@@ -4,6 +4,10 @@ import { CATEGORIES } from '@/lib/types';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FounderBio } from '@/components/brand/FounderBio';
 
+// Revalida cada 5 minutos: así el catálogo se actualiza solo (sin tener que
+// hacer un redeploy manual) cuando se cargan productos nuevos en Supabase.
+export const revalidate = 300;
+
 export default async function HomePage() {
   const featured = await getFeaturedProducts(8);
 

@@ -8,6 +8,10 @@ export function generateStaticParams() {
   return getAllCategories().map((c) => ({ categoria: c.slug }));
 }
 
+// Revalida cada 5 minutos para que el catálogo se actualice solo cuando
+// cambien los productos en Supabase, sin necesitar un redeploy manual.
+export const revalidate = 300;
+
 export async function generateMetadata({
   params,
 }: {

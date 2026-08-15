@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: 'Compara specs y precios de dos productos lado a lado.',
 };
 
+export const revalidate = 300;
+
 export default async function ComparadorPage() {
   const products = await getAllProducts();
 

@@ -12,6 +12,11 @@ export async function generateStaticParams() {
   return products.map((p) => ({ slug: p.slug }));
 }
 
+// Revalida cada 5 minutos (precios/specs actualizados) y permite que
+// productos nuevos, agregados después del build, se rendericen al vuelo
+// la primera vez que alguien entra a su ficha (dynamicParams por defecto).
+export const revalidate = 300;
+
 export async function generateMetadata({
   params,
 }: {
