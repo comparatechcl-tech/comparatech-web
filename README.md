@@ -114,3 +114,5 @@ ya van a apoyarse en IA para el catálogo diario:
 Ninguna de estas ideas está implementada todavía — quedan como propuesta
 para priorizar según lo que más ayude a la carga de trabajo real del
 proyecto.
+
+probando actualización
