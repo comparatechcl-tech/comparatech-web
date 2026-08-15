@@ -5,7 +5,7 @@ import Link from 'next/link';
  * detrás de ComparaTech en el sitio (para linkear desde bio de Instagram/
  * TikTok) y sirve de referencia de "autoridad" para SEO (E-E-A-T).
  *
- * TODO antes de publicar: reemplazar nombre, foto y handles por los reales.
+ * TODO antes de publicar: reemplazar foto y handles por los reales.
  */
 export function FounderBio({ compact = false }: { compact?: boolean }) {
   return (
@@ -17,12 +17,13 @@ export function FounderBio({ compact = false }: { compact?: boolean }) {
       <div className="h-20 w-20 shrink-0 rounded-full bg-surface2 ring-2 ring-accent/40" />
       <div>
         <p className="font-heading text-lg font-semibold text-white">
-          [Nombre] — Fundadora de ComparaTech
+          Roxana — Fundadora de ComparaTech
         </p>
         <p className="mt-1 text-sm text-muted">
-          Sin años de experiencia en tecnología, pero con toda la curiosidad y
-          las ganas de probar, comparar y explicar en simple qué producto
-          conviene comprar y por qué — sin tecnicismos innecesarios.
+          Cada producto que ves acá lo revisamos a fondo: precio, specs y
+          opiniones reales, para ahorrarte el tiempo de comparar por tu
+          cuenta. La idea es simple: explicarte qué conviene comprar y por
+          qué, sin letra chica ni tecnicismos.
         </p>
         {!compact && (
           <Link href="/nosotros" className="mt-3 inline-block text-sm text-accent hover:underline">

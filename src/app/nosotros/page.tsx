@@ -21,14 +21,14 @@ export default function NosotrosPage() {
           sin tener que abrir veinte pestañas.
         </p>
         <p>
-          {/* TODO: reemplazar con la bio real de la fundadora — nombre,
-              trayectoria/motivación y redes sociales (Instagram/TikTok) que
-              se usarán también como bio link para el contenido de RRSS. */}
-          Detrás del proyecto está [Nombre], quien está dando sus primeros
-          pasos en el mundo tech pero le pone toda la actitud: prueba
-          productos, compara opciones reales y comparte lo que aprende en
-          el camino — sin pretender ser la experta con más años en el rubro,
-          sino la persona que hace el trabajo pesado de comparar por ti.
+          {/* TODO: agregar redes sociales (Instagram/TikTok) reales, que se
+              usarán también como bio link para el contenido de RRSS. */}
+          Detrás del proyecto está Roxana, quien revisa cada producto que
+          aparece en el sitio: compara precios, lee las especificaciones y
+          descarta lo que no cumple. La idea no es venderte lo primero que
+          aparece, sino ahorrarte el tiempo de comparar por tu cuenta y
+          explicarte en simple qué conviene comprar y por qué — sin letra
+          chica ni tecnicismos.
         </p>
         <h2 className="pt-2 font-heading text-lg font-semibold text-white">
           Cómo ganamos dinero
