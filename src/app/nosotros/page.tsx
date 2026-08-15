@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { FounderBio } from '@/components/brand/FounderBio';
+import { SocialLinks } from '@/components/brand/SocialLinks';
 
 export const metadata: Metadata = {
   title: 'Nosotros',
@@ -12,6 +13,7 @@ export default function NosotrosPage() {
       <h1 className="mb-6 font-heading text-2xl font-bold">Nosotros</h1>
 
       <FounderBio compact />
+      <SocialLinks className="mt-4 justify-center" />
 
       <div className="mt-8 space-y-4 text-sm leading-relaxed text-muted">
         <p>
@@ -21,8 +23,6 @@ export default function NosotrosPage() {
           sin tener que abrir veinte pestañas.
         </p>
         <p>
-          {/* TODO: agregar redes sociales (Instagram/TikTok) reales, que se
-              usarán también como bio link para el contenido de RRSS. */}
           Detrás del proyecto está Roxana, quien revisa cada producto que
           aparece en el sitio: compara precios, lee las especificaciones y
           descarta lo que no cumple. La idea no es venderte lo primero que

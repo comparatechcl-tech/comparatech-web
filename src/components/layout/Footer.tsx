@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { CATEGORIES } from '@/lib/types';
+import { SocialLinks } from '@/components/brand/SocialLinks';
 
 export function Footer() {
   return (
@@ -14,6 +15,7 @@ export function Footer() {
               Comparamos precios de tecnología y hogar en Chile para que elijas
               mejor, sin vueltas.
             </p>
+            <SocialLinks className="mt-4" />
           </div>
 
           <div>
