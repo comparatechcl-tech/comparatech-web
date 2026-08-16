@@ -1,11 +1,10 @@
 import Link from 'next/link';
+import Image from 'next/image';
 
 /**
  * Componente de posicionamiento personal. Ancla la imagen de la persona
  * detrás de ComparaTech en el sitio (para linkear desde bio de Instagram/
  * TikTok) y sirve de referencia de "autoridad" para SEO (E-E-A-T).
- *
- * TODO antes de publicar: reemplazar foto y handles por los reales.
  */
 export function FounderBio({ compact = false }: { compact?: boolean }) {
   return (
@@ -14,7 +13,13 @@ export function FounderBio({ compact = false }: { compact?: boolean }) {
         compact ? '' : 'sm:p-8'
       }`}
     >
-      <div className="h-20 w-20 shrink-0 rounded-full bg-surface2 ring-2 ring-accent/40" />
+      <Image
+        src="/roxana.jpg"
+        alt="Roxana, fundadora de ComparaTech"
+        width={80}
+        height={80}
+        className="h-20 w-20 shrink-0 rounded-full object-cover ring-2 ring-accent/40"
+      />
       <div>
         <p className="font-heading text-lg font-semibold text-white">
           Roxana — Fundadora de ComparaTech
