@@ -18,6 +18,27 @@ export interface Product {
   created_at: string;
 }
 
+export interface ProductCandidate {
+  id: string;
+  ml_product_id: string;
+  name: string;
+  brand: string | null;
+  category: string;
+  price: number;
+  original_price: number | null;
+  image_url: string;
+  description: string;
+  specs: Record<string, string | number>;
+  seller_id: number;
+  seller_nickname: string | null;
+  seller_reputation: SellerReputation;
+  seller_sales_count: number;
+  affiliate_url: string | null;
+  status: 'pending_review' | 'approved' | 'rejected';
+  source: string;
+  prospected_at: string;
+}
+
 export interface CategoryInfo {
   slug: string;
   name: string;
