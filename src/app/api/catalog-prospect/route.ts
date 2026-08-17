@@ -11,7 +11,11 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
  * Body esperado (POST):
  *   { candidates: [ { ml_product_id, name, brand, category, price,
  *     original_price, image_url, description, specs, seller_id,
- *     seller_nickname, seller_reputation, seller_sales_count } ] }
+ *     seller_nickname, seller_reputation_raw, seller_sales_count } ] }
+ *
+ * `seller_reputation_raw` es el `level_id` crudo de ML (ej. "5_green") — el
+ * cálculo de "verde" se hace acá, no en Make, para no depender de fórmulas
+ * con comillas anidadas en el body crudo del módulo HTTP.
  */
 export async function POST(req: NextRequest) {
   if (process.env.ENABLE_CATALOG_PROSPECT !== 'true') {
@@ -41,7 +45,12 @@ export async function POST(req: NextRequest) {
 
   // Solo vendedores con reputación verde entran a revisión, según la regla
   // del Programa de Afiliados de ML (CLAUDE.md).
-  const accepted = body.candidates.filter((c: { seller_reputation?: string }) => c.seller_reputation === 'verde');
+  const accepted = body.candidates
+    .filter((c: { seller_reputation_raw?: string }) => String(c.seller_reputation_raw ?? '').includes('green'))
+    .map((c: { seller_reputation_raw?: string; [key: string]: unknown }) => {
+      const { seller_reputation_raw, ...rest } = c;
+      return { ...rest, seller_reputation: 'verde' };
+    });
   const skipped = body.candidates.length - accepted.length;
 
   if (accepted.length === 0) {
