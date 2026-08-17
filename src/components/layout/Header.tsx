@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState } from 'react';
 import { CATEGORIES } from '@/lib/types';
 
@@ -16,7 +17,8 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link href="/" className="font-heading text-xl font-bold tracking-tight">
+        <Link href="/" className="flex items-center gap-2 font-heading text-xl font-bold tracking-tight">
+          <Image src="/icon-192.png" alt="" width={32} height={32} priority className="h-8 w-8" />
           Compara<span className="text-accent">Tech</span>
         </Link>
 
