@@ -57,12 +57,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, inserted: 0, skipped });
   }
 
-  const { error } = await admin.from('product_candidates').upsert(accepted, {
-    onConflict: 'ml_product_id',
-  });
+  try {
+    const { error } = await admin.from('product_candidates').upsert(accepted, {
+      onConflict: 'ml_product_id',
+    });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 502 });
+    }
+  } catch (e) {
+    // Falla de red/conexión con Supabase (transitoria) — Make reintenta solo
+    // con backoff creciente, así que basta con devolver un error claro.
+    return NextResponse.json(
+      { error: 'Fallo de conexión con Supabase', detail: e instanceof Error ? e.message : String(e) },
+      { status: 502 }
+    );
   }
 
   return NextResponse.json({ ok: true, inserted: accepted.length, skipped });
