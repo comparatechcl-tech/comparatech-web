@@ -49,6 +49,14 @@ export function CandidateCard({ candidate }: { candidate: ProductCandidate }) {
           {candidate.category} · {candidate.seller_nickname ?? 'vendedor desconocido'} · reputación{' '}
           {candidate.seller_reputation} · {candidate.seller_sales_count.toLocaleString('es-CL')} ventas
         </p>
+        <a
+          href={`https://listado.mercadolibre.cl/${encodeURIComponent(candidate.name)}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-accent hover:underline"
+        >
+          Buscar en Mercado Libre ↗
+        </a>
         <input
           type="url"
           placeholder="Pega acá el link de afiliado real"
