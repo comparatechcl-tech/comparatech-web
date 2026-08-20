@@ -43,7 +43,11 @@ export async function getProductsByCategory(category: string): Promise<Product[]
   return all.filter((p) => p.category === category);
 }
 
-export async function getFeaturedProducts(limit = 4): Promise<Product[]> {
+// Muestra lo más nuevo del catálogo (ya viene ordenado por created_at desc
+// desde getAllProducts). No filtra por is_featured: los productos recién
+// aprobados desde /admin/candidatos deben verse en el Home de inmediato,
+// no quedar invisibles hasta marcarlos a mano como destacados.
+export async function getFeaturedProducts(limit = 8): Promise<Product[]> {
   const all = await getAllProducts();
-  return all.filter((p) => p.is_featured).slice(0, limit);
+  return all.slice(0, limit);
 }

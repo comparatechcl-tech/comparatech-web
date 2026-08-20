@@ -17,8 +17,15 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link href="/" className="flex items-center gap-2 font-heading text-xl font-bold tracking-tight">
-          <Image src="/icon-192.png" alt="" width={32} height={32} priority className="h-8 w-8" />
+        <Link href="/" className="flex items-center gap-2.5 font-heading text-xl font-bold tracking-tight">
+          <Image
+            src="/icon-192.png"
+            alt=""
+            width={44}
+            height={44}
+            priority
+            className="h-10 w-10 drop-shadow-[0_0_10px_rgba(0,212,255,0.35)]"
+          />
           Compara<span className="text-accent">Tech</span>
         </Link>
 
