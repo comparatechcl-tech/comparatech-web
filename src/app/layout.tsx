@@ -33,6 +33,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es-CL" className={inter.variable}>
       <body className="flex min-h-screen flex-col font-body">
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0 -z-10"
+          style={{
+            background:
+              'radial-gradient(38% 32% at 12% 0%, rgba(8,126,255,0.16) 0%, rgba(8,126,255,0) 60%), ' +
+              'radial-gradient(30% 28% at 92% 18%, rgba(0,212,255,0.12) 0%, rgba(0,212,255,0) 60%), ' +
+              'radial-gradient(35% 30% at 15% 92%, rgba(8,126,255,0.10) 0%, rgba(8,126,255,0) 60%), ' +
+              'radial-gradient(32% 30% at 100% 85%, rgba(0,212,255,0.10) 0%, rgba(0,212,255,0) 60%)',
+          }}
+        />
         <Header />
         <main className="flex-1">{children}</main>
         <Footer />

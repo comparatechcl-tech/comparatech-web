@@ -1,10 +1,10 @@
 import Link from 'next/link';
-import Image from 'next/image';
 import { Smartphone, Laptop, Headphones, Scale, Search, Check, Tags, ChartNoAxesColumn, Link2 } from 'lucide-react';
 import { getFeaturedProducts } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FounderBio } from '@/components/brand/FounderBio';
 import { QuickCompare } from '@/components/compare/QuickCompare';
+import { HeroIllustration } from '@/components/brand/HeroIllustration';
 
 // Revalida cada 5 minutos: así el catálogo se actualiza solo (sin tener que
 // hacer un redeploy manual) cuando se cargan productos nuevos en Supabase.
@@ -28,28 +28,32 @@ const CATEGORY_CARDS = [
   {
     href: '/categoria/celulares',
     icon: Smartphone,
-    color: 'text-accent bg-accent/10',
+    gradient: 'linear-gradient(135deg, #087EFF, #00D4FF)',
+    glow: 'rgba(0,212,255,0.45)',
     title: 'Celulares',
     desc: 'Compara los mejores smartphones',
   },
   {
     href: '/categoria/computacion',
     icon: Laptop,
-    color: 'text-blue bg-blue/10',
+    gradient: 'linear-gradient(135deg, #7C3AED, #A855F7)',
+    glow: 'rgba(168,85,247,0.4)',
     title: 'Computación',
     desc: 'Notebooks, componentes y más',
   },
   {
     href: '/categoria/electronica',
     icon: Headphones,
-    color: 'text-accent bg-accent/10',
+    gradient: 'linear-gradient(135deg, #059669, #10D9A0)',
+    glow: 'rgba(16,217,160,0.4)',
     title: 'Electrónica',
     desc: 'Audífonos, parlantes, wearables',
   },
   {
     href: '/comparador',
     icon: Scale,
-    color: 'text-mlYellow bg-mlYellow/10',
+    gradient: 'linear-gradient(135deg, #EA580C, #FFE600)',
+    glow: 'rgba(255,230,0,0.4)',
     title: 'Comparador',
     desc: 'Compara 2 productos en detalle',
   },
@@ -57,7 +61,6 @@ const CATEGORY_CARDS = [
 
 export default async function HomePage() {
   const featured = await getFeaturedProducts(8);
-  const heroProducts = featured.slice(0, 3);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
@@ -112,34 +115,9 @@ export default async function HomePage() {
             </form>
           </div>
 
-          {heroProducts.length > 0 && (
-            <div className="relative mx-auto hidden h-72 w-full max-w-sm sm:block">
-              <div
-                className="pointer-events-none absolute inset-0 -z-10 rounded-full blur-3xl"
-                style={{ background: 'radial-gradient(closest-side, rgba(0,212,255,0.24), transparent)' }}
-              />
-              {/* Producto principal, centrado */}
-              <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-3xl border border-border bg-white shadow-2xl sm:h-64 sm:w-64">
-                <Image
-                  src={heroProducts[0].image_url}
-                  alt={heroProducts[0].name}
-                  fill
-                  className="object-contain p-6"
-                />
-              </div>
-              {/* Producto secundario, asomando atrás */}
-              {heroProducts[1] && (
-                <div className="absolute -right-2 top-2 h-28 w-28 overflow-hidden rounded-2xl border border-border bg-white shadow-xl sm:h-32 sm:w-32">
-                  <Image
-                    src={heroProducts[1].image_url}
-                    alt={heroProducts[1].name}
-                    fill
-                    className="object-contain p-3"
-                  />
-                </div>
-              )}
-            </div>
-          )}
+          <div className="mx-auto hidden w-full max-w-md sm:block">
+            <HeroIllustration className="w-full" />
+          </div>
         </div>
       </section>
 
@@ -152,10 +130,14 @@ export default async function HomePage() {
               <Link
                 key={c.href}
                 href={c.href}
-                className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow"
+                className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:shadow-[0_0_40px_-14px_var(--glow)]"
+                style={{ '--glow': c.glow } as React.CSSProperties}
               >
-                <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${c.color}`}>
-                  <Icon size={20} />
+                <span
+                  className="flex h-12 w-12 items-center justify-center rounded-xl text-white"
+                  style={{ background: c.gradient, boxShadow: `0 6px 20px -6px ${c.glow}` }}
+                >
+                  <Icon size={21} />
                 </span>
                 <div>
                   <p className="font-heading text-base font-semibold text-white">{c.title}</p>
