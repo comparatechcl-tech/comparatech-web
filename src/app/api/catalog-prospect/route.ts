@@ -6,48 +6,66 @@ interface MlAttribute {
   value_name: string | null;
 }
 
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(id));
+}
+
 async function getMlToken(): Promise<string | null> {
-  const res = await fetch('https://api.mercadolibre.com/oauth/token', {
-    method: 'POST',
-    headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: process.env.ML_CLIENT_ID ?? '',
-      client_secret: process.env.ML_CLIENT_SECRET ?? '',
-    }),
-  }).then((r) => r.json());
-  return res.access_token ?? null;
+  try {
+    const res = await fetchWithTimeout('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: process.env.ML_CLIENT_ID ?? '',
+        client_secret: process.env.ML_CLIENT_SECRET ?? '',
+      }),
+    }).then((r) => r.json());
+    return res.access_token ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Trae marca y specs reales desde /products/{id} — no confiamos en que Make
 // arme esto en el body crudo del HTTP module (ahí es donde se rompió antes
 // la fórmula de reputación, por comillas anidadas). Acá es TypeScript
 // normal, mucho más confiable.
+const FALLBACK_ENRICHMENT = { brand: null, specs: {} } as const;
+
 async function enrichFromMl(
   mlProductId: string,
   token: string
 ): Promise<{ brand: string | null; specs: Record<string, string> }> {
-  const res = await fetch(`https://api.mercadolibre.com/products/${mlProductId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return { brand: null, specs: {} };
+  try {
+    const res = await fetchWithTimeout(`https://api.mercadolibre.com/products/${mlProductId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return FALLBACK_ENRICHMENT;
 
-  const data = await res.json();
-  const attributes: MlAttribute[] = data?.attributes ?? [];
+    const data = await res.json();
+    const attributes: MlAttribute[] = data?.attributes ?? [];
 
-  const SKIP_NAMES = new Set(['Marca', 'Modelo alfanumérico', 'Línea']);
-  const brandAttr = attributes.find((a) => a.name === 'Marca');
-  const specs: Record<string, string> = {};
-  const seenValues = new Set<string>();
-  for (const attr of attributes) {
-    if (SKIP_NAMES.has(attr.name) || !attr.value_name) continue;
-    if (seenValues.has(attr.value_name)) continue; // evita "Color"/"Color principal" repetidos
-    if (Object.keys(specs).length >= 8) break;
-    specs[attr.name] = attr.value_name;
-    seenValues.add(attr.value_name);
+    const SKIP_NAMES = new Set(['Marca', 'Modelo alfanumérico', 'Línea']);
+    const brandAttr = attributes.find((a) => a.name === 'Marca');
+    const specs: Record<string, string> = {};
+    const seenValues = new Set<string>();
+    for (const attr of attributes) {
+      if (SKIP_NAMES.has(attr.name) || !attr.value_name) continue;
+      if (seenValues.has(attr.value_name)) continue; // evita "Color"/"Color principal" repetidos
+      if (Object.keys(specs).length >= 8) break;
+      specs[attr.name] = attr.value_name;
+      seenValues.add(attr.value_name);
+    }
+
+    return { brand: brandAttr?.value_name ?? null, specs };
+  } catch {
+    // ML lento/caído para este producto puntual — no debe tirar abajo todo
+    // el batch, se guarda el candidato igual sin marca/specs enriquecidas.
+    return FALLBACK_ENRICHMENT;
   }
-
-  return { brand: brandAttr?.value_name ?? null, specs };
 }
 
 /**

@@ -14,22 +14,16 @@ export function CandidateCard({ candidate }: { candidate: ProductCandidate }) {
   function handleApprove() {
     setError(null);
     startTransition(async () => {
-      try {
-        await approveCandidate(candidate.id, candidate.name, affiliateUrl);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Error al aprobar');
-      }
+      const result = await approveCandidate(candidate.id, candidate.name, affiliateUrl);
+      if (!result.ok) setError(result.error);
     });
   }
 
   function handleReject() {
     setError(null);
     startTransition(async () => {
-      try {
-        await rejectCandidate(candidate.id);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Error al rechazar');
-      }
+      const result = await rejectCandidate(candidate.id);
+      if (!result.ok) setError(result.error);
     });
   }
 
