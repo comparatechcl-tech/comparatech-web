@@ -6,7 +6,7 @@ import { Product } from './types';
  * día uno. En cuanto agregues NEXT_PUBLIC_SUPABASE_URL/ANON_KEY, lib/queries
  * pasa a leer productos reales desde la base de datos.
  */
-export const MOCK_PRODUCTS: Product[] = [
+const RAW_MOCK_PRODUCTS: Omit<Product, 'is_active' | 'ml_product_id'>[] = [
   {
     id: '1',
     slug: 'iphone-13-128gb',
@@ -148,3 +148,9 @@ export const MOCK_PRODUCTS: Product[] = [
     created_at: '2026-08-05T00:00:00.000Z',
   },
 ];
+
+export const MOCK_PRODUCTS: Product[] = RAW_MOCK_PRODUCTS.map((p) => ({
+  ...p,
+  is_active: true,
+  ml_product_id: null,
+}));

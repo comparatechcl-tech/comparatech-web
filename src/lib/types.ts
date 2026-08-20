@@ -15,6 +15,8 @@ export interface Product {
   seller_reputation: SellerReputation;
   seller_sales_count: number;
   is_featured: boolean;
+  is_active: boolean;
+  ml_product_id: string | null;
   created_at: string;
 }
 

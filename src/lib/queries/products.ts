@@ -16,6 +16,7 @@ export async function getAllProducts(): Promise<Product[]> {
   const { data, error } = await supabase
     .from('products')
     .select('*')
+    .eq('is_active', true)
     .order('created_at', { ascending: false });
 
   if (error || !data) return MOCK_PRODUCTS;
@@ -32,6 +33,7 @@ export async function getProductBySlug(slug: string): Promise<Product | null> {
     .from('products')
     .select('*')
     .eq('slug', slug)
+    .eq('is_active', true)
     .single();
 
   if (error || !data) return null;
