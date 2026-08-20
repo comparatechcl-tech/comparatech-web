@@ -9,7 +9,7 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-4 py-10 text-sm text-muted">
         <div className="grid gap-8 md:grid-cols-3">
           <div>
-            <p className="flex items-center gap-2 font-heading text-lg font-bold text-white">
+            <p className="flex items-center gap-2 font-heading text-lg font-extrabold text-white">
               <Logo size={26} className="text-white" />
               <span>
                 Compara<span className="text-accent">Tech</span>

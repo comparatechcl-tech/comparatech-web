@@ -75,7 +75,7 @@ export default async function HomePage() {
             <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface2 px-3.5 py-1.5 text-xs font-medium text-muted">
               Compara · Elige · Ahorra
             </span>
-            <h1 className="mt-5 font-heading text-4xl font-bold leading-[1.08] sm:text-5xl">
+            <h1 className="mt-5 font-heading text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl">
               Encuentra el mejor <br className="hidden sm:block" />
               producto al <span className="text-accent">mejor precio</span>
             </h1>

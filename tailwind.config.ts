@@ -19,7 +19,7 @@ const config: Config = {
         glow: '0 0 40px -12px rgba(0,212,255,0.35)',
       },
       fontFamily: {
-        heading: ['var(--font-space-grotesk)', 'sans-serif'],
+        heading: ['var(--font-inter)', 'sans-serif'],
         body: ['var(--font-inter)', 'sans-serif'],
       },
     },
