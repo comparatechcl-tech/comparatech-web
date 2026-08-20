@@ -142,8 +142,17 @@ export async function POST(req: NextRequest) {
     )
   );
 
+  // Un mismo producto puede aparecer en los destacados de más de una
+  // categoría el mismo día (ej. un power bank en "celulares" y en
+  // "computación") — Postgres no permite que ON CONFLICT toque la misma
+  // fila dos veces dentro de un solo upsert, así que hay que deduplicar
+  // por ml_product_id antes de guardar o se cae el lote completo.
+  const dedupedByMlId = Array.from(
+    new Map(accepted.map((c) => [c.ml_product_id, c])).values()
+  );
+
   try {
-    const { error } = await admin.from('product_candidates').upsert(accepted, {
+    const { error } = await admin.from('product_candidates').upsert(dedupedByMlId, {
       onConflict: 'ml_product_id',
     });
 
@@ -159,5 +168,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ok: true, inserted: accepted.length, skipped });
+  return NextResponse.json({ ok: true, inserted: dedupedByMlId.length, skipped });
 }
