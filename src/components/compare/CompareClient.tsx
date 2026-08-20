@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Image from 'next/image';
+import { CheckCircle2 } from 'lucide-react';
 import { Product } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
 import { AffiliateButton } from '@/components/product/AffiliateButton';
@@ -11,9 +12,22 @@ function parseNumeric(value: string | number): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export function CompareClient({ products }: { products: Product[] }) {
-  const [slugA, setSlugA] = useState(products[0]?.slug ?? '');
-  const [slugB, setSlugB] = useState(products[1]?.slug ?? products[0]?.slug ?? '');
+export function CompareClient({
+  products,
+  initialSlugA,
+  initialSlugB,
+}: {
+  products: Product[];
+  initialSlugA?: string;
+  initialSlugB?: string;
+}) {
+  const exists = (slug?: string) => !!slug && products.some((p) => p.slug === slug);
+  const [slugA, setSlugA] = useState(
+    exists(initialSlugA) ? (initialSlugA as string) : products[0]?.slug ?? ''
+  );
+  const [slugB, setSlugB] = useState(
+    exists(initialSlugB) ? (initialSlugB as string) : products[1]?.slug ?? products[0]?.slug ?? ''
+  );
 
   const a = products.find((p) => p.slug === slugA);
   const b = products.find((p) => p.slug === slugB);
@@ -25,11 +39,11 @@ export function CompareClient({ products }: { products: Product[] }) {
 
   return (
     <div>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2">
         <select
           value={slugA}
           onChange={(e) => setSlugA(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-white"
+          className="rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
         >
           {products.map((p) => (
             <option key={p.slug} value={p.slug}>
@@ -40,7 +54,7 @@ export function CompareClient({ products }: { products: Product[] }) {
         <select
           value={slugB}
           onChange={(e) => setSlugB(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-white"
+          className="rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
         >
           {products.map((p) => (
             <option key={p.slug} value={p.slug}>
@@ -51,61 +65,65 @@ export function CompareClient({ products }: { products: Product[] }) {
       </div>
 
       {a && b && (
-        <div className="mt-6 overflow-hidden rounded-xl border border-border">
+        <div className="mt-6 overflow-hidden rounded-2xl border border-border">
           <div className="grid grid-cols-2 divide-x divide-border">
             {[a, b].map((p) => (
-              <div key={p.id} className="flex flex-col items-center gap-2 bg-surface p-4 text-center">
-                <div className="relative h-24 w-24">
-                  <Image src={p.image_url} alt={p.name} fill className="object-cover rounded" />
+              <div key={p.id} className="flex flex-col items-center gap-3 bg-surface p-5 text-center sm:p-6">
+                <div className="relative h-20 w-20 overflow-hidden rounded-xl bg-surface2 sm:h-28 sm:w-28">
+                  <Image src={p.image_url} alt={p.name} fill className="object-cover" />
                 </div>
-                <p className="font-heading text-sm font-medium text-white">{p.name}</p>
+                <p className="line-clamp-2 font-heading text-sm font-medium text-white">{p.name}</p>
                 <p
-                  className={`font-heading text-lg font-bold ${
+                  className={`font-heading text-lg font-bold sm:text-xl ${
                     p.price <= Math.min(a.price, b.price) ? 'text-accent' : 'text-white'
                   }`}
                 >
                   {formatCLP(p.price)}
                 </p>
+                <AffiliateButton href={p.affiliate_url} className="w-full text-xs sm:text-sm" />
               </div>
             ))}
           </div>
 
-          <table className="w-full text-sm">
-            <tbody>
-              {specKeys.map((key, i) => {
-                const va = a.specs[key];
-                const vb = b.specs[key];
-                const na = va !== undefined ? parseNumeric(va) : null;
-                const nb = vb !== undefined ? parseNumeric(vb) : null;
-                const aWins = na !== null && nb !== null && na > nb;
-                const bWins = na !== null && nb !== null && nb > na;
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-sm">
+              <tbody>
+                {specKeys.map((key, i) => {
+                  const va = a.specs[key];
+                  const vb = b.specs[key];
+                  const na = va !== undefined ? parseNumeric(va) : null;
+                  const nb = vb !== undefined ? parseNumeric(vb) : null;
+                  const aWins = na !== null && nb !== null && na > nb;
+                  const bWins = na !== null && nb !== null && nb > na;
 
-                return (
-                  <tr key={key} className={i % 2 === 0 ? 'bg-surface2' : 'bg-surface'}>
-                    <td
-                      className={`px-4 py-2 text-center ${
-                        aWins ? 'font-semibold text-accent' : 'text-white'
-                      }`}
-                    >
-                      {va ?? '—'}
-                    </td>
-                    <td className="px-3 py-2 text-center text-xs text-muted">{key}</td>
-                    <td
-                      className={`px-4 py-2 text-center ${
-                        bWins ? 'font-semibold text-accent' : 'text-white'
-                      }`}
-                    >
-                      {vb ?? '—'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          <div className="flex justify-around gap-4 bg-surface p-4">
-            <AffiliateButton href={a.affiliate_url} />
-            <AffiliateButton href={b.affiliate_url} />
+                  return (
+                    <tr key={key} className={i % 2 === 0 ? 'bg-surface2' : 'bg-surface'}>
+                      <td
+                        className={`px-4 py-2.5 text-center ${
+                          aWins ? 'font-semibold text-accent' : 'text-white'
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          {aWins && <CheckCircle2 size={13} className="shrink-0" />}
+                          {va ?? '—'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-center text-xs text-muted">{key}</td>
+                      <td
+                        className={`px-4 py-2.5 text-center ${
+                          bWins ? 'font-semibold text-accent' : 'text-white'
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          {vb ?? '—'}
+                          {bWins && <CheckCircle2 size={13} className="shrink-0" />}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

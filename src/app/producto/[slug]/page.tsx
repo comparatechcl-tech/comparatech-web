@@ -56,13 +56,13 @@ export default async function ProductoPage({
     <div className="mx-auto max-w-4xl px-4 py-10">
       <ProductJsonLd product={product} />
       <div className="grid gap-8 sm:grid-cols-2">
-        <div className="relative aspect-square overflow-hidden rounded-xl border border-border bg-surface">
+        <div className="relative aspect-square overflow-hidden rounded-2xl border border-border bg-surface">
           <Image src={product.image_url} alt={product.name} fill className="object-cover" />
         </div>
 
         <div>
-          <span className="text-xs uppercase tracking-wide text-muted">{product.brand}</span>
-          <h1 className="mt-1 font-heading text-2xl font-bold">{product.name}</h1>
+          <span className="text-xs font-medium uppercase tracking-wide text-muted">{product.brand}</span>
+          <h1 className="mt-1 font-heading text-2xl font-bold sm:text-3xl">{product.name}</h1>
           <div className="mt-3">
             <PriceTag price={product.price} originalPrice={product.original_price} />
           </div>

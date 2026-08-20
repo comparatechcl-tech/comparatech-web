@@ -1,9 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import { Menu, X } from 'lucide-react';
 import { CATEGORIES } from '@/lib/types';
+import { Logo } from '@/components/brand/Logo';
 
 const NAV_LINKS = [
   { href: '/comparador', label: 'Comparador' },
@@ -13,74 +15,64 @@ const NAV_LINKS = [
 
 export function Header() {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+
+  const links = [
+    ...CATEGORIES.slice(0, 3).map((c) => ({ href: `/categoria/${c.slug}`, label: c.name })),
+    ...NAV_LINKS,
+  ];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link href="/" className="flex items-center gap-2.5 font-heading text-xl font-bold tracking-tight">
-          <Image
-            src="/icon-192.png"
-            alt=""
-            width={44}
-            height={44}
-            priority
-            className="h-10 w-10 drop-shadow-[0_0_10px_rgba(0,212,255,0.35)]"
-          />
+    <header className="sticky top-0 z-40 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3.5">
+        <Link href="/" className="flex items-center gap-2.5 font-heading text-xl font-bold tracking-tight text-white">
+          <Logo size={34} className="text-white" />
           Compara<span className="text-accent">Tech</span>
         </Link>
 
-        <nav className="hidden items-center gap-6 md:flex">
-          {CATEGORIES.slice(0, 3).map((c) => (
-            <Link
-              key={c.slug}
-              href={`/categoria/${c.slug}`}
-              className="text-sm text-muted transition hover:text-accent"
-            >
-              {c.name}
-            </Link>
-          ))}
-          {NAV_LINKS.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="text-sm text-muted transition hover:text-accent"
-            >
-              {l.label}
-            </Link>
-          ))}
+        <nav className="hidden items-center gap-7 md:flex">
+          {links.map((l) => {
+            const active = pathname === l.href;
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                className={`text-sm font-medium transition ${
+                  active ? 'text-accent' : 'text-muted hover:text-white'
+                }`}
+              >
+                {l.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <button
-          className="text-sm text-muted md:hidden"
+          className="text-muted transition hover:text-white md:hidden"
           onClick={() => setOpen((v) => !v)}
-          aria-label="Abrir menú"
+          aria-label={open ? 'Cerrar menú' : 'Abrir menú'}
         >
-          {open ? '✕' : '☰'}
+          {open ? <X size={22} /> : <Menu size={22} />}
         </button>
       </div>
 
       {open && (
         <nav className="flex flex-col gap-1 border-t border-border px-4 py-3 md:hidden">
-          {CATEGORIES.map((c) => (
-            <Link
-              key={c.slug}
-              href={`/categoria/${c.slug}`}
-              className="py-2 text-sm text-muted hover:text-accent"
-              onClick={() => setOpen(false)}
-            >
-              {c.name}
-            </Link>
-          ))}
-          {NAV_LINKS.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="py-2 text-sm text-muted hover:text-accent"
-              onClick={() => setOpen(false)}
-            >
-              {l.label}
-            </Link>
-          ))}
+          {links.map((l) => {
+            const active = pathname === l.href;
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                className={`rounded-lg px-2 py-2.5 text-sm font-medium transition ${
+                  active ? 'bg-accent/10 text-accent' : 'text-muted hover:text-white'
+                }`}
+                onClick={() => setOpen(false)}
+              >
+                {l.label}
+              </Link>
+            );
+          })}
         </nav>
       )}
     </header>

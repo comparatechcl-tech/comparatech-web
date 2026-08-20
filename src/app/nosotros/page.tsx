@@ -1,6 +1,14 @@
 import type { Metadata } from 'next';
+import { Search, GitCompareArrows, ClipboardCheck, ThumbsUp } from 'lucide-react';
 import { FounderBio } from '@/components/brand/FounderBio';
 import { SocialLinks } from '@/components/brand/SocialLinks';
+
+const STEPS = [
+  { icon: Search, title: 'Buscamos', desc: 'Rastreamos los productos más vendidos en las categorías que nos importan.' },
+  { icon: GitCompareArrows, title: 'Comparamos', desc: 'Precio, specs y vendedor, uno al lado del otro, sin letra chica.' },
+  { icon: ClipboardCheck, title: 'Analizamos', desc: 'Descartamos vendedores sin reputación verde y precios que no cuadran.' },
+  { icon: ThumbsUp, title: 'Tú decides', desc: 'Te dejamos la comparación lista — la decisión de compra es tuya.' },
+];
 
 export const metadata: Metadata = {
   title: 'Nosotros',
@@ -15,7 +23,27 @@ export default function NosotrosPage() {
       <FounderBio compact />
       <SocialLinks className="mt-4 justify-center" />
 
-      <div className="mt-8 space-y-4 text-sm leading-relaxed text-muted">
+      <div className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {STEPS.map((s, i) => {
+          const Icon = s.icon;
+          return (
+            <div key={s.title} className="rounded-2xl border border-border bg-surface p-4">
+              <div className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                  <Icon size={16} />
+                </span>
+                <span className="font-heading text-xs font-semibold text-muted">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+              </div>
+              <p className="mt-3 font-heading text-sm font-semibold text-white">{s.title}</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted">{s.desc}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-10 space-y-4 text-sm leading-relaxed text-muted">
         <p>
           ComparaTech nace para simplificar la decisión de compra de
           tecnología y artículos para el hogar en Chile: reunimos precios,

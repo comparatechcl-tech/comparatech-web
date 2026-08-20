@@ -15,7 +15,7 @@ export function AffiliateButton({
       href={href}
       target="_blank"
       rel="nofollow sponsored noopener"
-      className={`inline-flex items-center justify-center rounded-lg bg-accent px-5 py-3 font-medium text-bg transition hover:opacity-90 ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-xl bg-mlYellow px-5 py-3 font-heading font-semibold text-[#1a1400] transition hover:brightness-95 ${className}`}
     >
       Ver en Mercado Libre
     </a>
