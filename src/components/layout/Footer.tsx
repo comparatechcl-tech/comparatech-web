@@ -11,7 +11,9 @@ export function Footer() {
           <div>
             <p className="flex items-center gap-2 font-heading text-lg font-bold text-white">
               <Logo size={26} className="text-white" />
-              Compara<span className="text-accent">Tech</span>
+              <span>
+                Compara<span className="text-accent">Tech</span>
+              </span>
             </p>
             <p className="mt-1 text-xs font-medium uppercase tracking-wide text-accent">
               Compara · Elige · Ahorra

@@ -27,7 +27,9 @@ export function Header() {
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3.5">
         <Link href="/" className="flex items-center gap-2.5 font-heading text-xl font-bold tracking-tight text-white">
           <Logo size={34} className="text-white" />
-          Compara<span className="text-accent">Tech</span>
+          <span>
+            Compara<span className="text-accent">Tech</span>
+          </span>
         </Link>
 
         <nav className="hidden items-center gap-7 md:flex">

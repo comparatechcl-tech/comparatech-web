@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { Smartphone, Laptop, Headphones, Scale, Search, Check } from 'lucide-react';
+import { Smartphone, Laptop, Headphones, Scale, Search, Check, Tags, ChartNoAxesColumn, Link2 } from 'lucide-react';
 import { getFeaturedProducts } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FounderBio } from '@/components/brand/FounderBio';
@@ -15,6 +15,13 @@ const BENEFITS = [
   'Precios actualizados',
   'Enlaces directos a Mercado Libre',
   'Fácil y rápido',
+];
+
+const WHY_US = [
+  { icon: Search, title: 'Ahorra tiempo', desc: 'Compara múltiples productos en segundos.' },
+  { icon: Tags, title: 'Mejores precios', desc: 'Encuentra siempre la mejor oportunidad.' },
+  { icon: ChartNoAxesColumn, title: 'Información clara', desc: 'Especificaciones ordenadas y fáciles de entender.' },
+  { icon: Link2, title: 'Enlaces directos', desc: 'Ve directamente a comprar en Mercado Libre.' },
 ];
 
 const CATEGORY_CARDS = [
@@ -109,24 +116,28 @@ export default async function HomePage() {
             <div className="relative mx-auto hidden h-72 w-full max-w-sm sm:block">
               <div
                 className="pointer-events-none absolute inset-0 -z-10 rounded-full blur-3xl"
-                style={{ background: 'radial-gradient(closest-side, rgba(0,212,255,0.22), transparent)' }}
+                style={{ background: 'radial-gradient(closest-side, rgba(0,212,255,0.24), transparent)' }}
               />
-              {heroProducts.map((p, i) => (
-                <div
-                  key={p.id}
-                  className="absolute overflow-hidden rounded-2xl border border-border bg-surface2 shadow-2xl"
-                  style={{
-                    width: i === 0 ? '65%' : '46%',
-                    aspectRatio: '1 / 1',
-                    top: i === 0 ? '8%' : i === 1 ? '48%' : '2%',
-                    left: i === 0 ? '2%' : i === 1 ? '0%' : '54%',
-                    transform: `rotate(${i === 0 ? -3 : i === 1 ? 4 : -6}deg)`,
-                    zIndex: 3 - i,
-                  }}
-                >
-                  <Image src={p.image_url} alt={p.name} fill className="object-cover" />
+              {/* Producto principal, centrado */}
+              <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-3xl border border-border bg-white shadow-2xl sm:h-64 sm:w-64">
+                <Image
+                  src={heroProducts[0].image_url}
+                  alt={heroProducts[0].name}
+                  fill
+                  className="object-contain p-6"
+                />
+              </div>
+              {/* Producto secundario, asomando atrás */}
+              {heroProducts[1] && (
+                <div className="absolute -right-2 top-2 h-28 w-28 overflow-hidden rounded-2xl border border-border bg-white shadow-xl sm:h-32 sm:w-32">
+                  <Image
+                    src={heroProducts[1].image_url}
+                    alt={heroProducts[1].name}
+                    fill
+                    className="object-contain p-3"
+                  />
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>
@@ -173,6 +184,28 @@ export default async function HomePage() {
           <span className="text-sm text-muted">{featured.length} productos</span>
         </div>
         <ProductGrid products={featured} />
+      </section>
+
+      {/* ¿Por qué usar ComparaTech? */}
+      <section className="mb-16 text-center">
+        <h2 className="font-heading text-2xl font-bold">¿Por qué usar ComparaTech?</h2>
+        <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
+          Todo lo que necesitas para tomar la mejor decisión de compra.
+        </p>
+        <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-4">
+          {WHY_US.map((w) => {
+            const Icon = w.icon;
+            return (
+              <div key={w.title} className="flex flex-col items-center gap-2.5">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
+                  <Icon size={20} />
+                </span>
+                <p className="font-heading text-sm font-semibold text-white">{w.title}</p>
+                <p className="text-xs leading-relaxed text-muted">{w.desc}</p>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       <section>

@@ -43,7 +43,7 @@ export function CompareClient({
         <select
           value={slugA}
           onChange={(e) => setSlugA(e.target.value)}
-          className="rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
+          className="w-full min-w-0 truncate rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
         >
           {products.map((p) => (
             <option key={p.slug} value={p.slug}>
@@ -54,7 +54,7 @@ export function CompareClient({
         <select
           value={slugB}
           onChange={(e) => setSlugB(e.target.value)}
-          className="rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
+          className="w-full min-w-0 truncate rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
         >
           {products.map((p) => (
             <option key={p.slug} value={p.slug}>
