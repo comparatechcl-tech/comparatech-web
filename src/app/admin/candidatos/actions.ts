@@ -3,16 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { verifyAffiliateLink } from '@/lib/actions/verifyAffiliateLink';
+import { stripDiacritics } from '@/lib/text';
 
 export { verifyAffiliateLink };
 
-const DIACRITICS_RE = new RegExp('[̀-ͯ]', 'g');
-
 function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(DIACRITICS_RE, '')
+  return stripDiacritics(text.toLowerCase())
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }

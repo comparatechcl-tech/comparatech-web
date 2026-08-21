@@ -3,6 +3,7 @@ import { getAllProducts } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FilterPanel } from '@/components/search/FilterPanel';
 import { formatDiscountPct } from '@/lib/format';
+import { stripDiacritics } from '@/lib/text';
 
 export const metadata: Metadata = {
   title: 'Buscar productos',
@@ -24,14 +25,14 @@ export default async function BuscarPage({
   const params = await searchParams;
   const all = await getAllProducts();
 
-  const q = params.q?.toLowerCase().trim();
-  const brand = params.brand?.toLowerCase().trim();
+  const q = params.q ? stripDiacritics(params.q.toLowerCase().trim()) : undefined;
+  const brand = params.brand ? stripDiacritics(params.brand.toLowerCase().trim()) : undefined;
   const maxPrice = params.maxPrice ? Number(params.maxPrice) : undefined;
   const minDiscount = params.minDiscount ? Number(params.minDiscount) : undefined;
 
   const results = all.filter((p) => {
-    if (q && !p.name.toLowerCase().includes(q)) return false;
-    if (brand && !p.brand.toLowerCase().includes(brand)) return false;
+    if (q && !stripDiacritics(p.name.toLowerCase()).includes(q)) return false;
+    if (brand && !stripDiacritics(p.brand.toLowerCase()).includes(brand)) return false;
     if (maxPrice && p.price > maxPrice) return false;
     if (minDiscount) {
       const discount = formatDiscountPct(p.price, p.original_price) ?? 0;
