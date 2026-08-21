@@ -4,7 +4,9 @@ import { useState, useTransition } from 'react';
 import Image from 'next/image';
 import { ProductCandidate } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
-import { approveCandidate, rejectCandidate } from './actions';
+import { approveCandidate, rejectCandidate, verifyAffiliateLink } from './actions';
+
+type LinkCheck = { status: 'idle' } | { status: 'checking' } | { status: 'ok'; direct: boolean } | { status: 'error'; message: string };
 
 export function CandidateCard({
   candidate,
@@ -17,7 +19,20 @@ export function CandidateCard({
 }) {
   const [affiliateUrl, setAffiliateUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [linkCheck, setLinkCheck] = useState<LinkCheck>({ status: 'idle' });
   const [isPending, startTransition] = useTransition();
+
+  function handleVerifyLink() {
+    setLinkCheck({ status: 'checking' });
+    startTransition(async () => {
+      const result = await verifyAffiliateLink(affiliateUrl);
+      if (!result.ok) {
+        setLinkCheck({ status: 'error', message: result.error });
+        return;
+      }
+      setLinkCheck({ status: 'ok', direct: result.direct });
+    });
+  }
 
   function handleApprove() {
     setError(null);
@@ -68,13 +83,38 @@ export function CandidateCard({
         >
           Buscar en Mercado Libre ↗
         </a>
-        <input
-          type="url"
-          placeholder="Pega acá el link de afiliado real"
-          value={affiliateUrl}
-          onChange={(e) => setAffiliateUrl(e.target.value)}
-          className="mt-1 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none"
-        />
+        <div className="mt-1 flex gap-2">
+          <input
+            type="url"
+            placeholder="Pega acá el link de afiliado real"
+            value={affiliateUrl}
+            onChange={(e) => {
+              setAffiliateUrl(e.target.value);
+              setLinkCheck({ status: 'idle' });
+            }}
+            className="flex-1 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none"
+          />
+          <button
+            onClick={handleVerifyLink}
+            disabled={!affiliateUrl.trim() || linkCheck.status === 'checking'}
+            className="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {linkCheck.status === 'checking' ? 'Verificando…' : 'Verificar link'}
+          </button>
+        </div>
+        {linkCheck.status === 'ok' && linkCheck.direct && (
+          <p className="text-xs text-accent">✓ El link lleva directo al producto.</p>
+        )}
+        {linkCheck.status === 'ok' && !linkCheck.direct && (
+          <p className="text-xs text-red-400">
+            ⚠ Este link lleva a tu perfil social de afiliada, no a la ficha del producto — la oferta que ahí se
+            destaca puede cambiar sola y no coincidir con el precio que vas a publicar. Genera el link compartiendo
+            desde la ficha específica del producto, no desde el perfil.
+          </p>
+        )}
+        {linkCheck.status === 'error' && (
+          <p className="text-xs text-amber-400">No se pudo verificar el link ({linkCheck.message}). Revísalo a mano antes de aprobar.</p>
+        )}
         {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="mt-1 flex gap-2">
           <button

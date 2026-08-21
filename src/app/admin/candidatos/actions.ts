@@ -16,6 +16,37 @@ function slugify(text: string): string {
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
+type LinkCheckResult =
+  | { ok: true; direct: boolean; finalUrl: string }
+  | { ok: false; error: string };
+
+// Mercado Libre solo entrega la redirección real del acortador meli.la si el
+// request trae un User-Agent de navegador — con el UA por defecto de fetch()
+// el link no redirige y parece roto. Los links de "compartir mi perfil" de
+// afiliados terminan en mercadolibre.cl/social/<usuario> (una vitrina cuya
+// oferta destacada cambia sola con el tiempo), en vez de en la ficha fija
+// del producto/vendedor que se aprobó — eso es lo que se detecta acá.
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+
+export async function verifyAffiliateLink(url: string): Promise<LinkCheckResult> {
+  const trimmed = url.trim();
+  if (!trimmed) return { ok: false, error: 'Falta el link' };
+
+  try {
+    const res = await fetch(trimmed, {
+      redirect: 'follow',
+      headers: { 'User-Agent': BROWSER_UA },
+      signal: AbortSignal.timeout(8000),
+    });
+    const finalUrl = res.url || trimmed;
+    const direct = !finalUrl.includes('/social/');
+    return { ok: true, direct, finalUrl };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'No se pudo verificar el link' };
+  }
+}
+
 export async function approveCandidate(
   candidateId: string,
   name: string,
