@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { Product, RrssStatus, CATEGORIES } from '@/lib/types';
-import { ProductAdminCard } from './ProductAdminCard';
+import { ProductsList } from './ProductsList';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,13 +88,8 @@ export default async function ProductosPage({
         </div>
       </div>
 
-      <div className="mt-8 flex flex-col gap-4">
-        {products.map((p) => (
-          <ProductAdminCard key={p.id} product={p} />
-        ))}
-        {products.length === 0 && (
-          <p className="text-sm text-muted">No hay productos que coincidan con este filtro.</p>
-        )}
+      <div className="mt-8">
+        <ProductsList products={products} />
       </div>
     </main>
   );

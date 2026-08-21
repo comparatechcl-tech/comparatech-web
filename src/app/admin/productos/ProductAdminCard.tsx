@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import Image from 'next/image';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ExternalLink } from 'lucide-react';
 import { Product, RrssStatus } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
 import { setRrssStatus, updateAffiliateUrl, verifyAffiliateLink } from './actions';
@@ -21,7 +21,15 @@ type LinkCheck =
   | { status: 'unknown' }
   | { status: 'error'; message: string };
 
-export function ProductAdminCard({ product }: { product: Product }) {
+export function ProductAdminCard({
+  product,
+  selected = false,
+  onToggleSelect,
+}: {
+  product: Product;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
   const [status, setStatus] = useState<RrssStatus>(product.rrss_status ?? 'sin_usar');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +91,15 @@ export function ProductAdminCard({ product }: { product: Product }) {
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="h-4 w-4 shrink-0 accent-accent sm:self-center"
+            aria-label={`Seleccionar ${product.name}`}
+          />
+        )}
         <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-surface2">
           <Image src={product.image_url} alt={product.name} fill sizes="80px" className="object-cover" />
         </div>
@@ -98,6 +115,14 @@ export function ProductAdminCard({ product }: { product: Product }) {
             {product.category} · {new Date(product.created_at).toLocaleDateString('es-CL')}
             {!product.is_active && <span className="ml-2 text-red-400">Inactivo</span>}
           </p>
+          <a
+            href={product.affiliate_url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:underline"
+          >
+            Ver en Mercado Libre <ExternalLink size={11} />
+          </a>
         </div>
 
         <div className="flex shrink-0 flex-col items-stretch gap-2 sm:w-56">
