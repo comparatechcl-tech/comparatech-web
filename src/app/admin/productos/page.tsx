@@ -42,7 +42,7 @@ export default async function ProductosPage({
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
-      <h1 className="font-heading text-2xl font-bold text-white">Productos aprobados</h1>
+      <h1 className="font-heading text-2xl font-bold text-fg">Productos aprobados</h1>
       <p className="mt-1 text-sm text-muted">
         {products.length} producto{products.length === 1 ? '' : 's'}. Marca cuáles ya se usaron en RRSS para no
         repetir contenido.
@@ -53,7 +53,7 @@ export default async function ProductosPage({
           <Link
             href={buildHref({ categoria: undefined })}
             className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-              !categoria ? 'border-accent text-accent' : 'border-border text-muted hover:text-white'
+              !categoria ? 'border-accent text-accent' : 'border-border text-muted hover:text-fg'
             }`}
           >
             Todas las categorías
@@ -63,7 +63,7 @@ export default async function ProductosPage({
               key={c.slug}
               href={buildHref({ categoria: c.slug })}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                categoria === c.slug ? 'border-accent text-accent' : 'border-border text-muted hover:text-white'
+                categoria === c.slug ? 'border-accent text-accent' : 'border-border text-muted hover:text-fg'
               }`}
             >
               {c.name}
@@ -79,7 +79,7 @@ export default async function ProductosPage({
               className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                 (f.value === 'todos' && !rrss) || rrss === f.value
                   ? 'border-accent text-accent'
-                  : 'border-border text-muted hover:text-white'
+                  : 'border-border text-muted hover:text-fg'
               }`}
             >
               {f.label}

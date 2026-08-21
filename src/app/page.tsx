@@ -1,10 +1,10 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { Smartphone, Laptop, Headphones, Scale, Search, Check, Tags, ChartNoAxesColumn, Link2 } from 'lucide-react';
 import { getFeaturedProducts } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FounderBio } from '@/components/brand/FounderBio';
 import { QuickCompare } from '@/components/compare/QuickCompare';
-import { HeroIllustration } from '@/components/brand/HeroIllustration';
 
 // Revalida cada 5 minutos: así el catálogo se actualiza solo (sin tener que
 // hacer un redeploy manual) cuando se cargan productos nuevos en Supabase.
@@ -103,20 +103,27 @@ export default async function HomePage() {
                   type="text"
                   name="q"
                   placeholder="Busca un producto, marca o modelo..."
-                  className="w-full rounded-xl border border-border bg-surface2 py-3 pl-10 pr-3 text-sm text-white placeholder:text-muted transition focus:border-accent focus:outline-none"
+                  className="w-full rounded-xl border border-border bg-surface2 py-3 pl-10 pr-3 text-sm text-fg placeholder:text-muted transition focus:border-accent focus:outline-none"
                 />
               </div>
               <button
                 type="submit"
-                className="shrink-0 rounded-xl bg-gradient-to-r from-blue to-accent px-5 py-3 font-heading text-sm font-semibold text-bg transition hover:opacity-90"
+                className="shrink-0 rounded-xl bg-gradient-to-r from-blue to-accent px-5 py-3 font-heading text-sm font-semibold text-ink transition hover:opacity-90"
               >
                 Buscar →
               </button>
             </form>
           </div>
 
-          <div className="mx-auto hidden w-full max-w-md sm:block">
-            <HeroIllustration className="w-full" />
+          <div className="relative mx-auto hidden aspect-square w-full max-w-md sm:block">
+            <Image
+              src="/hero-products.png"
+              alt="Notebook, celular y audífonos sobre una plataforma iluminada"
+              fill
+              sizes="(min-width: 640px) 448px, 0px"
+              className="object-contain drop-shadow-2xl"
+              priority
+            />
           </div>
         </div>
       </section>
@@ -134,13 +141,13 @@ export default async function HomePage() {
                 style={{ '--glow': c.glow } as React.CSSProperties}
               >
                 <span
-                  className="flex h-12 w-12 items-center justify-center rounded-xl text-white"
+                  className="flex h-12 w-12 items-center justify-center rounded-xl text-fg"
                   style={{ background: c.gradient, boxShadow: `0 6px 20px -6px ${c.glow}` }}
                 >
                   <Icon size={21} />
                 </span>
                 <div>
-                  <p className="font-heading text-base font-semibold text-white">{c.title}</p>
+                  <p className="font-heading text-base font-semibold text-fg">{c.title}</p>
                   <p className="mt-0.5 text-xs text-muted">{c.desc}</p>
                 </div>
                 <span className="mt-auto text-xs font-medium text-accent opacity-0 transition group-hover:opacity-100">
@@ -182,7 +189,7 @@ export default async function HomePage() {
                 <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
                   <Icon size={20} />
                 </span>
-                <p className="font-heading text-sm font-semibold text-white">{w.title}</p>
+                <p className="font-heading text-sm font-semibold text-fg">{w.title}</p>
                 <p className="text-xs leading-relaxed text-muted">{w.desc}</p>
               </div>
             );

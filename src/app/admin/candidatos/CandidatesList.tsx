@@ -59,7 +59,7 @@ export function CandidatesList({ candidates }: { candidates: ProductCandidate[] 
         <button
           onClick={handleBulkReject}
           disabled={selected.size === 0 || isPending}
-          className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
         >
           Rechazar seleccionados
         </button>

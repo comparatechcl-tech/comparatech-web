@@ -2,6 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Paleta oscura (default) y clara, como tripletes "R G B" para que
+ * Tailwind pueda aplicarles opacidad con la sintaxis rgb(var(...) / alpha).
+ * --color-border se guarda directo como rgba() porque su opacidad siempre
+ * es fija (nunca se le aplica un modificador de opacidad en las clases).
+ */
+:root {
+  --color-bg: 7 11 20;
+  --color-surface: 11 18 32;
+  --color-surface2: 16 24 39;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-accent: 0 212 255;
+  --color-blue: 8 126 255;
+  --color-blue-deep: 6 59 143;
+  --color-ml-yellow: 255 230 0;
+  --color-muted: 148 163 184;
+  --color-fg: 255 255 255;
+}
+
+html.light {
+  --color-bg: 246 248 251;
+  --color-surface: 255 255 255;
+  --color-surface2: 238 242 247;
+  --color-border: rgba(15, 23, 42, 0.1);
+  --color-accent: 14 116 144;
+  --color-blue: 8 126 255;
+  --color-blue-deep: 6 59 143;
+  --color-ml-yellow: 255 230 0;
+  --color-muted: 71 85 105;
+  --color-fg: 15 23 42;
+}
+
 body {
-  @apply bg-bg text-white antialiased;
+  @apply bg-bg text-fg antialiased transition-colors duration-200;
 }

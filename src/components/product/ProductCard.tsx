@@ -17,7 +17,7 @@ export function ProductCard({ product }: { product: Product }) {
       <Link href={`/producto/${product.slug}`} className="flex flex-1 flex-col">
         <div className="relative aspect-square w-full overflow-hidden bg-surface2">
           {product.is_featured && (
-            <span className="absolute left-2.5 top-2.5 z-10 inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-bg">
+            <span className="absolute left-2.5 top-2.5 z-10 inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-ink">
               <Sparkles size={11} /> Recomendado
             </span>
           )}
@@ -33,7 +33,7 @@ export function ProductCard({ product }: { product: Product }) {
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
             {categoryName}
           </span>
-          <h3 className="line-clamp-2 font-heading text-sm font-medium text-white transition group-hover:text-accent">
+          <h3 className="line-clamp-2 font-heading text-sm font-medium text-fg transition group-hover:text-accent">
             {product.name}
           </h3>
           {specBadges.length > 0 && (

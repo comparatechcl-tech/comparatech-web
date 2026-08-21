@@ -9,8 +9,8 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-4 py-10 text-sm text-muted">
         <div className="grid gap-8 md:grid-cols-3">
           <div>
-            <p className="flex items-center gap-2 font-heading text-lg font-extrabold text-white">
-              <Logo size={26} className="text-white" />
+            <p className="flex items-center gap-2 font-heading text-lg font-extrabold text-fg">
+              <Logo size={26} className="text-fg" />
               <span>
                 Compara<span className="text-accent">Tech</span>
               </span>
@@ -26,7 +26,7 @@ export function Footer() {
           </div>
 
           <div>
-            <p className="mb-2 font-medium text-white">Categorías</p>
+            <p className="mb-2 font-medium text-fg">Categorías</p>
             <ul className="space-y-1">
               {CATEGORIES.map((c) => (
                 <li key={c.slug}>
@@ -39,7 +39,7 @@ export function Footer() {
           </div>
 
           <div>
-            <p className="mb-2 font-medium text-white">Sitio</p>
+            <p className="mb-2 font-medium text-fg">Sitio</p>
             <ul className="space-y-1">
               <li>
                 <Link href="/comparador" className="transition hover:text-accent">

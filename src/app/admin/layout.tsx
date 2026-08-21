@@ -14,7 +14,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <Link
               key={t.href}
               href={t.href}
-              className="border-b-2 border-transparent px-3 py-3 text-sm font-medium text-muted transition hover:text-white"
+              className="border-b-2 border-transparent px-3 py-3 text-sm font-medium text-muted transition hover:text-fg"
             >
               {t.label}
             </Link>

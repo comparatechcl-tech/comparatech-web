@@ -50,7 +50,7 @@ export function ProductsList({ products }: { products: Product[] }) {
         <button
           onClick={handleCopySelected}
           disabled={selected.size === 0}
-          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
         >
           {copied ? <Check size={13} className="text-accent" /> : <Copy size={13} />}
           {copied ? 'Copiado' : 'Copiar seleccionados'}

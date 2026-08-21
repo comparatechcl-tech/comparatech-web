@@ -106,7 +106,7 @@ export function ProductAdminCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="font-heading text-sm font-medium text-white">{product.name}</h3>
+            <h3 className="font-heading text-sm font-medium text-fg">{product.name}</h3>
             <span className="whitespace-nowrap text-sm font-semibold text-accent">
               {formatCLP(product.price)}
             </span>
@@ -133,7 +133,7 @@ export function ProductAdminCard({
                 onClick={() => handleStatusChange(opt.value)}
                 disabled={isPending}
                 className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition disabled:opacity-50 ${
-                  status === opt.value ? 'bg-accent text-bg' : 'text-muted hover:text-white'
+                  status === opt.value ? 'bg-accent text-ink' : 'text-muted hover:text-fg'
                 }`}
               >
                 {opt.label}
@@ -142,7 +142,7 @@ export function ProductAdminCard({
           </div>
           <button
             onClick={handleCopy}
-            className="flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted transition hover:text-white"
+            className="flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted transition hover:text-fg"
           >
             {copied ? <Check size={13} className="text-accent" /> : <Copy size={13} />}
             {copied ? 'Copiado' : 'Copiar para RRSS'}
@@ -159,19 +159,19 @@ export function ProductAdminCard({
               setAffiliateUrl(e.target.value);
               setLinkCheck({ status: 'idle' });
             }}
-            className="flex-1 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-white focus:border-accent focus:outline-none"
+            className="flex-1 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-fg focus:border-accent focus:outline-none"
           />
           <button
             onClick={handleVerifyLink}
             disabled={!affiliateUrl.trim() || linkCheck.status === 'checking'}
-            className="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            className="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
           >
             {linkCheck.status === 'checking' ? 'Verificando…' : 'Verificar'}
           </button>
           <button
             onClick={handleSaveLink}
             disabled={!affiliateUrl.trim() || affiliateUrl === product.affiliate_url || isPending}
-            className="shrink-0 rounded-md bg-accent px-3 py-2 text-xs font-medium text-bg transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="shrink-0 rounded-md bg-accent px-3 py-2 text-xs font-medium text-ink transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {saved ? 'Guardado ✓' : 'Guardar'}
           </button>

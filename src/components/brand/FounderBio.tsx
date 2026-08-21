@@ -21,7 +21,7 @@ export function FounderBio({ compact = false }: { compact?: boolean }) {
         className="h-20 w-20 shrink-0 rounded-full object-cover ring-2 ring-accent/40"
       />
       <div>
-        <p className="font-heading text-lg font-semibold text-white">
+        <p className="font-heading text-lg font-semibold text-fg">
           Roxana — Fundadora de ComparaTech
         </p>
         <p className="mt-1 text-sm text-muted">

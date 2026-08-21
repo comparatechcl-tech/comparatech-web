@@ -11,7 +11,7 @@ export function PriceTag({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="font-heading text-xl font-bold text-white">
+      <span className="font-heading text-xl font-bold text-fg">
         {formatCLP(price)}
       </span>
       {originalPrice && discount && (

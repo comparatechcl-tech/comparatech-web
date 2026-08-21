@@ -36,7 +36,7 @@ export default function NosotrosPage() {
                   {String(i + 1).padStart(2, '0')}
                 </span>
               </div>
-              <p className="mt-3 font-heading text-sm font-semibold text-white">{s.title}</p>
+              <p className="mt-3 font-heading text-sm font-semibold text-fg">{s.title}</p>
               <p className="mt-1 text-xs leading-relaxed text-muted">{s.desc}</p>
             </div>
           );
@@ -58,7 +58,7 @@ export default function NosotrosPage() {
           explicarte en simple qué conviene comprar y por qué — sin letra
           chica ni tecnicismos.
         </p>
-        <h2 className="pt-2 font-heading text-lg font-semibold text-white">
+        <h2 className="pt-2 font-heading text-lg font-semibold text-fg">
           Cómo ganamos dinero
         </h2>
         <p>

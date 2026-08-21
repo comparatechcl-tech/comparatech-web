@@ -11,12 +11,12 @@ export function ProductSpecsTable({ product }: { product: Product }) {
           {entries.map(([key, value], i) => (
             <tr key={key} className={i % 2 === 0 ? 'bg-surface' : 'bg-surface2'}>
               <td className="px-4 py-2.5 text-muted">{key}</td>
-              <td className="px-4 py-2.5 text-right font-medium text-white">{value}</td>
+              <td className="px-4 py-2.5 text-right font-medium text-fg">{value}</td>
             </tr>
           ))}
           <tr className="bg-surface2">
             <td className="px-4 py-2.5 text-muted">Vendedor</td>
-            <td className="px-4 py-2.5 text-right font-medium text-white">
+            <td className="px-4 py-2.5 text-right font-medium text-fg">
               {reputationLabel(product.seller_reputation)} ·{' '}
               {product.seller_sales_count.toLocaleString('es-CL')} ventas
             </td>

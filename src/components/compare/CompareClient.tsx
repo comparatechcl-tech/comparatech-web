@@ -43,7 +43,7 @@ export function CompareClient({
         <select
           value={slugA}
           onChange={(e) => setSlugA(e.target.value)}
-          className="w-full min-w-0 truncate rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
+          className="w-full min-w-0 truncate rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-fg transition focus:border-accent focus:outline-none"
         >
           {products.map((p) => (
             <option key={p.slug} value={p.slug}>
@@ -54,7 +54,7 @@ export function CompareClient({
         <select
           value={slugB}
           onChange={(e) => setSlugB(e.target.value)}
-          className="w-full min-w-0 truncate rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
+          className="w-full min-w-0 truncate rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium text-fg transition focus:border-accent focus:outline-none"
         >
           {products.map((p) => (
             <option key={p.slug} value={p.slug}>
@@ -72,10 +72,10 @@ export function CompareClient({
                 <div className="relative h-20 w-20 overflow-hidden rounded-xl bg-surface2 sm:h-28 sm:w-28">
                   <Image src={p.image_url} alt={p.name} fill className="object-cover" />
                 </div>
-                <p className="line-clamp-2 font-heading text-sm font-medium text-white">{p.name}</p>
+                <p className="line-clamp-2 font-heading text-sm font-medium text-fg">{p.name}</p>
                 <p
                   className={`font-heading text-lg font-bold sm:text-xl ${
-                    p.price <= Math.min(a.price, b.price) ? 'text-accent' : 'text-white'
+                    p.price <= Math.min(a.price, b.price) ? 'text-accent' : 'text-fg'
                   }`}
                 >
                   {formatCLP(p.price)}
@@ -100,7 +100,7 @@ export function CompareClient({
                     <tr key={key} className={i % 2 === 0 ? 'bg-surface2' : 'bg-surface'}>
                       <td
                         className={`px-4 py-2.5 text-center ${
-                          aWins ? 'font-semibold text-accent' : 'text-white'
+                          aWins ? 'font-semibold text-accent' : 'text-fg'
                         }`}
                       >
                         <span className="inline-flex items-center gap-1.5">
@@ -111,7 +111,7 @@ export function CompareClient({
                       <td className="px-3 py-2.5 text-center text-xs text-muted">{key}</td>
                       <td
                         className={`px-4 py-2.5 text-center ${
-                          bWins ? 'font-semibold text-accent' : 'text-white'
+                          bWins ? 'font-semibold text-accent' : 'text-fg'
                         }`}
                       >
                         <span className="inline-flex items-center gap-1.5">

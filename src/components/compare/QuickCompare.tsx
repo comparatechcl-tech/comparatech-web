@@ -21,7 +21,7 @@ export function QuickCompare({ products }: { products: Product[] }) {
         <select
           value={slugA}
           onChange={(e) => setSlugA(e.target.value)}
-          className="w-full min-w-0 flex-1 truncate rounded-xl border border-border bg-surface2 px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
+          className="w-full min-w-0 flex-1 truncate rounded-xl border border-border bg-surface2 px-4 py-3 text-sm font-medium text-fg transition focus:border-accent focus:outline-none"
         >
           {products.map((p) => (
             <option key={p.slug} value={p.slug}>
@@ -37,7 +37,7 @@ export function QuickCompare({ products }: { products: Product[] }) {
         <select
           value={slugB}
           onChange={(e) => setSlugB(e.target.value)}
-          className="w-full min-w-0 flex-1 truncate rounded-xl border border-border bg-surface2 px-4 py-3 text-sm font-medium text-white transition focus:border-accent focus:outline-none"
+          className="w-full min-w-0 flex-1 truncate rounded-xl border border-border bg-surface2 px-4 py-3 text-sm font-medium text-fg transition focus:border-accent focus:outline-none"
         >
           {products.map((p) => (
             <option key={p.slug} value={p.slug}>
@@ -50,7 +50,7 @@ export function QuickCompare({ products }: { products: Product[] }) {
       <button
         onClick={() => router.push(`/comparador?a=${slugA}&b=${slugB}`)}
         disabled={!slugA || !slugB}
-        className="mt-5 w-full rounded-xl bg-gradient-to-r from-blue to-accent py-3.5 text-center font-heading text-sm font-semibold text-bg transition hover:opacity-90 disabled:opacity-40 sm:w-auto sm:px-8"
+        className="mt-5 w-full rounded-xl bg-gradient-to-r from-blue to-accent py-3.5 text-center font-heading text-sm font-semibold text-ink transition hover:opacity-90 disabled:opacity-40 sm:w-auto sm:px-8"
       >
         Comparar productos →
       </button>

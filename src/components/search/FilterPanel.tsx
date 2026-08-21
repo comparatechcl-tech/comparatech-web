@@ -19,7 +19,7 @@ export function FilterPanel({
           name="q"
           placeholder="Buscar producto..."
           defaultValue={defaultValues.q}
-          className="w-full rounded-xl border border-border bg-surface2 py-2.5 pl-9 pr-3 text-sm text-white placeholder:text-muted transition focus:border-accent focus:outline-none"
+          className="w-full rounded-xl border border-border bg-surface2 py-2.5 pl-9 pr-3 text-sm text-fg placeholder:text-muted transition focus:border-accent focus:outline-none"
         />
       </div>
       <input
@@ -27,19 +27,19 @@ export function FilterPanel({
         name="brand"
         placeholder="Marca"
         defaultValue={defaultValues.brand}
-        className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-white placeholder:text-muted transition focus:border-accent focus:outline-none"
+        className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-muted transition focus:border-accent focus:outline-none"
       />
       <input
         type="number"
         name="maxPrice"
         placeholder="Precio máximo (CLP)"
         defaultValue={defaultValues.maxPrice}
-        className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-white placeholder:text-muted transition focus:border-accent focus:outline-none"
+        className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-muted transition focus:border-accent focus:outline-none"
       />
       <select
         name="minDiscount"
         defaultValue={defaultValues.minDiscount ?? ''}
-        className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-white transition focus:border-accent focus:outline-none sm:col-span-2"
+        className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-fg transition focus:border-accent focus:outline-none sm:col-span-2"
       >
         <option value="">Cualquier descuento</option>
         <option value="10">10% o más</option>
@@ -48,7 +48,7 @@ export function FilterPanel({
       </select>
       <button
         type="submit"
-        className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue to-accent px-4 py-2.5 text-sm font-heading font-semibold text-bg transition hover:opacity-90 sm:col-span-2"
+        className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue to-accent px-4 py-2.5 text-sm font-heading font-semibold text-ink transition hover:opacity-90 sm:col-span-2"
       >
         <SlidersHorizontal size={15} />
         Filtrar

@@ -76,7 +76,7 @@ export function CandidateCard({
       </div>
       <div className="flex flex-1 flex-col gap-2">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="font-heading text-sm font-medium text-white">{candidate.name}</h3>
+          <h3 className="font-heading text-sm font-medium text-fg">{candidate.name}</h3>
           <span className="whitespace-nowrap text-sm font-semibold text-accent">
             {formatCLP(candidate.price)}
           </span>
@@ -102,12 +102,12 @@ export function CandidateCard({
               setAffiliateUrl(e.target.value);
               setLinkCheck({ status: 'idle' });
             }}
-            className="flex-1 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none"
+            className="flex-1 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-muted focus:border-accent focus:outline-none"
           />
           <button
             onClick={handleVerifyLink}
             disabled={!affiliateUrl.trim() || linkCheck.status === 'checking'}
-            className="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            className="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
           >
             {linkCheck.status === 'checking' ? 'Verificando…' : 'Verificar link'}
           </button>
@@ -133,14 +133,14 @@ export function CandidateCard({
           <button
             onClick={handleApprove}
             disabled={isPending || !affiliateUrl.trim()}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Aprobar
           </button>
           <button
             onClick={handleReject}
             disabled={isPending}
-            className="rounded-md border border-border px-4 py-2 text-sm text-muted transition hover:text-white disabled:opacity-40"
+            className="rounded-md border border-border px-4 py-2 text-sm text-muted transition hover:text-fg disabled:opacity-40"
           >
             Rechazar
           </button>
