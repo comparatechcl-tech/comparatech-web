@@ -18,6 +18,7 @@ export interface Product {
   is_featured: boolean;
   is_active: boolean;
   ml_product_id: string | null;
+  seller_id: number | null;
   rrss_status: RrssStatus;
   created_at: string;
 }

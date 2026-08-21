@@ -6,7 +6,13 @@ import { ProductCandidate } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
 import { approveCandidate, rejectCandidate, verifyAffiliateLink } from './actions';
 
-type LinkCheck = { status: 'idle' } | { status: 'checking' } | { status: 'ok'; direct: boolean } | { status: 'error'; message: string };
+type LinkCheck =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'direct' }
+  | { status: 'wrong_offer' }
+  | { status: 'unknown' }
+  | { status: 'error'; message: string };
 
 export function CandidateCard({
   candidate,
@@ -25,12 +31,16 @@ export function CandidateCard({
   function handleVerifyLink() {
     setLinkCheck({ status: 'checking' });
     startTransition(async () => {
-      const result = await verifyAffiliateLink(affiliateUrl);
+      const result = await verifyAffiliateLink(affiliateUrl, candidate.ml_product_id, candidate.seller_id);
       if (!result.ok) {
         setLinkCheck({ status: 'error', message: result.error });
         return;
       }
-      setLinkCheck({ status: 'ok', direct: result.direct });
+      if (result.direct) {
+        setLinkCheck({ status: 'direct' });
+      } else {
+        setLinkCheck({ status: result.reason === 'wrong_offer' ? 'wrong_offer' : 'unknown' });
+      }
     });
   }
 
@@ -102,15 +112,18 @@ export function CandidateCard({
             {linkCheck.status === 'checking' ? 'Verificando…' : 'Verificar link'}
           </button>
         </div>
-        {linkCheck.status === 'ok' && linkCheck.direct && (
-          <p className="text-xs text-accent">✓ El link lleva directo al producto.</p>
+        {linkCheck.status === 'direct' && (
+          <p className="text-xs text-accent">✓ El link lleva a la oferta exacta del vendedor aprobado.</p>
         )}
-        {linkCheck.status === 'ok' && !linkCheck.direct && (
+        {linkCheck.status === 'wrong_offer' && (
           <p className="text-xs text-red-400">
-            ⚠ Este link lleva a tu perfil social de afiliada, no a la ficha del producto — la oferta que ahí se
-            destaca puede cambiar sola y no coincidir con el precio que vas a publicar. Genera el link compartiendo
-            desde la ficha específica del producto, no desde el perfil.
+            ⚠ Este link destaca la oferta de otro vendedor, no la de {candidate.seller_nickname ?? 'este vendedor'} —
+            puede mostrar un precio distinto al aprobado. Genera el link de nuevo desde la oferta específica de ese
+            vendedor.
           </p>
+        )}
+        {linkCheck.status === 'unknown' && (
+          <p className="text-xs text-amber-400">No se pudo identificar qué oferta destaca este link. Revísalo a mano antes de aprobar.</p>
         )}
         {linkCheck.status === 'error' && (
           <p className="text-xs text-amber-400">No se pudo verificar el link ({linkCheck.message}). Revísalo a mano antes de aprobar.</p>
