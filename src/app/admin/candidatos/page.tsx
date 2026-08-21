@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { ProductCandidate } from '@/lib/types';
-import { CandidateCard } from './CandidateCard';
+import { CandidatesList } from './CandidatesList';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,13 +23,8 @@ export default async function CandidatosPage() {
         {candidates.length} producto{candidates.length === 1 ? '' : 's'} esperando aprobación. Agrega el link de
         afiliado real antes de aprobar — sin eso no se puede publicar.
       </p>
-      <div className="mt-8 flex flex-col gap-4">
-        {candidates.map((c) => (
-          <CandidateCard key={c.id} candidate={c} />
-        ))}
-        {candidates.length === 0 && (
-          <p className="text-sm text-muted">No hay candidatos pendientes por ahora.</p>
-        )}
+      <div className="mt-8">
+        <CandidatesList candidates={candidates} />
       </div>
     </main>
   );

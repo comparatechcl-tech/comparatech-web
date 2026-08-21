@@ -6,7 +6,15 @@ import { ProductCandidate } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
 import { approveCandidate, rejectCandidate } from './actions';
 
-export function CandidateCard({ candidate }: { candidate: ProductCandidate }) {
+export function CandidateCard({
+  candidate,
+  selected = false,
+  onToggleSelect,
+}: {
+  candidate: ProductCandidate;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
   const [affiliateUrl, setAffiliateUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -29,6 +37,15 @@ export function CandidateCard({ candidate }: { candidate: ProductCandidate }) {
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 sm:flex-row">
+      {onToggleSelect && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          className="mt-1 h-4 w-4 shrink-0 accent-accent"
+          aria-label={`Seleccionar ${candidate.name}`}
+        />
+      )}
       <div className="relative h-32 w-32 shrink-0 overflow-hidden rounded-lg bg-surface2">
         <Image src={candidate.image_url} alt={candidate.name} fill sizes="128px" className="object-cover" />
       </div>

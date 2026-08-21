@@ -59,3 +59,19 @@ export async function rejectCandidate(candidateId: string): Promise<ActionResult
   revalidatePath('/admin/candidatos');
   return { ok: true };
 }
+
+export async function rejectCandidates(candidateIds: string[]): Promise<ActionResult> {
+  if (candidateIds.length === 0) return { ok: true };
+
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
+
+  const { error } = await admin
+    .from('product_candidates')
+    .update({ status: 'rejected', reviewed_at: new Date().toISOString() })
+    .in('id', candidateIds);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath('/admin/candidatos');
+  return { ok: true };
+}
