@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { Smartphone, Laptop, Headphones, Scale, Search, Check, Tags, ChartNoAxesColumn, Link2 } from 'lucide-react';
+import { Search, Check, Tags, ChartNoAxesColumn, Link2 } from 'lucide-react';
 import { getFeaturedProducts } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FounderBio } from '@/components/brand/FounderBio';
@@ -27,32 +27,28 @@ const WHY_US = [
 const CATEGORY_CARDS = [
   {
     href: '/categoria/celulares',
-    icon: Smartphone,
-    gradient: 'linear-gradient(135deg, #087EFF, #00D4FF)',
+    image: '/category-celulares.png',
     glow: 'rgba(0,212,255,0.45)',
     title: 'Celulares',
     desc: 'Compara los mejores smartphones',
   },
   {
     href: '/categoria/computacion',
-    icon: Laptop,
-    gradient: 'linear-gradient(135deg, #7C3AED, #A855F7)',
+    image: '/category-computacion.png',
     glow: 'rgba(168,85,247,0.4)',
     title: 'Computación',
     desc: 'Notebooks, componentes y más',
   },
   {
     href: '/categoria/electronica',
-    icon: Headphones,
-    gradient: 'linear-gradient(135deg, #059669, #10D9A0)',
+    image: '/category-electronica.png',
     glow: 'rgba(16,217,160,0.4)',
     title: 'Electrónica',
     desc: 'Audífonos, parlantes, wearables',
   },
   {
     href: '/comparador',
-    icon: Scale,
-    gradient: 'linear-gradient(135deg, #EA580C, #FFE600)',
+    image: '/category-comparador.png',
     glow: 'rgba(255,230,0,0.4)',
     title: 'Comparador',
     desc: 'Compara 2 productos en detalle',
@@ -132,7 +128,6 @@ export default async function HomePage() {
       <section className="mb-16">
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {CATEGORY_CARDS.map((c) => {
-            const Icon = c.icon;
             return (
               <Link
                 key={c.href}
@@ -140,11 +135,12 @@ export default async function HomePage() {
                 className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:shadow-[0_0_40px_-14px_var(--glow)]"
                 style={{ '--glow': c.glow } as React.CSSProperties}
               >
-                <span
-                  className="flex h-12 w-12 items-center justify-center rounded-xl text-fg"
-                  style={{ background: c.gradient, boxShadow: `0 6px 20px -6px ${c.glow}` }}
-                >
-                  <Icon size={21} />
+                <span className="relative flex h-16 w-16 items-center justify-center">
+                  <span
+                    className="absolute inset-0 rounded-full blur-xl"
+                    style={{ background: c.glow }}
+                  />
+                  <Image src={c.image} alt="" width={64} height={64} className="relative object-contain" />
                 </span>
                 <div>
                   <p className="font-heading text-base font-semibold text-fg">{c.title}</p>
