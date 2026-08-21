@@ -1,4 +1,5 @@
 export type SellerReputation = 'verde' | 'amarillo' | 'naranja' | 'rojo';
+export type RrssStatus = 'sin_usar' | 'seleccionado' | 'publicado';
 
 export interface Product {
   id: string;
@@ -17,6 +18,7 @@ export interface Product {
   is_featured: boolean;
   is_active: boolean;
   ml_product_id: string | null;
+  rrss_status: RrssStatus;
   created_at: string;
 }
 
