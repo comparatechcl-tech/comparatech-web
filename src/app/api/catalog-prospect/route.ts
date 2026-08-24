@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { EMPTY_ENRICHMENT, enrichFromMl, getMlToken } from '@/lib/ml-enrichment';
+import {
+  buildPublishedCatalog,
+  collapseCandidateFamilies,
+  partitionCandidates,
+} from '@/lib/prospect-filter';
 
 /**
  * Recibe candidatos prospectados por Make (highlights → products → items →
@@ -20,6 +25,11 @@ import { EMPTY_ENRICHMENT, enrichFromMl, getMlToken } from '@/lib/ml-enrichment'
  * razón, `brand`, `specs` y `description` reales se completan acá también
  * (ver enrichFromMl) en vez de intentar armarlos dentro del body crudo de
  * Make.
+ *
+ * Solo llega a la cola de revisión lo que agrega algo al catálogo: se
+ * descartan los colores repetidos del mismo lote y los que pertenecen a una
+ * familia ya publicada, salvo que sean bastante más baratos que lo que ya
+ * está en el sitio (ver lib/prospect-filter).
  */
 export async function POST(req: NextRequest) {
   if (process.env.ENABLE_CATALOG_PROSPECT !== 'true') {
@@ -52,10 +62,17 @@ export async function POST(req: NextRequest) {
   const greenCandidates = body.candidates.filter((c: { seller_reputation_raw?: string }) =>
     String(c.seller_reputation_raw ?? '').includes('green')
   );
-  const skipped = body.candidates.length - greenCandidates.length;
+  const skippedNotGreen = body.candidates.length - greenCandidates.length;
 
   if (greenCandidates.length === 0) {
-    return NextResponse.json({ ok: true, inserted: 0, skipped });
+    return NextResponse.json({
+      ok: true,
+      inserted: 0,
+      skipped: skippedNotGreen,
+      skipped_not_green: skippedNotGreen,
+      skipped_same_batch_variants: 0,
+      skipped_already_in_catalog: 0,
+    });
   }
 
   const mlToken = await getMlToken();
@@ -66,6 +83,7 @@ export async function POST(req: NextRequest) {
         seller_reputation_raw?: string;
         ml_product_id: string;
         name: string;
+        price: number;
         [key: string]: unknown;
       }) => {
         const { seller_reputation_raw, ...rest } = c;
@@ -99,8 +117,40 @@ export async function POST(req: NextRequest) {
     new Map(accepted.map((c) => [c.ml_product_id, c])).values()
   );
 
+  // Descarta lo que solo repite el catálogo ya publicado. Sin esto, la cola
+  // de revisión se llena todos los días con otros colores del mismo modelo
+  // —una persona los abre y los rechaza uno por uno— aunque los listados
+  // muestren una sola variante por familia de todas formas.
+  const { data: publishedRows } = await admin
+    .from('products')
+    .select('ml_product_id, ml_family_id, price')
+    .eq('is_active', true);
+
+  // Primero los colores repetidos dentro del propio lote, después lo que ya
+  // existe en el sitio.
+  const { kept, dropped: sameBatchVariants } = collapseCandidateFamilies(dedupedByMlId);
+
+  const { fresh, skipped: skippedInCatalog } = partitionCandidates(
+    kept,
+    buildPublishedCatalog(publishedRows ?? [])
+  );
+
+  const skippedTotal =
+    skippedNotGreen + sameBatchVariants.length + skippedInCatalog.length;
+
+  if (fresh.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      inserted: 0,
+      skipped: skippedTotal,
+      skipped_not_green: skippedNotGreen,
+      skipped_same_batch_variants: sameBatchVariants.length,
+      skipped_already_in_catalog: skippedInCatalog.length,
+    });
+  }
+
   try {
-    const { error } = await admin.from('product_candidates').upsert(dedupedByMlId, {
+    const { error } = await admin.from('product_candidates').upsert(fresh, {
       onConflict: 'ml_product_id',
     });
 
@@ -116,5 +166,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ok: true, inserted: dedupedByMlId.length, skipped });
+  return NextResponse.json({
+    ok: true,
+    inserted: fresh.length,
+    skipped: skippedTotal,
+    skipped_not_green: skippedNotGreen,
+    skipped_same_batch_variants: sameBatchVariants.length,
+    skipped_already_in_catalog: skippedInCatalog.length,
+  });
 }
