@@ -1,5 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
+import { enrichFromMl, getMlToken } from '@/lib/ml-enrichment';
+
+interface CatalogRow {
+  id: string;
+  ml_product_id: string;
+  seller_id: number | null;
+  price: number;
+  is_active: boolean;
+  name: string;
+  brand: string | null;
+  specs: Record<string, string> | null;
+  description: string | null;
+}
+
+/**
+ * Un producto queda incompleto cuando se aprobó antes de que existiera el
+ * enriquecimiento, o cuando ML estaba caído justo en ese momento. Sin esto
+ * el hueco no se cerraba nunca: la ficha se publicaba con la tabla de
+ * especificaciones vacía y sin marca, y el comparador no tenía nada que
+ * comparar.
+ */
+function missingCatalogData(product: CatalogRow): boolean {
+  return (
+    !product.brand?.trim() ||
+    !product.description?.trim() ||
+    Object.keys(product.specs ?? {}).length === 0
+  );
+}
 
 /**
  * Corre una vez al día vía Vercel Cron (ver vercel.json), para todo producto
@@ -15,6 +43,10 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
  *     el sitio pero se conserva el historial, y queda pendiente de que se
  *     genere un link nuevo a mano si hay reemplazo. Si vuelve a cumplir, se
  *     reactiva solo.
+ *  3. Rellena marca, specs y descripción en los productos que quedaron
+ *     incompletos (aprobados antes de que existiera el enriquecimiento, o
+ *     con ML caído en ese momento). Solo consulta ML de más para los que
+ *     tienen huecos, no para todo el catálogo.
  * No toca productos cargados a mano sin ml_product_id.
  */
 export async function GET(req: NextRequest) {
@@ -28,29 +60,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Supabase admin no configurado' }, { status: 500 });
   }
 
-  const { data: products, error: fetchError } = await admin
+  const { data, error: fetchError } = await admin
     .from('products')
-    .select('id, ml_product_id, seller_id, price, is_active')
+    .select('id, ml_product_id, seller_id, price, is_active, name, brand, specs, description')
     .not('ml_product_id', 'is', null);
+
+  const products = data as CatalogRow[] | null;
 
   if (fetchError) {
     return NextResponse.json({ error: fetchError.message }, { status: 500 });
   }
   if (!products || products.length === 0) {
-    return NextResponse.json({ ok: true, updated: 0, deactivated: 0, failed: 0 });
+    return NextResponse.json({ ok: true, updated: 0, deactivated: 0, repaired: 0, failed: 0 });
   }
 
-  const tokenRes = await fetch('https://api.mercadolibre.com/oauth/token', {
-    method: 'POST',
-    headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: process.env.ML_CLIENT_ID ?? '',
-      client_secret: process.env.ML_CLIENT_SECRET ?? '',
-    }),
-  }).then((r) => r.json());
-
-  const accessToken = tokenRes.access_token;
+  const accessToken = await getMlToken();
   if (!accessToken) {
     return NextResponse.json({ error: 'No se pudo obtener token de ML' }, { status: 502 });
   }
@@ -58,6 +82,7 @@ export async function GET(req: NextRequest) {
 
   let updated = 0;
   let deactivated = 0;
+  let repaired = 0;
   let failed = 0;
 
   for (const product of products) {
@@ -96,6 +121,23 @@ export async function GET(req: NextRequest) {
         patch.is_active = isGreen;
       }
 
+      // Solo pega el request extra a ML si a este producto le falta algo:
+      // el catálogo sano no paga el costo.
+      if (missingCatalogData(product)) {
+        const enrichment = await enrichFromMl(product.ml_product_id, accessToken, product.name);
+        if (enrichment.brand && !product.brand?.trim()) patch.brand = enrichment.brand;
+        if (enrichment.description && !product.description?.trim()) {
+          patch.description = enrichment.description;
+        }
+        if (
+          Object.keys(enrichment.specs).length > 0 &&
+          Object.keys(product.specs ?? {}).length === 0
+        ) {
+          patch.specs = enrichment.specs;
+        }
+        if (patch.brand || patch.description || patch.specs) repaired++;
+      }
+
       if (Object.keys(patch).length > 0) {
         const { error: updateError } = await admin.from('products').update(patch).eq('id', product.id);
         if (updateError) throw updateError;
@@ -108,5 +150,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, updated, deactivated, failed, total: products.length });
+  return NextResponse.json({ ok: true, updated, deactivated, repaired, failed, total: products.length });
 }
