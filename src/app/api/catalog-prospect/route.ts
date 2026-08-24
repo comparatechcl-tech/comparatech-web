@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
+import { buildDescription } from '@/lib/product-description';
 
 interface MlAttribute {
   name: string;
@@ -33,12 +34,13 @@ async function getMlToken(): Promise<string | null> {
 // arme esto en el body crudo del HTTP module (ahí es donde se rompió antes
 // la fórmula de reputación, por comillas anidadas). Acá es TypeScript
 // normal, mucho más confiable.
-const FALLBACK_ENRICHMENT = { brand: null, specs: {} } as const;
+const FALLBACK_ENRICHMENT = { brand: null, specs: {}, description: '' } as const;
 
 async function enrichFromMl(
   mlProductId: string,
-  token: string
-): Promise<{ brand: string | null; specs: Record<string, string> }> {
+  token: string,
+  name: string
+): Promise<{ brand: string | null; specs: Record<string, string>; description: string }> {
   try {
     const res = await fetchWithTimeout(`https://api.mercadolibre.com/products/${mlProductId}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -60,7 +62,16 @@ async function enrichFromMl(
       seenValues.add(attr.value_name);
     }
 
-    return { brand: brandAttr?.value_name ?? null, specs };
+    const brand = brandAttr?.value_name ?? null;
+    const features: string[] = (data?.main_features ?? [])
+      .map((f: { text?: string }) => f?.text)
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    return {
+      brand,
+      specs,
+      description: buildDescription({ name, brand, features, specs }),
+    };
   } catch {
     // ML lento/caído para este producto puntual — no debe tirar abajo todo
     // el batch, se guarda el candidato igual sin marca/specs enriquecidas.
@@ -83,8 +94,9 @@ async function enrichFromMl(
  * `seller_reputation_raw` es el `level_id` crudo de ML (ej. "5_green") — el
  * cálculo de "verde" se hace acá, no en Make, para no depender de fórmulas
  * con comillas anidadas en el body crudo del módulo HTTP. Por la misma
- * razón, `brand` y `specs` reales se completan acá también (ver
- * enrichFromMl) en vez de intentar armarlos dentro del body crudo de Make.
+ * razón, `brand`, `specs` y `description` reales se completan acá también
+ * (ver enrichFromMl) en vez de intentar armarlos dentro del body crudo de
+ * Make.
  */
 export async function POST(req: NextRequest) {
   if (process.env.ENABLE_CATALOG_PROSPECT !== 'true') {
@@ -127,16 +139,26 @@ export async function POST(req: NextRequest) {
 
   const accepted = await Promise.all(
     greenCandidates.map(
-      async (c: { seller_reputation_raw?: string; ml_product_id: string; [key: string]: unknown }) => {
+      async (c: {
+        seller_reputation_raw?: string;
+        ml_product_id: string;
+        name: string;
+        [key: string]: unknown;
+      }) => {
         const { seller_reputation_raw, ...rest } = c;
         const enrichment = mlToken
-          ? await enrichFromMl(c.ml_product_id, mlToken)
-          : { brand: null, specs: {} };
+          ? await enrichFromMl(c.ml_product_id, mlToken, c.name)
+          : FALLBACK_ENRICHMENT;
         return {
           ...rest,
           seller_reputation: 'verde',
           brand: enrichment.brand,
           specs: enrichment.specs,
+          // Make no manda descripción y la columna default es '' — sin esto
+          // la ficha del producto termina publicada sin meta description,
+          // que es justo lo que Google necesita para posicionarla.
+          description:
+            enrichment.description || (typeof rest.description === 'string' ? rest.description : ''),
         };
       }
     )
