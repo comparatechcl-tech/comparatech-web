@@ -6,6 +6,7 @@ import {
   collapseCandidateFamilies,
   partitionCandidates,
 } from '@/lib/prospect-filter';
+import { categoryFromDomain } from '@/lib/categories';
 
 /**
  * Recibe candidatos prospectados por Make (highlights → products → items →
@@ -98,6 +99,15 @@ export async function POST(req: NextRequest) {
           // Agrupa las variantes de color del mismo modelo, para no publicar
           // la misma silla gamer dos veces en el home.
           ml_family_id: enrichment.familyId,
+          ml_domain_id: enrichment.domainId,
+          // La categoría que manda Make sale del bloque de destacados y es
+          // demasiado gruesa: así entraban los audífonos como "celulares" y
+          // una silla gamer como "computación". El domain_id de ML dice el
+          // tipo exacto de producto. Si no lo tenemos mapeado, se respeta lo
+          // que vino en el candidato.
+          category:
+            categoryFromDomain(enrichment.domainId) ??
+            (typeof rest.category === 'string' ? rest.category : 'electronica'),
           // Make no manda descripción y la columna default es '' — sin esto
           // la ficha del producto termina publicada sin meta description,
           // que es justo lo que Google necesita para posicionarla.
@@ -121,6 +131,9 @@ export async function POST(req: NextRequest) {
   // de revisión se llena todos los días con otros colores del mismo modelo
   // —una persona los abre y los rechaza uno por uno— aunque los listados
   // muestren una sola variante por familia de todas formas.
+  // A propósito NO se filtra por is_hidden: si alguien bajó un producto del
+  // sitio a mano, la decisión fue "no lo quiero", así que tampoco tiene que
+  // volver mañana a la cola de revisión como candidato nuevo.
   const { data: publishedRows } = await admin
     .from('products')
     .select('ml_product_id, ml_family_id, price')

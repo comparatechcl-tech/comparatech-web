@@ -13,10 +13,14 @@ export async function getAllProducts(): Promise<Product[]> {
   const supabase = getSupabase();
   if (!supabase) return MOCK_PRODUCTS;
 
+  // is_active lo maneja el cron (el vendedor dejó de ofrecer el producto);
+  // is_hidden es una decisión humana desde /admin/productos. Para el sitio
+  // público las dos significan lo mismo: no se muestra.
   const { data, error } = await supabase
     .from('products')
     .select('*')
     .eq('is_active', true)
+    .eq('is_hidden', false)
     .order('created_at', { ascending: false });
 
   if (error || !data) return MOCK_PRODUCTS;
@@ -34,6 +38,7 @@ export async function getProductBySlug(slug: string): Promise<Product | null> {
     .select('*')
     .eq('slug', slug)
     .eq('is_active', true)
+    .eq('is_hidden', false)
     .single();
 
   if (error || !data) return null;

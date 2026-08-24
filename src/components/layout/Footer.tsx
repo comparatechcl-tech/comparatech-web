@@ -1,9 +1,9 @@
 import Link from 'next/link';
-import { CATEGORIES } from '@/lib/types';
+import { CategoryInfo } from '@/lib/types';
 import { SocialLinks } from '@/components/brand/SocialLinks';
 import { Logo } from '@/components/brand/Logo';
 
-export function Footer() {
+export function Footer({ categories }: { categories: CategoryInfo[] }) {
   return (
     <footer className="border-t border-border bg-surface">
       <div className="mx-auto max-w-6xl px-4 py-10 text-sm text-muted">
@@ -28,7 +28,7 @@ export function Footer() {
           <div>
             <p className="mb-2 font-medium text-fg">Categorías</p>
             <ul className="space-y-1">
-              {CATEGORIES.map((c) => (
+              {categories.map((c) => (
                 <li key={c.slug}>
                   <Link href={`/categoria/${c.slug}`} className="transition hover:text-accent">
                     {c.name}

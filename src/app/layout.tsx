@@ -5,6 +5,7 @@ import './globals.css';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { SITE_URL } from '@/lib/site';
+import { getSiteCategories } from '@/lib/queries/site-categories';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -29,7 +30,9 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', images: ['/og-image.png'] },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const categories = await getSiteCategories();
+
   return (
     <html lang="es-CL" className={inter.variable} suppressHydrationWarning>
       <body className="flex min-h-screen flex-col font-body">
@@ -45,9 +48,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 'radial-gradient(32% 30% at 100% 85%, rgba(0,212,255,0.10) 0%, rgba(0,212,255,0) 60%)',
             }}
           />
-          <Header />
+          <Header categories={categories} />
           <main className="flex-1">{children}</main>
-          <Footer />
+          <Footer categories={categories} />
         </ThemeProvider>
       </body>
     </html>

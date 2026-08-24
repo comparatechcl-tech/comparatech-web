@@ -2,10 +2,15 @@
 
 import { useState, useTransition } from 'react';
 import Image from 'next/image';
-import { Copy, Check, ExternalLink } from 'lucide-react';
+import { Copy, Check, ExternalLink, EyeOff, Eye } from 'lucide-react';
 import { Product, RrssStatus } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
-import { setRrssStatus, updateAffiliateUrl, verifyAffiliateLink } from './actions';
+import {
+  setProductHidden,
+  setRrssStatus,
+  updateAffiliateUrl,
+  verifyAffiliateLink,
+} from './actions';
 
 const RRSS_OPTIONS: { value: RrssStatus; label: string }[] = [
   { value: 'sin_usar', label: 'Sin usar' },
@@ -36,7 +41,22 @@ export function ProductAdminCard({
   const [affiliateUrl, setAffiliateUrl] = useState(product.affiliate_url);
   const [linkCheck, setLinkCheck] = useState<LinkCheck>({ status: 'idle' });
   const [saved, setSaved] = useState(false);
+  const [isHidden, setIsHidden] = useState(product.is_hidden ?? false);
   const [isPending, startTransition] = useTransition();
+
+  function handleToggleHidden() {
+    const next = !isHidden;
+    const previous = isHidden;
+    setIsHidden(next);
+    setError(null);
+    startTransition(async () => {
+      const result = await setProductHidden(product.id, next);
+      if (!result.ok) {
+        setIsHidden(previous);
+        setError(result.error);
+      }
+    });
+  }
 
   function handleVerifyLink() {
     setLinkCheck({ status: 'checking' });
@@ -89,7 +109,11 @@ export function ProductAdminCard({
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4">
+    <div
+      className={`flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 transition ${
+        isHidden ? 'opacity-55' : ''
+      }`}
+    >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
         {onToggleSelect && (
           <input
@@ -114,6 +138,7 @@ export function ProductAdminCard({
           <p className="mt-1 text-xs text-muted">
             {product.category} · {new Date(product.created_at).toLocaleDateString('es-CL')}
             {!product.is_active && <span className="ml-2 text-red-400">Inactivo</span>}
+            {isHidden && <span className="ml-2 text-amber-400">Oculto del sitio</span>}
           </p>
           <a
             href={product.affiliate_url}
@@ -146,6 +171,18 @@ export function ProductAdminCard({
           >
             {copied ? <Check size={13} className="text-accent" /> : <Copy size={13} />}
             {copied ? 'Copiado' : 'Copiar para RRSS'}
+          </button>
+          <button
+            onClick={handleToggleHidden}
+            disabled={isPending}
+            className={`flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-50 ${
+              isHidden
+                ? 'border-accent/40 text-accent hover:bg-accent/10'
+                : 'border-border text-muted hover:text-red-400'
+            }`}
+          >
+            {isHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+            {isHidden ? 'Volver a publicar' : 'Ocultar del sitio'}
           </button>
         </div>
       </div>

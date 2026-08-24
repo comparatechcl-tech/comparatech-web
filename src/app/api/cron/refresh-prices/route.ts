@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { enrichFromMl, getMlToken } from '@/lib/ml-enrichment';
+import { categoryFromDomain } from '@/lib/categories';
 
 interface CatalogRow {
   id: string;
@@ -13,6 +14,9 @@ interface CatalogRow {
   specs: Record<string, string> | null;
   description: string | null;
   ml_family_id: string | null;
+  ml_domain_id: string | null;
+  is_hidden: boolean;
+  category: string;
 }
 
 /**
@@ -27,6 +31,7 @@ function missingCatalogData(product: CatalogRow): boolean {
     !product.brand?.trim() ||
     !product.description?.trim() ||
     !product.ml_family_id ||
+    !product.ml_domain_id ||
     Object.keys(product.specs ?? {}).length === 0
   );
 }
@@ -48,7 +53,10 @@ function missingCatalogData(product: CatalogRow): boolean {
  *  3. Rellena marca, specs, descripción y familia en los productos que quedaron
  *     incompletos (aprobados antes de que existiera el enriquecimiento, o
  *     con ML caído en ese momento). Solo consulta ML de más para los que
- *     tienen huecos, no para todo el catálogo.
+ *     tienen huecos, no para todo el catálogo, y de paso recategoriza
+ *     segun el domain_id de ML.
+ *  4. No toca los productos ocultados a mano (is_hidden): esa decision es
+ *     humana y el cron la respeta.
  * No toca productos cargados a mano sin ml_product_id.
  */
 export async function GET(req: NextRequest) {
@@ -64,7 +72,9 @@ export async function GET(req: NextRequest) {
 
   const { data, error: fetchError } = await admin
     .from('products')
-    .select('id, ml_product_id, seller_id, price, is_active, name, brand, specs, description, ml_family_id')
+    .select(
+      'id, ml_product_id, seller_id, price, is_active, name, brand, specs, description, ml_family_id, ml_domain_id, is_hidden, category'
+    )
     .not('ml_product_id', 'is', null);
 
   const products = data as CatalogRow[] | null;
@@ -73,7 +83,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: fetchError.message }, { status: 500 });
   }
   if (!products || products.length === 0) {
-    return NextResponse.json({ ok: true, updated: 0, deactivated: 0, repaired: 0, failed: 0 });
+    return NextResponse.json({ ok: true, updated: 0, deactivated: 0, repaired: 0, hidden: 0, failed: 0 });
   }
 
   const accessToken = await getMlToken();
@@ -85,9 +95,18 @@ export async function GET(req: NextRequest) {
   let updated = 0;
   let deactivated = 0;
   let repaired = 0;
+  let hidden = 0;
   let failed = 0;
 
   for (const product of products) {
+    // Bajado a mano desde /admin/productos. Sin este corte, el cron veria
+    // que el vendedor sigue vigente y lo volveria a publicar al dia
+    // siguiente, pisando una decision humana.
+    if (product.is_hidden) {
+      hidden++;
+      continue;
+    }
+
     try {
       const itemsRes = await fetch(
         `https://api.mercadolibre.com/products/${product.ml_product_id}/items`,
@@ -140,7 +159,22 @@ export async function GET(req: NextRequest) {
         if (enrichment.familyId && !product.ml_family_id) {
           patch.ml_family_id = enrichment.familyId;
         }
-        if (patch.brand || patch.description || patch.specs || patch.ml_family_id) repaired++;
+        if (enrichment.domainId && !product.ml_domain_id) {
+          patch.ml_domain_id = enrichment.domainId;
+          // La categoría se recalcula solo cuando aprendemos el dominio, que
+          // es más preciso que el que venía del bloque de destacados de ML.
+          const mapped = categoryFromDomain(enrichment.domainId);
+          if (mapped && mapped !== product.category) patch.category = mapped;
+        }
+        if (
+          patch.brand ||
+          patch.description ||
+          patch.specs ||
+          patch.ml_family_id ||
+          patch.ml_domain_id
+        ) {
+          repaired++;
+        }
       }
 
       if (Object.keys(patch).length > 0) {
@@ -155,5 +189,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, updated, deactivated, repaired, failed, total: products.length });
+  return NextResponse.json({ ok: true, updated, deactivated, repaired, hidden, failed, total: products.length });
 }

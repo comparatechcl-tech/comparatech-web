@@ -3,24 +3,56 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { Menu, X, Smartphone, Laptop, Headphones, Scale, Search, Info } from 'lucide-react';
+import {
+  Menu,
+  X,
+  Smartphone,
+  Laptop,
+  Headphones,
+  Cpu,
+  Sofa,
+  WashingMachine,
+  Package,
+  Scale,
+  Search,
+  Info,
+} from 'lucide-react';
 import { Logo } from '@/components/brand/Logo';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
+import { CategoryInfo } from '@/lib/types';
 
-const NAV_LINKS = [
-  { href: '/categoria/celulares', label: 'Celulares', icon: Smartphone },
-  { href: '/categoria/computacion', label: 'Computación', icon: Laptop },
-  { href: '/categoria/electronica', label: 'Electrónica', icon: Headphones },
+const CATEGORY_ICONS: Record<string, typeof Smartphone> = {
+  celulares: Smartphone,
+  computacion: Laptop,
+  audio: Headphones,
+  electronica: Cpu,
+  hogar: Sofa,
+  electrodomesticos: WashingMachine,
+};
+
+const FIXED_LINKS = [
   { href: '/comparador', label: 'Comparador', icon: Scale },
   { href: '/buscar', label: 'Buscar', icon: Search },
   { href: '/nosotros', label: 'Nosotros', icon: Info },
 ];
 
-export function Header() {
+/**
+ * `categories` llega desde el layout (server component) con las categorías
+ * que hoy tienen productos, en vez de una lista fija. Antes el menú ofrecía
+ * "Electrónica" sin un solo producto adentro.
+ */
+export function Header({ categories }: { categories: CategoryInfo[] }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
-  const links = NAV_LINKS;
+  const links = [
+    ...categories.map((c) => ({
+      href: `/categoria/${c.slug}`,
+      label: c.name,
+      icon: CATEGORY_ICONS[c.slug] ?? Package,
+    })),
+    ...FIXED_LINKS,
+  ];
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-bg/80 backdrop-blur-md">

@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { Search, Check, Tags, ChartNoAxesColumn, Link2 } from 'lucide-react';
+import { Search, Check, Tags, ChartNoAxesColumn, Link2, Smartphone, Headphones, Sofa, WashingMachine, Package } from 'lucide-react';
 import { getFeaturedProducts } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FounderBio } from '@/components/brand/FounderBio';
 import { QuickCompare } from '@/components/compare/QuickCompare';
+import { getSiteCategories } from '@/lib/queries/site-categories';
 
 // Revalida cada 5 minutos: así el catálogo se actualiza solo (sin tener que
 // hacer un redeploy manual) cuando se cargan productos nuevos en Supabase.
@@ -24,39 +25,68 @@ const WHY_US = [
   { icon: Link2, title: 'Enlaces directos', desc: 'Ve directamente a comprar en Mercado Libre.' },
 ];
 
-const CATEGORY_CARDS = [
-  {
-    href: '/categoria/celulares',
+/**
+ * Presentación de cada categoría en el home. Solo hay ilustración propia
+ * para algunas; el resto cae al ícono de lucide, para que una categoría
+ * nueva pueda aparecer sin esperar a que alguien dibuje su arte.
+ */
+const CATEGORY_STYLE: Record<
+  string,
+  { image?: string; icon?: typeof Smartphone; glow: string; desc: string }
+> = {
+  celulares: {
     image: '/category-celulares.png',
     glow: 'rgba(0,212,255,0.45)',
-    title: 'Celulares',
     desc: 'Compara los mejores smartphones',
   },
-  {
-    href: '/categoria/computacion',
+  computacion: {
     image: '/category-computacion.png',
     glow: 'rgba(168,85,247,0.4)',
-    title: 'Computación',
     desc: 'Notebooks, componentes y más',
   },
-  {
-    href: '/categoria/electronica',
+  electronica: {
     image: '/category-electronica.png',
     glow: 'rgba(16,217,160,0.4)',
-    title: 'Electrónica',
-    desc: 'Audífonos, parlantes, wearables',
+    desc: 'Cargadores, antenas y wearables',
   },
-  {
-    href: '/comparador',
-    image: '/category-comparador.png',
-    glow: 'rgba(255,230,0,0.4)',
-    title: 'Comparador',
-    desc: 'Compara 2 productos en detalle',
+  audio: {
+    icon: Headphones,
+    glow: 'rgba(0,212,255,0.4)',
+    desc: 'Audífonos, parlantes y más',
   },
-];
+  hogar: {
+    icon: Sofa,
+    glow: 'rgba(255,138,76,0.4)',
+    desc: 'Muebles y artículos para la casa',
+  },
+  electrodomesticos: {
+    icon: WashingMachine,
+    glow: 'rgba(120,190,255,0.4)',
+    desc: 'Línea blanca y cocina',
+  },
+};
+
+const FALLBACK_STYLE = { icon: Package, glow: 'rgba(148,163,184,0.35)', desc: 'Ver productos' };
+
+const COMPARADOR_CARD = {
+  href: '/comparador',
+  image: '/category-comparador.png',
+  glow: 'rgba(255,230,0,0.4)',
+  title: 'Comparador',
+  desc: 'Compara 2 productos en detalle',
+};
 
 export default async function HomePage() {
   const featured = await getFeaturedProducts(8);
+  const categories = await getSiteCategories();
+
+  const categoryCards = [
+    ...categories.map((c) => {
+      const style = CATEGORY_STYLE[c.slug] ?? FALLBACK_STYLE;
+      return { href: `/categoria/${c.slug}`, title: c.name, ...style };
+    }),
+    COMPARADOR_CARD,
+  ];
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
@@ -127,7 +157,8 @@ export default async function HomePage() {
       {/* Categorías */}
       <section className="mb-16">
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {CATEGORY_CARDS.map((c) => {
+          {categoryCards.map((c) => {
+            const CardIcon = 'icon' in c ? c.icon : undefined;
             return (
               <Link
                 key={c.href}
@@ -140,7 +171,11 @@ export default async function HomePage() {
                     className="absolute inset-0 rounded-full blur-xl"
                     style={{ background: c.glow }}
                   />
-                  <Image src={c.image} alt="" width={64} height={64} className="relative object-contain" />
+                  {'image' in c && c.image ? (
+                    <Image src={c.image} alt="" width={64} height={64} className="relative object-contain" />
+                  ) : (
+                    CardIcon && <CardIcon size={34} className="relative text-accent" strokeWidth={1.5} />
+                  )}
                 </span>
                 <div>
                   <p className="font-heading text-base font-semibold text-fg">{c.title}</p>

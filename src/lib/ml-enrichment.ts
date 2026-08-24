@@ -25,6 +25,8 @@ export interface Enrichment {
   description: string;
   /** parent_id de ML: agrupa las variantes (colores) del mismo modelo. */
   familyId: string | null;
+  /** domain_id de ML ("MLC-HEADPHONES"): el tipo exacto de producto. */
+  domainId: string | null;
 }
 
 export const EMPTY_ENRICHMENT: Enrichment = {
@@ -32,6 +34,7 @@ export const EMPTY_ENRICHMENT: Enrichment = {
   specs: {},
   description: '',
   familyId: null,
+  domainId: null,
 };
 
 /**
@@ -132,6 +135,7 @@ export function enrichFromMlProduct(mlProduct: unknown, name: string): Enrichmen
     specs,
     description: buildDescription({ name, brand, features: extractFeatures(mlProduct), specs }),
     familyId: (mlProduct as { parent_id?: string })?.parent_id ?? null,
+    domainId: (mlProduct as { domain_id?: string })?.domain_id ?? null,
   };
 }
 

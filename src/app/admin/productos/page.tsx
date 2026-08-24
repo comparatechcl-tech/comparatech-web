@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
-import { Product, RrssStatus, CATEGORIES } from '@/lib/types';
+import { Product, RrssStatus } from '@/lib/types';
+import { CATEGORIES } from '@/lib/categories';
 import { ProductsList } from './ProductsList';
 
 export const dynamic = 'force-dynamic';

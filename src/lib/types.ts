@@ -16,8 +16,13 @@ export interface Product {
   seller_reputation: SellerReputation;
   seller_sales_count: number;
   is_featured: boolean;
+  /** Lo maneja el cron: false cuando el vendedor dejó de ofrecer el producto. */
   is_active: boolean;
+  /** Decisión humana desde /admin/productos. El cron no la toca. */
+  is_hidden: boolean;
   ml_product_id: string | null;
+  /** Tipo de producto según ML ("MLC-HEADPHONES"), base de la categoría. */
+  ml_domain_id: string | null;
   // Identificador de familia de ML (parent_id): todos los colores del mismo
   // modelo lo comparten. Permite mostrar una sola tarjeta por producto real.
   ml_family_id: string | null;
@@ -30,6 +35,7 @@ export interface ProductCandidate {
   id: string;
   ml_product_id: string;
   ml_family_id: string | null;
+  ml_domain_id: string | null;
   name: string;
   brand: string | null;
   category: string;
@@ -52,11 +58,3 @@ export interface CategoryInfo {
   slug: string;
   name: string;
 }
-
-export const CATEGORIES: CategoryInfo[] = [
-  { slug: 'celulares', name: 'Celulares' },
-  { slug: 'computacion', name: 'Computación' },
-  { slug: 'electronica', name: 'Electrónica' },
-  { slug: 'hogar', name: 'Hogar' },
-  { slug: 'electrodomesticos', name: 'Electrodomésticos' },
-];
