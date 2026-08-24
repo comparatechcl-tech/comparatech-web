@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getAllProducts } from '@/lib/queries/products';
+import { getCatalogProducts } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FilterPanel } from '@/components/search/FilterPanel';
 import { formatDiscountPct } from '@/lib/format';
@@ -23,7 +23,7 @@ export default async function BuscarPage({
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const all = await getAllProducts();
+  const all = await getCatalogProducts();
 
   const q = params.q ? stripDiacritics(params.q.toLowerCase().trim()) : undefined;
   const brand = params.brand ? stripDiacritics(params.brand.toLowerCase().trim()) : undefined;

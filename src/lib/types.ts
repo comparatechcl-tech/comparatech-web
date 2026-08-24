@@ -18,6 +18,9 @@ export interface Product {
   is_featured: boolean;
   is_active: boolean;
   ml_product_id: string | null;
+  // Identificador de familia de ML (parent_id): todos los colores del mismo
+  // modelo lo comparten. Permite mostrar una sola tarjeta por producto real.
+  ml_family_id: string | null;
   seller_id: number | null;
   rrss_status: RrssStatus;
   created_at: string;
@@ -26,6 +29,7 @@ export interface Product {
 export interface ProductCandidate {
   id: string;
   ml_product_id: string;
+  ml_family_id: string | null;
   name: string;
   brand: string | null;
   category: string;

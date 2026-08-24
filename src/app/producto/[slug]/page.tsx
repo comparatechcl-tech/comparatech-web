@@ -1,11 +1,12 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import Image from 'next/image';
-import { getAllProducts, getProductBySlug } from '@/lib/queries/products';
+import { getAllProducts, getProductBySlug, getSiblingVariants } from '@/lib/queries/products';
 import { PriceTag } from '@/components/product/PriceTag';
 import { ProductSpecsTable } from '@/components/product/ProductSpecsTable';
 import { AffiliateButton } from '@/components/product/AffiliateButton';
 import { ProductJsonLd } from '@/components/seo/ProductJsonLd';
+import { VariantLinks } from '@/components/product/VariantLinks';
 import { resolveDescription } from '@/lib/product-description';
 import { truncateAtWord } from '@/lib/text';
 
@@ -60,6 +61,8 @@ export default async function ProductoPage({
   const product = await getProductBySlug(slug);
   if (!product) notFound();
 
+  const variants = await getSiblingVariants(product);
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">
       <ProductJsonLd product={product} />
@@ -89,6 +92,8 @@ export default async function ProductoPage({
         <h2 className="mb-3 font-heading text-lg font-semibold">Especificaciones</h2>
         <ProductSpecsTable product={product} />
       </div>
+
+      <VariantLinks variants={variants} />
     </div>
   );
 }

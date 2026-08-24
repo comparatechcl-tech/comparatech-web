@@ -40,8 +40,67 @@ export async function getProductBySlug(slug: string): Promise<Product | null> {
   return data as Product;
 }
 
-export async function getProductsByCategory(category: string): Promise<Product[]> {
+/**
+ * Clave con la que se agrupan las variantes de un mismo producto. ML entrega
+ * `parent_id` (guardado como ml_family_id) y todos los colores del mismo
+ * modelo lo comparten. Un producto sin familia —cargado a mano, o subido
+ * antes de que existiera la columna— es su propio grupo, así que nunca se
+ * pierde nada por no tener el dato.
+ */
+function variantKey(product: Product): string {
+  return product.ml_family_id || product.id;
+}
+
+/**
+ * Deja una sola tarjeta por producto real.
+ *
+ * El prospector trae cada color como un producto separado: había dos "Silla
+ * Gamer Vidita GX2000" idénticas en el home y dos audífonos Sleve Pulse ANC
+ * al mismo precio. De 11 productos publicados, 10 eran pares de variantes.
+ *
+ * Se muestra la más barata de cada familia, que es la que le sirve a quien
+ * compara precios — y en 3 de 5 familias los colores costaban distinto. Ante
+ * el mismo precio gana la más reciente, que es como venían ordenadas.
+ */
+export function collapseVariants(products: Product[]): Product[] {
+  const bestByFamily = new Map<string, Product>();
+
+  for (const product of products) {
+    const key = variantKey(product);
+    const current = bestByFamily.get(key);
+    if (!current || product.price < current.price) {
+      bestByFamily.set(key, product);
+    }
+  }
+
+  // Respeta el orden en que venían los productos, quedándose con el
+  // representante elegido de cada familia.
+  const chosen = new Set(bestByFamily.values());
+  return products.filter((p) => chosen.has(p));
+}
+
+/** Catálogo para listados: una tarjeta por producto real, sin variantes repetidas. */
+export async function getCatalogProducts(): Promise<Product[]> {
+  return collapseVariants(await getAllProducts());
+}
+
+/**
+ * Las otras variantes del mismo producto (otros colores), para ofrecerlas en
+ * la ficha. Sin esto, colapsar los listados escondería opciones reales: que
+ * los Redmi Buds rosados sean más baratos no significa que alguien no quiera
+ * los negros.
+ */
+export async function getSiblingVariants(product: Product): Promise<Product[]> {
+  if (!product.ml_family_id) return [];
+
   const all = await getAllProducts();
+  return all.filter(
+    (p) => p.id !== product.id && p.ml_family_id === product.ml_family_id
+  );
+}
+
+export async function getProductsByCategory(category: string): Promise<Product[]> {
+  const all = await getCatalogProducts();
   return all.filter((p) => p.category === category);
 }
 
@@ -50,6 +109,6 @@ export async function getProductsByCategory(category: string): Promise<Product[]
 // aprobados desde /admin/candidatos deben verse en el Home de inmediato,
 // no quedar invisibles hasta marcarlos a mano como destacados.
 export async function getFeaturedProducts(limit = 8): Promise<Product[]> {
-  const all = await getAllProducts();
+  const all = await getCatalogProducts();
   return all.slice(0, limit);
 }

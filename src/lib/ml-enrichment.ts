@@ -23,9 +23,16 @@ export interface Enrichment {
   brand: string | null;
   specs: Record<string, string>;
   description: string;
+  /** parent_id de ML: agrupa las variantes (colores) del mismo modelo. */
+  familyId: string | null;
 }
 
-export const EMPTY_ENRICHMENT: Enrichment = { brand: null, specs: {}, description: '' };
+export const EMPTY_ENRICHMENT: Enrichment = {
+  brand: null,
+  specs: {},
+  description: '',
+  familyId: null,
+};
 
 /**
  * Atributos que no entran a la tabla de especificaciones. ML devuelve entre
@@ -124,6 +131,7 @@ export function enrichFromMlProduct(mlProduct: unknown, name: string): Enrichmen
     brand,
     specs,
     description: buildDescription({ name, brand, features: extractFeatures(mlProduct), specs }),
+    familyId: (mlProduct as { parent_id?: string })?.parent_id ?? null,
   };
 }
 

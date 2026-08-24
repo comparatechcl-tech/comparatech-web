@@ -12,6 +12,7 @@ interface CatalogRow {
   brand: string | null;
   specs: Record<string, string> | null;
   description: string | null;
+  ml_family_id: string | null;
 }
 
 /**
@@ -25,6 +26,7 @@ function missingCatalogData(product: CatalogRow): boolean {
   return (
     !product.brand?.trim() ||
     !product.description?.trim() ||
+    !product.ml_family_id ||
     Object.keys(product.specs ?? {}).length === 0
   );
 }
@@ -43,7 +45,7 @@ function missingCatalogData(product: CatalogRow): boolean {
  *     el sitio pero se conserva el historial, y queda pendiente de que se
  *     genere un link nuevo a mano si hay reemplazo. Si vuelve a cumplir, se
  *     reactiva solo.
- *  3. Rellena marca, specs y descripción en los productos que quedaron
+ *  3. Rellena marca, specs, descripción y familia en los productos que quedaron
  *     incompletos (aprobados antes de que existiera el enriquecimiento, o
  *     con ML caído en ese momento). Solo consulta ML de más para los que
  *     tienen huecos, no para todo el catálogo.
@@ -62,7 +64,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error: fetchError } = await admin
     .from('products')
-    .select('id, ml_product_id, seller_id, price, is_active, name, brand, specs, description')
+    .select('id, ml_product_id, seller_id, price, is_active, name, brand, specs, description, ml_family_id')
     .not('ml_product_id', 'is', null);
 
   const products = data as CatalogRow[] | null;
@@ -135,7 +137,10 @@ export async function GET(req: NextRequest) {
         ) {
           patch.specs = enrichment.specs;
         }
-        if (patch.brand || patch.description || patch.specs) repaired++;
+        if (enrichment.familyId && !product.ml_family_id) {
+          patch.ml_family_id = enrichment.familyId;
+        }
+        if (patch.brand || patch.description || patch.specs || patch.ml_family_id) repaired++;
       }
 
       if (Object.keys(patch).length > 0) {

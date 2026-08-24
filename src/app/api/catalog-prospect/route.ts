@@ -77,6 +77,9 @@ export async function POST(req: NextRequest) {
           seller_reputation: 'verde',
           brand: enrichment.brand,
           specs: enrichment.specs,
+          // Agrupa las variantes de color del mismo modelo, para no publicar
+          // la misma silla gamer dos veces en el home.
+          ml_family_id: enrichment.familyId,
           // Make no manda descripción y la columna default es '' — sin esto
           // la ficha del producto termina publicada sin meta description,
           // que es justo lo que Google necesita para posicionarla.

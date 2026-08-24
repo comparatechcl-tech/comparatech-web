@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getAllProducts } from '@/lib/queries/products';
+import { getCatalogProducts } from '@/lib/queries/products';
 import { CompareClient } from '@/components/compare/CompareClient';
 
 export const metadata: Metadata = {
@@ -15,7 +15,7 @@ export default async function ComparadorPage({
   searchParams: Promise<{ a?: string; b?: string }>;
 }) {
   const { a, b } = await searchParams;
-  const products = await getAllProducts();
+  const products = await getCatalogProducts();
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">
