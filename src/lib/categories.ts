@@ -49,6 +49,7 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   'MLC-COMPUTER_MICE': 'computacion',
   'MLC-3D_PRINTERS': 'computacion',
   'MLC-3D_PRINTER_FILAMENTS': 'computacion',
+  'MLC-MEMORY_CARDS': 'computacion',
   'MLC-TABLETS': 'computacion',
 
   // Electrónica
