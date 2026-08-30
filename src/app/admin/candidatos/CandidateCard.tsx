@@ -93,7 +93,9 @@ export function CandidateCard({
         >
           Buscar en Mercado Libre ↗
         </a>
-        <div className="mt-1 flex gap-2">
+        {/* En un teléfono, input y botón lado a lado dejaban el campo del
+            link con menos de la mitad del ancho. Se apilan hasta sm. */}
+        <div className="mt-1 flex flex-col gap-2 sm:flex-row">
           <input
             type="url"
             placeholder="Pega acá el link de afiliado real"

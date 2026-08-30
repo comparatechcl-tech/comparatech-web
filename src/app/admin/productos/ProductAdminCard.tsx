@@ -188,7 +188,9 @@ export function ProductAdminCard({
       </div>
 
       <div className="flex flex-col gap-1.5 border-t border-border pt-3">
-        <div className="flex gap-2">
+        {/* Tres controles en fila dejaban el campo del link ilegible en un
+            teléfono. Se apilan hasta sm, donde ya hay ancho de sobra. */}
+        <div className="flex flex-col gap-2 sm:flex-row">
           <input
             type="url"
             value={affiliateUrl}
@@ -201,14 +203,14 @@ export function ProductAdminCard({
           <button
             onClick={handleVerifyLink}
             disabled={!affiliateUrl.trim() || linkCheck.status === 'checking'}
-            className="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex-1 sm:flex-none sm:shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
           >
             {linkCheck.status === 'checking' ? 'Verificando…' : 'Verificar'}
           </button>
           <button
             onClick={handleSaveLink}
             disabled={!affiliateUrl.trim() || affiliateUrl === product.affiliate_url || isPending}
-            className="shrink-0 rounded-md bg-accent px-3 py-2 text-xs font-medium text-ink transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex-1 sm:flex-none sm:shrink-0 rounded-md bg-accent px-3 py-2 text-xs font-medium text-ink transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {saved ? 'Guardado ✓' : 'Guardar'}
           </button>
