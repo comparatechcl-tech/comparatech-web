@@ -36,6 +36,15 @@ const MUTED = '#64748b';
 const BORDER = '#e2e8f0';
 const ACCENT = '#0e7490';
 
+/**
+ * Elige entre singular y plural. Existe para no volver a escribir frases
+ * como "4 productos salió del sitio": pluralizar solo el sustantivo con un
+ * `${n === 1 ? '' : 's'}` deja el verbo en singular.
+ */
+function plural(count: number, singular: string, many: string): string {
+  return count === 1 ? singular : many;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -49,7 +58,7 @@ export function buildDigestSubject(input: DigestInput): string {
 
   const parts: string[] = [];
   if (newCandidates.length > 0) {
-    parts.push(`${newCandidates.length} producto${newCandidates.length === 1 ? '' : 's'} nuevo${newCandidates.length === 1 ? '' : 's'}`);
+    parts.push(`${newCandidates.length} ${plural(newCandidates.length, 'producto nuevo', 'productos nuevos')}`);
   }
   if (pendingTotal > 0) {
     parts.push(`${pendingTotal} por revisar`);
@@ -104,11 +113,18 @@ export function buildDigestHtml(input: DigestInput): string {
       ? `
       <div style="margin-top:28px;padding:14px 16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;">
         <div style="font-size:14px;color:#9a3412;font-weight:600;">
-          ${needsAttention.length} producto${needsAttention.length === 1 ? '' : 's'} salió del sitio
+          ${needsAttention.length}
+          ${plural(needsAttention.length, 'producto necesita', 'productos necesitan')}
+          un link nuevo
         </div>
         <div style="font-size:13px;color:#9a3412;margin-top:4px;line-height:1.5;">
-          El vendedor dejó de ofrecerlo o el link quedó apuntando a otra oferta.
-          Hay que generarles un link nuevo desde Mercado Libre.
+          ${plural(
+            needsAttention.length,
+            'Dejó de mostrarse en el sitio porque el vendedor ya no lo ofrece, o porque su link apunta a otra oferta.',
+            'Dejaron de mostrarse en el sitio porque el vendedor ya no los ofrece, o porque sus links apuntan a otra oferta.'
+          )}
+          ${plural(needsAttention.length, 'Se recupera', 'Se recuperan')} generando el link
+          de nuevo desde Mercado Libre.
         </div>
         <ul style="margin:8px 0 0;padding-left:18px;font-size:13px;color:#9a3412;">
           ${needsAttention.map((p) => `<li style="margin:2px 0;">${escapeHtml(p.name)}</li>`).join('')}
@@ -131,22 +147,29 @@ export function buildDigestHtml(input: DigestInput): string {
           <div style="font-size:13px;color:${MUTED};margin-top:2px;">Resumen del catálogo</div>
 
           <div style="margin-top:20px;padding:18px;background:${BG};border-radius:10px;text-align:center;">
-            <div style="font-size:34px;font-weight:700;color:${TEXT};line-height:1;">${pendingTotal}</div>
-            <div style="font-size:13px;color:${MUTED};margin-top:6px;">
-              ${pendingTotal === 1 ? 'producto esperando revisión' : 'productos esperando revisión'}
-            </div>
-            <a href="${escapeHtml(adminUrl)}/admin/candidatos"
-               style="display:inline-block;margin-top:14px;padding:10px 20px;background:${ACCENT};color:#fff;
-                      font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
-              Revisar ahora
-            </a>
+            ${
+              pendingTotal > 0
+                ? `<div style="font-size:34px;font-weight:700;color:${TEXT};line-height:1;">${pendingTotal}</div>
+                   <div style="font-size:13px;color:${MUTED};margin-top:6px;">
+                     ${plural(pendingTotal, 'producto esperando revisión', 'productos esperando revisión')}
+                   </div>
+                   <a href="${escapeHtml(adminUrl)}/admin/candidatos"
+                      style="display:inline-block;margin-top:14px;padding:10px 20px;background:${ACCENT};color:#fff;
+                             font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
+                     Revisar ahora
+                   </a>`
+                : // Un "0" gigante con un botón "Revisar ahora" al lado invita
+                  // a entrar a una pantalla vacía.
+                  `<div style="font-size:15px;font-weight:600;color:${TEXT};">Cola de revisión al día</div>
+                   <div style="font-size:13px;color:${MUTED};margin-top:4px;">No queda nada pendiente por aprobar.</div>`
+            }
           </div>
 
           ${newSection}
           ${attentionSection}
 
           <p style="font-size:12px;color:${MUTED};margin:28px 0 24px;border-top:1px solid ${BORDER};padding-top:16px;line-height:1.6;">
-            ${publishedTotal} producto${publishedTotal === 1 ? '' : 's'} publicado${publishedTotal === 1 ? '' : 's'} en el sitio.
+            ${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.
             Los precios se actualizan solos todos los días siguiendo la oferta a la que apunta cada link.
           </p>
 
@@ -163,7 +186,7 @@ export function buildDigestText(input: DigestInput): string {
   const lines = [
     `ComparaTech — resumen del catálogo`,
     ``,
-    `${pendingTotal} producto(s) esperando revisión: ${adminUrl}/admin/candidatos`,
+    `${pendingTotal} ${plural(pendingTotal, 'producto espera', 'productos esperan')} revisión: ${adminUrl}/admin/candidatos`,
     ``,
   ];
 
@@ -175,10 +198,10 @@ export function buildDigestText(input: DigestInput): string {
   }
 
   if (needsAttention.length > 0) {
-    lines.push('', `${needsAttention.length} producto(s) salió del sitio y necesita link nuevo:`);
+    lines.push('', `${needsAttention.length} ${plural(needsAttention.length, 'producto necesita', 'productos necesitan')} un link nuevo:`);
     needsAttention.forEach((p) => lines.push(`  - ${p.name}`));
   }
 
-  lines.push('', `${publishedTotal} producto(s) publicado(s).`);
+  lines.push('', `${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.`);
   return lines.join('\n');
 }
