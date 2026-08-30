@@ -198,6 +198,11 @@ export async function GET(req: NextRequest) {
       ml_product_id: item.productId,
       ml_family_id: item.enrichment.familyId,
       ml_domain_id: item.enrichment.domainId,
+      // Guarda a qué oferta corresponde el precio. El panel de revisión
+      // enlaza directo a ella, para no tener que buscarla a mano entre las
+      // decenas de vendedores y variantes que devuelve una búsqueda por
+      // nombre — y el link de afiliado se genera desde la oferta correcta.
+      ml_item_id: offer.item_id,
       name: item.name,
       brand: item.enrichment.brand,
       category: item.category,

@@ -2,8 +2,10 @@
 
 import { useState, useTransition } from 'react';
 import Image from 'next/image';
+import { ExternalLink } from 'lucide-react';
 import { ProductCandidate } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
+import { bestMlUrl, mlProductUrl } from '@/lib/ml-urls';
 import { approveCandidate, rejectCandidate, verifyAffiliateLink } from './actions';
 
 type LinkCheck =
@@ -85,14 +87,30 @@ export function CandidateCard({
           {candidate.category} · {candidate.seller_nickname ?? 'vendedor desconocido'} · reputación{' '}
           {candidate.seller_reputation} · {candidate.seller_sales_count.toLocaleString('es-CL')} ventas
         </p>
-        <a
-          href={`https://listado.mercadolibre.cl/${encodeURIComponent(candidate.name)}`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-accent hover:underline"
-        >
-          Buscar en Mercado Libre ↗
-        </a>
+        {/* Antes esto era una búsqueda por nombre, que devolvía una parrilla
+            de variantes y vendedores donde había que adivinar cuál era la
+            oferta del precio de arriba. Ahora se enlaza directo a ella. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <a
+            href={bestMlUrl(candidate)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+          >
+            {candidate.ml_item_id ? 'Ir a la oferta de este precio' : 'Ver en Mercado Libre'}
+            <ExternalLink size={11} />
+          </a>
+          {candidate.ml_item_id && candidate.ml_product_id && (
+            <a
+              href={mlProductUrl(candidate.ml_product_id)}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-muted hover:text-fg hover:underline"
+            >
+              ver todas las ofertas
+            </a>
+          )}
+        </div>
         {/* En un teléfono, input y botón lado a lado dejaban el campo del
             link con menos de la mitad del ancho. Se apilan hasta sm. */}
         <div className="mt-1 flex flex-col gap-2 sm:flex-row">

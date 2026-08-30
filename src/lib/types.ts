@@ -36,6 +36,8 @@ export interface ProductCandidate {
   ml_product_id: string;
   ml_family_id: string | null;
   ml_domain_id: string | null;
+  /** Oferta concreta a la que corresponde `price`. */
+  ml_item_id: string | null;
   name: string;
   brand: string | null;
   category: string;

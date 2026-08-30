@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Copy, Check, ExternalLink, EyeOff, Eye, Trash2 } from 'lucide-react';
 import { Product, RrssStatus } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
+import { bestMlUrl } from '@/lib/ml-urls';
 import {
   deleteProduct,
   setProductHidden,
@@ -160,14 +161,29 @@ export function ProductAdminCard({
             {!product.is_active && <span className="ml-2 text-red-400">Inactivo</span>}
             {isHidden && <span className="ml-2 text-amber-400">Oculto del sitio</span>}
           </p>
-          <a
-            href={product.affiliate_url}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:underline"
-          >
-            Ver en Mercado Libre <ExternalLink size={11} />
-          </a>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <a
+              href={product.affiliate_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+            >
+              Abrir el link de afiliado <ExternalLink size={11} />
+            </a>
+            {/* Ficha de catálogo con la oferta publicada ya seleccionada: es
+                desde donde hay que generar el link si el actual quedó
+                apuntando a otra oferta. */}
+            {product.ml_product_id && (
+              <a
+                href={bestMlUrl(product)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-muted hover:text-fg hover:underline"
+              >
+                ir a la oferta en ML
+              </a>
+            )}
+          </div>
         </div>
 
         <div className="flex shrink-0 flex-col items-stretch gap-2 sm:w-56">
