@@ -124,8 +124,8 @@ export function ProductAdminCard({
             aria-label={`Seleccionar ${product.name}`}
           />
         )}
-        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-surface2">
-          <Image src={product.image_url} alt={product.name} fill sizes="80px" className="object-cover" />
+        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-white">
+          <Image src={product.image_url} alt={product.name} fill sizes="80px" className="object-contain" />
         </div>
 
         <div className="min-w-0 flex-1">

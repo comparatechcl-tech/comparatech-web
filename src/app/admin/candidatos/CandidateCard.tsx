@@ -71,8 +71,8 @@ export function CandidateCard({
           aria-label={`Seleccionar ${candidate.name}`}
         />
       )}
-      <div className="relative h-32 w-32 shrink-0 overflow-hidden rounded-lg bg-surface2">
-        <Image src={candidate.image_url} alt={candidate.name} fill sizes="128px" className="object-cover" />
+      <div className="relative h-32 w-32 shrink-0 overflow-hidden rounded-lg bg-white">
+        <Image src={candidate.image_url} alt={candidate.name} fill sizes="128px" className="object-contain" />
       </div>
       <div className="flex flex-1 flex-col gap-2">
         <div className="flex items-start justify-between gap-2">

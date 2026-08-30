@@ -26,8 +26,8 @@ export function VariantLinks({ variants }: { variants: Product[] }) {
             href={`/producto/${v.slug}`}
             className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3 transition hover:border-accent/40"
           >
-            <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-surface2">
-              <Image src={v.image_url} alt="" fill sizes="48px" className="object-cover" />
+            <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-white">
+              <Image src={v.image_url} alt="" fill sizes="48px" className="object-contain" />
             </span>
             <span className="min-w-0">
               <span className="block truncate text-sm font-medium text-fg">

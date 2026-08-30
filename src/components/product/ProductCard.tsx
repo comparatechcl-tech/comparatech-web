@@ -15,7 +15,7 @@ export function ProductCard({ product }: { product: Product }) {
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-surface transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow">
       <Link href={`/producto/${product.slug}`} className="flex flex-1 flex-col">
-        <div className="relative aspect-square w-full overflow-hidden bg-surface2">
+        <div className="relative aspect-square w-full overflow-hidden bg-white">
           {product.is_featured && (
             <span className="absolute left-2.5 top-2.5 z-10 inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-ink">
               <Sparkles size={11} /> Recomendado
@@ -26,7 +26,7 @@ export function ProductCard({ product }: { product: Product }) {
             alt={product.name}
             fill
             sizes="(max-width: 768px) 50vw, 25vw"
-            className="object-cover transition duration-300 group-hover:scale-105"
+            className="object-contain transition duration-300 group-hover:scale-105"
           />
         </div>
         <div className="flex flex-1 flex-col gap-2 p-4">

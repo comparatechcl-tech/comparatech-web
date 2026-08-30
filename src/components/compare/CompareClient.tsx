@@ -69,8 +69,8 @@ export function CompareClient({
           <div className="grid grid-cols-2 divide-x divide-border">
             {[a, b].map((p) => (
               <div key={p.id} className="flex flex-col items-center gap-3 bg-surface p-5 text-center sm:p-6">
-                <div className="relative h-20 w-20 overflow-hidden rounded-xl bg-surface2 sm:h-28 sm:w-28">
-                  <Image src={p.image_url} alt={p.name} fill className="object-cover" />
+                <div className="relative h-20 w-20 overflow-hidden rounded-xl bg-white sm:h-28 sm:w-28">
+                  <Image src={p.image_url} alt={p.name} fill className="object-contain" />
                 </div>
                 <p className="line-clamp-2 font-heading text-sm font-medium text-fg">{p.name}</p>
                 <p
