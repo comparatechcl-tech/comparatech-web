@@ -2,10 +2,11 @@
 
 import { useState, useTransition } from 'react';
 import Image from 'next/image';
-import { Copy, Check, ExternalLink, EyeOff, Eye } from 'lucide-react';
+import { Copy, Check, ExternalLink, EyeOff, Eye, Trash2 } from 'lucide-react';
 import { Product, RrssStatus } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
 import {
+  deleteProduct,
   setProductHidden,
   setRrssStatus,
   updateAffiliateUrl,
@@ -42,7 +43,26 @@ export function ProductAdminCard({
   const [linkCheck, setLinkCheck] = useState<LinkCheck>({ status: 'idle' });
   const [saved, setSaved] = useState(false);
   const [isHidden, setIsHidden] = useState(product.is_hidden ?? false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  function handleDelete() {
+    // Dos pasos a propósito: el borrado no tiene vuelta atrás y se lleva
+    // consigo el link de afiliado, que hay que generar a mano.
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      setTimeout(() => setConfirmingDelete(false), 5000);
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const result = await deleteProduct(product.id);
+      if (!result.ok) {
+        setError(result.error);
+        setConfirmingDelete(false);
+      }
+    });
+  }
 
   function handleToggleHidden() {
     const next = !isHidden;
@@ -183,6 +203,18 @@ export function ProductAdminCard({
           >
             {isHidden ? <Eye size={13} /> : <EyeOff size={13} />}
             {isHidden ? 'Volver a publicar' : 'Ocultar del sitio'}
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={isPending}
+            className={`flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-50 ${
+              confirmingDelete
+                ? 'border-red-500 bg-red-500/10 font-medium text-red-400'
+                : 'border-transparent text-muted hover:border-border hover:text-red-400'
+            }`}
+          >
+            <Trash2 size={13} />
+            {confirmingDelete ? 'Confirmar: borrar para siempre' : 'Eliminar'}
           </button>
         </div>
       </div>
