@@ -15,6 +15,7 @@ interface CatalogRow {
   description: string | null;
   ml_family_id: string | null;
   ml_domain_id: string | null;
+  ml_item_id: string | null;
   is_hidden: boolean;
   category: string;
 }
@@ -39,12 +40,12 @@ function missingCatalogData(product: CatalogRow): boolean {
 /**
  * Corre una vez al día vía Vercel Cron (ver vercel.json), para todo producto
  * aprobado que venga de la prospección automática (tiene ml_product_id):
- *  1. Refresca el precio del vendedor específico (seller_id) al que apunta
- *     el affiliate_url ya generado — NO al vendedor más barato del momento.
- *     Un mismo producto de catálogo puede tener 10+ vendedores a precios
- *     distintos; si tomáramos el más barato, el precio mostrado dejaría de
- *     coincidir con lo que el usuario paga al hacer click en el link.
- *  2. Si ese vendedor específico ya no ofrece el producto (se dio de baja
+ *  1. Refresca el precio siguiendo la oferta exacta que destaca el link de
+ *     afiliado (ml_item_id) — NO el vendedor más barato del momento, ni uno
+ *     elegido aparte. Un mismo producto de catálogo tiene 10+ vendedores a
+ *     precios distintos: si el precio no sigue al link, el sitio termina
+ *     anunciando algo distinto a lo que el comprador encuentra en ML.
+ *  2. Si esa oferta ya no existe (se dio de baja
  *     o le venció el stock) o perdió reputación verde, desactiva el
  *     producto (is_active=false) en vez de borrarlo — deja de mostrarse en
  *     el sitio pero se conserva el historial, y queda pendiente de que se
@@ -73,7 +74,7 @@ export async function GET(req: NextRequest) {
   const { data, error: fetchError } = await admin
     .from('products')
     .select(
-      'id, ml_product_id, seller_id, price, is_active, name, brand, specs, description, ml_family_id, ml_domain_id, is_hidden, category'
+      'id, ml_product_id, seller_id, price, is_active, name, brand, specs, description, ml_family_id, ml_domain_id, ml_item_id, is_hidden, category'
     )
     .not('ml_product_id', 'is', null);
 
@@ -113,14 +114,27 @@ export async function GET(req: NextRequest) {
         { headers: auth }
       );
       const itemsData = await itemsRes.json();
-      const offer = itemsData?.results?.find(
-        (r: { seller_id: number }) => r.seller_id === product.seller_id
-      );
+      const offers: { item_id: string; seller_id: number; price: number }[] =
+        itemsData?.results ?? [];
+
+      // El precio sigue a la oferta exacta que destaca el link de afiliado
+      // (ml_item_id), no al vendedor elegido durante la prospección. Eran
+      // dos cosas independientes y se separaban: 6 de 16 productos
+      // publicaban el precio de un vendedor distinto al que llevaba el
+      // link, y en un caso el sitio anunciaba $17.990 para un producto que
+      // el comprador encontraba a $19.990.
+      //
+      // Sin ml_item_id (productos anteriores a esto, o cargados a mano) se
+      // sigue usando el vendedor como antes.
+      const offer = product.ml_item_id
+        ? offers.find((r) => r.item_id === product.ml_item_id)
+        : offers.find((r) => r.seller_id === product.seller_id);
 
       if (!itemsRes.ok || !offer) {
-        // Ese vendedor específico ya no ofrece el producto (se dio de baja
-        // o se quedó sin stock) — no reemplazamos por otro vendedor
-        // automáticamente, el link de afiliado ya apunta a este.
+        // La oferta a la que apunta el link ya no existe: se dio de baja, se
+        // quedó sin stock o el link quedó apuntando a otro producto. No se
+        // reemplaza por otro vendedor automáticamente — habría que generar
+        // un link nuevo a mano.
         if (product.is_active) {
           await admin.from('products').update({ is_active: false }).eq('id', product.id);
         }
@@ -140,6 +154,12 @@ export async function GET(req: NextRequest) {
       }
       if (isGreen !== product.is_active) {
         patch.is_active = isGreen;
+      }
+      // El vendedor pasa a ser el de la oferta del link, para que la
+      // reputación que se verifica y la que se muestra sean las de quien
+      // realmente le vende al usuario.
+      if (offer.seller_id !== product.seller_id) {
+        patch.seller_id = offer.seller_id;
       }
 
       // Solo pega el request extra a ML si a este producto le falta algo:

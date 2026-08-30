@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { RrssStatus } from '@/lib/types';
 import { verifyAffiliateLink } from '@/lib/actions/verifyAffiliateLink';
+import { resolveAffiliateItemId } from '@/lib/affiliate-link';
 
 export { verifyAffiliateLink };
 
@@ -50,9 +51,18 @@ export async function updateAffiliateUrl(productId: string, url: string): Promis
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
 
-  const { error } = await admin.from('products').update({ affiliate_url: trimmed }).eq('id', productId);
+  // Se resuelve a qué oferta apunta el link y se guarda, para que el cron
+  // refresque el precio de esa oferta y no el de un vendedor elegido aparte.
+  // Si no se puede resolver ahora, el link se guarda igual: es mejor eso a
+  // bloquear la edición, y el precio sigue con el comportamiento anterior.
+  const resolved = await resolveAffiliateItemId(trimmed);
+  const patch: Record<string, unknown> = { affiliate_url: trimmed };
+  if (resolved.ok) patch.ml_item_id = resolved.itemId;
+
+  const { error } = await admin.from('products').update(patch).eq('id', productId);
   if (error) return { ok: false, error: error.message };
 
   revalidatePath('/admin/productos');
+  revalidatePath('/');
   return { ok: true };
 }

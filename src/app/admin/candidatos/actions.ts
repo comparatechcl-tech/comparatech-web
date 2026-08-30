@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { verifyAffiliateLink } from '@/lib/actions/verifyAffiliateLink';
+import { resolveAffiliateItemId } from '@/lib/affiliate-link';
 import { stripDiacritics } from '@/lib/text';
 
 export { verifyAffiliateLink };
@@ -33,12 +34,20 @@ export async function approveCandidate(
   const { data: existing } = await admin.from('products').select('id').eq('slug', baseSlug).maybeSingle();
   const slug = existing ? `${baseSlug}-${candidateId.slice(0, 5)}` : baseSlug;
 
-  const { error } = await admin.rpc('promote_candidate_to_product', {
+  const { data: newProductId, error } = await admin.rpc('promote_candidate_to_product', {
     candidate_id: candidateId,
     p_slug: slug,
     p_affiliate_url: affiliateUrl.trim(),
   });
   if (error) return { ok: false, error: error.message };
+
+  // A qué oferta apunta el link recién pegado. El cron refresca el precio de
+  // esa oferta, que es la que va a ver quien haga clic — no la del vendedor
+  // que eligió la prospección, que puede ser otro y a otro precio.
+  const resolved = await resolveAffiliateItemId(affiliateUrl.trim());
+  if (resolved.ok && newProductId) {
+    await admin.from('products').update({ ml_item_id: resolved.itemId }).eq('id', newProductId);
+  }
 
   revalidatePath('/admin/candidatos');
   revalidatePath('/');
