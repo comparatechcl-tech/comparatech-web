@@ -71,6 +71,91 @@ function pickCheapestGreenOffer(
   return offers.find((o) => isGreenSeller(sellers.get(o.seller_id))) ?? null;
 }
 
+type SupabaseAdmin = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
+
+/**
+ * Vuelve a mirar en ML los candidatos que esperan revisión y actualiza su
+ * precio, su descuento y la oferta a la que apuntan.
+ *
+ * Un candidato que ya no tiene ninguna oferta de vendedor verde no se puede
+ * aprobar, así que se rechaza: dejarlo en la cola solo hace perder tiempo a
+ * quien revisa.
+ */
+async function refreshPendingCandidates(
+  admin: SupabaseAdmin,
+  token: string,
+  outOfTime: () => boolean,
+  dryRun: boolean
+): Promise<{ updated: number; dropped: number }> {
+  const { data } = await admin
+    .from('product_candidates')
+    .select('id, ml_product_id, ml_item_id, price, original_price')
+    .eq('status', 'pending_review');
+
+  const pending = data ?? [];
+  if (pending.length === 0) return { updated: 0, dropped: 0 };
+
+  const withOffers = (
+    await mapWithConcurrency(pending, CONCURRENCY, async (candidate) => {
+      if (outOfTime()) return null;
+      const offers = await getProductOffers(candidate.ml_product_id, token);
+      return { candidate, offers };
+    })
+  ).filter(Boolean) as { candidate: (typeof pending)[number]; offers: MlOffer[] }[];
+
+  const sellers = await getSellers(
+    withOffers.flatMap((d) => d.offers.map((o) => o.seller_id)),
+    token
+  );
+
+  let updated = 0;
+  let dropped = 0;
+
+  for (const { candidate, offers } of withOffers) {
+    const offer = pickCheapestGreenOffer(offers, sellers);
+
+    if (!offer) {
+      dropped++;
+      if (!dryRun) {
+        await admin
+          .from('product_candidates')
+          .update({ status: 'rejected', reviewed_at: new Date().toISOString() })
+          .eq('id', candidate.id);
+      }
+      continue;
+    }
+
+    const listPrice =
+      typeof offer.original_price === 'number' && offer.original_price > offer.price
+        ? offer.original_price
+        : null;
+
+    const changed =
+      offer.price !== candidate.price ||
+      listPrice !== candidate.original_price ||
+      offer.item_id !== candidate.ml_item_id;
+
+    if (!changed) continue;
+    updated++;
+
+    if (!dryRun) {
+      await admin
+        .from('product_candidates')
+        .update({
+          price: offer.price,
+          original_price: listPrice,
+          ml_item_id: offer.item_id,
+          seller_id: offer.seller_id,
+          seller_nickname: sellers.get(offer.seller_id)?.nickname ?? null,
+          seller_sales_count: sellers.get(offer.seller_id)?.salesCount ?? 0,
+        })
+        .eq('id', candidate.id);
+    }
+  }
+
+  return { updated, dropped };
+}
+
 export async function GET(req: NextRequest) {
   if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -239,10 +324,24 @@ export async function GET(req: NextRequest) {
     inserted = fresh.length;
   }
 
+  // 10. Refresca la cola de revisión.
+  //
+  //     Los candidatos quedaban con el precio del día que entraron y podían
+  //     esperar días antes de que alguien los mirara: un parlante JBL subió
+  //     $6.000 en 24 horas y otro producto ya ni se ofrecía. Quien revisaba
+  //     abría el link y encontraba otro precio.
+  //
+  //     Como todavía no tienen link de afiliado, acá sí corresponde re-elegir
+  //     la oferta más barata con vendedor verde — a diferencia de los
+  //     productos publicados, donde el precio debe seguir al link ya generado.
+  const refreshed = await refreshPendingCandidates(admin, token, outOfTime, dryRun);
+
   return NextResponse.json({
     ok: true,
     dry_run: dryRun,
     inserted,
+    candidates_refreshed: refreshed.updated,
+    candidates_dropped: refreshed.dropped,
     would_insert: fresh.length,
     new_candidates: fresh.map((c) => ({
       name: c.name,

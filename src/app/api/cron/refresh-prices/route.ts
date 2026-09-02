@@ -8,6 +8,7 @@ interface CatalogRow {
   ml_product_id: string;
   seller_id: number | null;
   price: number;
+  original_price: number | null;
   is_active: boolean;
   name: string;
   brand: string | null;
@@ -74,7 +75,7 @@ export async function GET(req: NextRequest) {
   const { data, error: fetchError } = await admin
     .from('products')
     .select(
-      'id, ml_product_id, seller_id, price, is_active, name, brand, specs, description, ml_family_id, ml_domain_id, ml_item_id, is_hidden, category'
+      'id, ml_product_id, seller_id, price, original_price, is_active, name, brand, specs, description, ml_family_id, ml_domain_id, ml_item_id, is_hidden, category'
     )
     .not('ml_product_id', 'is', null);
 
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
         { headers: auth }
       );
       const itemsData = await itemsRes.json();
-      const offers: { item_id: string; seller_id: number; price: number }[] =
+      const offers: { item_id: string; seller_id: number; price: number; original_price: number | null }[] =
         itemsData?.results ?? [];
 
       // El precio sigue a la oferta exacta que destaca el link de afiliado
@@ -151,6 +152,19 @@ export async function GET(req: NextRequest) {
       const patch: Record<string, unknown> = {};
       if (typeof offer.price === 'number' && offer.price > 0 && offer.price !== product.price) {
         patch.price = offer.price;
+      }
+
+      // El precio de lista tambien cambia, y sin refrescarlo el descuento
+      // que muestra el sitio queda congelado en el del dia que se aprobo el
+      // producto. De 43 productos publicados, 30 tenian descuento vigente en
+      // ML y solo 21 lo tenian guardado: el resto mostraba precio pelado
+      // pese a estar en oferta.
+      const listPrice =
+        typeof offer.original_price === 'number' && offer.original_price > offer.price
+          ? offer.original_price
+          : null;
+      if (listPrice !== product.original_price) {
+        patch.original_price = listPrice;
       }
       if (isGreen !== product.is_active) {
         patch.is_active = isGreen;
