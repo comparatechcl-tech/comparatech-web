@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { enrichFromMlProduct, getMlToken } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
+import { gatherDigestInput } from '@/lib/digest-data';
+import { buildDigestHtml, buildDigestSubject, buildDigestText } from '@/lib/daily-digest';
+import { sendEmail } from '@/lib/email';
 import {
   buildPublishedCatalog,
   collapseCandidateFamilies,
@@ -154,6 +157,30 @@ async function refreshPendingCandidates(
   }
 
   return { updated, dropped };
+}
+
+/**
+ * Arma el resumen del día y lo manda por correo.
+ *
+ * Nunca lanza: si el correo falla, la prospección ya hizo su trabajo y sería
+ * absurdo devolver error por eso. El motivo queda en la respuesta del cron,
+ * que es donde se va a mirar cuando el correo no llegue.
+ */
+async function sendDailyDigest(admin: SupabaseAdmin) {
+  const to = process.env.DIGEST_TO?.trim();
+  if (!to) return { ok: false as const, error: 'DIGEST_TO no configurado' };
+
+  const input = await gatherDigestInput(admin);
+  const result = await sendEmail({
+    to,
+    subject: buildDigestSubject(input),
+    html: buildDigestHtml(input),
+    text: buildDigestText(input),
+  });
+
+  return result.ok
+    ? { ok: true as const, sent_to: to, new_candidates: input.newCandidates.length }
+    : { ok: false as const, error: result.error };
 }
 
 export async function GET(req: NextRequest) {
@@ -336,12 +363,21 @@ export async function GET(req: NextRequest) {
   //     productos publicados, donde el precio debe seguir al link ya generado.
   const refreshed = await refreshPendingCandidates(admin, token, outOfTime, dryRun);
 
+  // 11. El resumen diario sale desde acá, después de prospectar y refrescar,
+  //     para que refleje el estado del día y no el de ayer. Antes lo enviaba
+  //     un escenario de Make cuyo módulo de Gmail tenía el asunto y el
+  //     contenido vacíos: el correo llegaba en blanco todos los días y cada
+  //     intento de arreglarlo era a ciegas sobre una configuración que no se
+  //     versiona. Si el envío falla, queda el motivo en la respuesta.
+  const digest = dryRun ? { ok: true as const, skipped: 'dry_run' } : await sendDailyDigest(admin);
+
   return NextResponse.json({
     ok: true,
     dry_run: dryRun,
     inserted,
     candidates_refreshed: refreshed.updated,
     candidates_dropped: refreshed.dropped,
+    digest,
     would_insert: fresh.length,
     new_candidates: fresh.map((c) => ({
       name: c.name,

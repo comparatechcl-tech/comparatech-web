@@ -1,27 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
-import { SITE_URL } from '@/lib/site';
-import {
-  buildDigestHtml,
-  buildDigestSubject,
-  buildDigestText,
-  type DigestCandidate,
-} from '@/lib/daily-digest';
+import { gatherDigestInput } from '@/lib/digest-data';
+import { buildDigestHtml, buildDigestSubject, buildDigestText } from '@/lib/daily-digest';
 
 /**
- * Devuelve el resumen diario del catálogo con el correo ya armado.
+ * Vista previa del resumen diario.
  *
- * Existe porque el correo de las 08:00 llegaba todos los días "(sin asunto)"
- * y en blanco: los campos de asunto y contenido del módulo de Gmail estaban
- * vacíos. En vez de escribir el texto dentro de Make —donde no se versiona,
- * no se prueba y una fórmula mal armada rompe el correo en silencio— el
- * contenido se arma acá y Make solo mapea dos campos:
+ * El correo lo envía el cron de prospección (ver /api/cron/prospect), que
+ * corre justo antes. Este endpoint queda para poder revisar cómo se ve el
+ * correo en cualquier momento, sin esperar a las 08:00 ni disparar un envío:
  *
- *   Subject → {{body.subject}}
- *   Content → {{body.html}}    (Body type: Raw HTML)
- *
- * Se puede abrir en el navegador con ?preview=1 para ver cómo queda el correo
- * antes de que salga.
+ *   ?preview=1  devuelve el HTML renderizado en el navegador
+ *   sin params  devuelve asunto, html y texto como JSON
  */
 
 export const dynamic = 'force-dynamic';
@@ -36,44 +26,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Supabase admin no configurado' }, { status: 500 });
   }
 
-  // Ventana de 24 horas en vez de "día calendario": evita depender de la
-  // zona horaria del servidor y del cambio de hora en Chile.
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-  const [newRes, pendingRes, publishedRes, attentionRes] = await Promise.all([
-    admin
-      .from('product_candidates')
-      .select('name, price, category, image_url, seller_nickname')
-      .eq('status', 'pending_review')
-      .gte('prospected_at', since)
-      .order('price', { ascending: true }),
-    admin
-      .from('product_candidates')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending_review'),
-    admin
-      .from('products')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_active', true)
-      .eq('is_hidden', false),
-    // Se cayeron del sitio solos y no se recuperan sin intervención: el
-    // vendedor dejó de ofrecer el producto, o el link apunta a otra oferta.
-    admin
-      .from('products')
-      .select('name')
-      .eq('is_active', false)
-      .eq('is_hidden', false)
-      .order('created_at', { ascending: false }),
-  ]);
-
-  const input = {
-    newCandidates: (newRes.data ?? []) as DigestCandidate[],
-    pendingTotal: pendingRes.count ?? 0,
-    publishedTotal: publishedRes.count ?? 0,
-    needsAttention: (attentionRes.data ?? []) as { name: string }[],
-    adminUrl: SITE_URL,
-  };
-
+  const input = await gatherDigestInput(admin);
   const html = buildDigestHtml(input);
 
   if (req.nextUrl.searchParams.get('preview') === '1') {
