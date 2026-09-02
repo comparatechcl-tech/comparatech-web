@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { Product, RrssStatus } from '@/lib/types';
 import { CATEGORIES } from '@/lib/categories';
+import { Flame } from 'lucide-react';
+import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
 import { ProductsList } from './ProductsList';
 
 export const dynamic = 'force-dynamic';
@@ -16,9 +18,9 @@ const RRSS_FILTERS: { value: RrssStatus | 'todos'; label: string }[] = [
 export default async function ProductosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ categoria?: string; rrss?: string }>;
+  searchParams: Promise<{ categoria?: string; rrss?: string; oferta?: string }>;
 }) {
-  const { categoria, rrss } = await searchParams;
+  const { categoria, rrss, oferta } = await searchParams;
 
   const admin = getSupabaseAdmin();
   let query = admin
@@ -29,14 +31,25 @@ export default async function ProductosPage({
   if (categoria) query = query?.eq('category', categoria);
   if (rrss) query = query?.eq('rrss_status', rrss);
 
-  const products: Product[] = admin ? ((await query)?.data ?? []) : [];
+  let products: Product[] = admin ? ((await query)?.data ?? []) : [];
 
-  function buildHref(next: { categoria?: string; rrss?: string }) {
+  // Vista para armar contenido de redes: deja solo lo rebajado y lo ordena
+  // por descuento. Es la pregunta concreta que hay que responder antes de
+  // publicar — "qué tengo hoy que valga la pena mostrar".
+  if (oferta) {
+    products = products
+      .filter((p) => discountPercent(p) >= MIN_DEAL_DISCOUNT)
+      .sort((a, b) => discountPercent(b) - discountPercent(a));
+  }
+
+  function buildHref(next: { categoria?: string; rrss?: string; oferta?: string }) {
     const params = new URLSearchParams();
     const finalCategoria = next.categoria !== undefined ? next.categoria : categoria;
     const finalRrss = next.rrss !== undefined ? next.rrss : rrss;
+    const finalOferta = next.oferta !== undefined ? next.oferta : oferta;
     if (finalCategoria) params.set('categoria', finalCategoria);
     if (finalRrss) params.set('rrss', finalRrss);
+    if (finalOferta) params.set('oferta', finalOferta);
     const qs = params.toString();
     return qs ? `/admin/productos?${qs}` : '/admin/productos';
   }
@@ -73,6 +86,14 @@ export default async function ProductosPage({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Link
+            href={buildHref({ oferta: oferta ? undefined : '1' })}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+              oferta ? 'border-accent bg-accent/10 text-accent' : 'border-border text-muted hover:text-fg'
+            }`}
+          >
+            <Flame size={12} /> Solo en oferta
+          </Link>
           {RRSS_FILTERS.map((f) => (
             <Link
               key={f.value}

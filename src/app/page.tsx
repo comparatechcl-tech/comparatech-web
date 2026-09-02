@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { Search, Check, Tags, ChartNoAxesColumn, Link2, Smartphone, Headphones, Sofa, WashingMachine, Package } from 'lucide-react';
-import { getFeaturedProducts } from '@/lib/queries/products';
+import { Search, Check, Tags, ChartNoAxesColumn, Link2, Smartphone, Headphones, Sofa, WashingMachine, Package, Flame } from 'lucide-react';
+import { getFeaturedProducts, getDeals } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FounderBio } from '@/components/brand/FounderBio';
 import { QuickCompare } from '@/components/compare/QuickCompare';
@@ -79,6 +79,7 @@ const COMPARADOR_CARD = {
 export default async function HomePage() {
   const featured = await getFeaturedProducts(8);
   const categories = await getSiteCategories();
+  const deals = (await getDeals()).slice(0, 4);
 
   const categoryCards = [
     ...categories.map((c) => {
@@ -153,6 +154,24 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Ofertas — lo primero después del hero: es el gancho real del sitio
+          y el destino de lo que se publica en redes. Solo aparece si hay
+          rebajas de verdad, para no dejar una sección vacía. */}
+      {deals.length > 0 && (
+        <section className="mb-16">
+          <div className="mb-5 flex items-baseline justify-between gap-4">
+            <h2 className="flex items-center gap-2 font-heading text-2xl font-bold">
+              <Flame size={22} className="text-accent" />
+              Ofertas del día
+            </h2>
+            <Link href="/ofertas" className="text-sm font-medium text-accent hover:underline">
+              Ver todas →
+            </Link>
+          </div>
+          <ProductGrid products={deals} />
+        </section>
+      )}
 
       {/* Categorías */}
       <section className="mb-16">

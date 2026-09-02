@@ -6,6 +6,7 @@ import { Copy, Check, ExternalLink, EyeOff, Eye, Trash2 } from 'lucide-react';
 import { Product, RrssStatus } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
 import { bestMlUrl } from '@/lib/ml-urls';
+import { discountPercent, savingsAmount } from '@/lib/queries/products';
 import {
   deleteProduct,
   setProductHidden,
@@ -122,9 +123,19 @@ export function ProductAdminCard({
     });
   }
 
+  // El texto para redes se arma con el descuento adelante cuando lo hay: es
+  // el dato que hace que alguien se detenga a mirar el post. Sin rebaja, el
+  // precio solo.
   function handleCopy() {
-    const text = `${product.name} — ${formatCLP(product.price)}\n${product.affiliate_url}`;
-    navigator.clipboard.writeText(text);
+    const discount = discountPercent(product);
+    const headline =
+      discount > 0
+        ? `🔥 ${product.name}\n${formatCLP(product.price)} (antes ${formatCLP(
+            product.original_price ?? 0
+          )}) — ${discount}% de descuento, ahorras ${formatCLP(savingsAmount(product))}`
+        : `${product.name} — ${formatCLP(product.price)}`;
+
+    navigator.clipboard.writeText(`${headline}\n${product.affiliate_url}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
@@ -152,8 +163,13 @@ export function ProductAdminCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-heading text-sm font-medium text-fg">{product.name}</h3>
-            <span className="whitespace-nowrap text-sm font-semibold text-accent">
-              {formatCLP(product.price)}
+            <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+              {discountPercent(product) > 0 && (
+                <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-bold text-accent">
+                  -{discountPercent(product)}%
+                </span>
+              )}
+              <span className="text-sm font-semibold text-accent">{formatCLP(product.price)}</span>
             </span>
           </div>
           <p className="mt-1 text-xs text-muted">

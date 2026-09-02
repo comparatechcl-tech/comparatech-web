@@ -117,3 +117,37 @@ export async function getFeaturedProducts(limit = 8): Promise<Product[]> {
   const all = await getCatalogProducts();
   return all.slice(0, limit);
 }
+
+/**
+ * Descuento mínimo para que un producto entre a la sección de ofertas.
+ *
+ * Bajo esto no vale la pena promocionarlo: un 5% no mueve a nadie a comprar
+ * y llenaría la sección de ruido. Con el catálogo actual, 20% deja fuera lo
+ * marginal y conserva las rebajas que sí llaman la atención.
+ */
+export const MIN_DEAL_DISCOUNT = 20;
+
+/** Porcentaje de descuento respecto al precio de lista. 0 si no hay rebaja. */
+export function discountPercent(product: Product): number {
+  if (!product.original_price || product.original_price <= product.price) return 0;
+  return Math.round((1 - product.price / product.original_price) * 100);
+}
+
+/** Cuánto se ahorra en pesos. Es lo que más pesa al armar un post. */
+export function savingsAmount(product: Product): number {
+  if (!product.original_price || product.original_price <= product.price) return 0;
+  return product.original_price - product.price;
+}
+
+/**
+ * Productos en oferta, de mayor a menor descuento.
+ *
+ * Todos cumplen ya las reglas del Programa de Afiliados por venir del mismo
+ * catálogo: vendedor con reputación verde y link generado a mano.
+ */
+export async function getDeals(minDiscount = MIN_DEAL_DISCOUNT): Promise<Product[]> {
+  const all = await getCatalogProducts();
+  return all
+    .filter((p) => discountPercent(p) >= minDiscount)
+    .sort((a, b) => discountPercent(b) - discountPercent(a));
+}

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import {
   Menu,
+  Flame,
   X,
   Smartphone,
   Laptop,
@@ -31,6 +32,7 @@ const CATEGORY_ICONS: Record<string, typeof Smartphone> = {
 };
 
 const FIXED_LINKS = [
+  { href: '/ofertas', label: 'Ofertas', icon: Flame },
   { href: '/comparador', label: 'Comparador', icon: Scale },
   { href: '/buscar', label: 'Buscar', icon: Search },
   { href: '/nosotros', label: 'Nosotros', icon: Info },
