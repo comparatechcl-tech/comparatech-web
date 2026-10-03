@@ -12,6 +12,7 @@
  */
 
 import { formatCLP } from '@/lib/format';
+import { getCategoryInfo } from '@/lib/categories';
 
 export interface DigestCandidate {
   name: string;
@@ -49,6 +50,47 @@ const ACCENT = '#0e7490';
  */
 function plural(count: number, singular: string, many: string): string {
   return count === 1 ? singular : many;
+}
+
+/**
+ * Cuántos candidatos nuevos se listan con foto. Desde que la prospección
+ * recuerda lo descartado entran decenas por día —113 en la primera corrida—
+ * y un correo con todos no se lee: más arriba va el conteo por categoría y
+ * el resto se revisa en el admin.
+ */
+const MAX_LISTED = 10;
+
+function categoryName(slug: string): string {
+  return getCategoryInfo(slug)?.name ?? slug;
+}
+
+/**
+ * Muestra variada: uno de cada categoría por vuelta. Tomar los primeros por
+ * precio daba diez repetidores wifi seguidos.
+ */
+function sampleAcrossCategories(candidates: DigestCandidate[], max: number): DigestCandidate[] {
+  const groups = new Map<string, DigestCandidate[]>();
+  for (const c of candidates) groups.set(c.category, [...(groups.get(c.category) ?? []), c]);
+
+  const sample: DigestCandidate[] = [];
+  while (sample.length < Math.min(max, candidates.length)) {
+    for (const group of groups.values()) {
+      const next = group.shift();
+      if (next) sample.push(next);
+      if (sample.length === max) break;
+    }
+  }
+  return sample;
+}
+
+/** "86 de Computación · 10 de Audio · …", de la categoría con más a la con menos. */
+function countByCategory(candidates: DigestCandidate[]): string {
+  const counts = new Map<string, number>();
+  for (const c of candidates) counts.set(c.category, (counts.get(c.category) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([slug, n]) => `${n} de ${categoryName(slug)}`)
+    .join(' · ');
 }
 
 function escapeHtml(value: string): string {
@@ -89,7 +131,7 @@ function candidateRow(c: DigestCandidate): string {
     <td style="padding:12px 0 12px 12px;border-bottom:1px solid ${BORDER};" valign="top">
       <div style="font-size:14px;color:${TEXT};font-weight:600;line-height:1.35;">${escapeHtml(c.name)}</div>
       <div style="font-size:12px;color:${MUTED};margin-top:3px;">
-        ${escapeHtml(c.category)}${c.seller_nickname ? ` · ${escapeHtml(c.seller_nickname)}` : ''}
+        ${escapeHtml(categoryName(c.category))}${c.seller_nickname ? ` · ${escapeHtml(c.seller_nickname)}` : ''}
       </div>
     </td>
     <td style="padding:12px 0;border-bottom:1px solid ${BORDER};text-align:right;white-space:nowrap;" valign="top">
@@ -101,13 +143,29 @@ function candidateRow(c: DigestCandidate): string {
 export function buildDigestHtml(input: DigestInput): string {
   const { newCandidates, pendingTotal, publishedTotal, needsLink, pausedCount, adminUrl } = input;
 
+  const listed = sampleAcrossCategories(newCandidates, MAX_LISTED);
+  const notListed = newCandidates.length - listed.length;
+
   const newSection =
     newCandidates.length > 0
       ? `
-      <h2 style="font-size:15px;color:${TEXT};margin:28px 0 4px;">Nuevos desde ayer</h2>
+      <h2 style="font-size:15px;color:${TEXT};margin:28px 0 4px;">Nuevos desde ayer (${newCandidates.length})</h2>
+      ${
+        notListed > 0
+          ? `<p style="font-size:13px;color:${MUTED};margin:0 0 4px;line-height:1.5;">${escapeHtml(countByCategory(newCandidates))}</p>`
+          : ''
+      }
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-        ${newCandidates.map(candidateRow).join('')}
-      </table>`
+        ${listed.map(candidateRow).join('')}
+      </table>
+      ${
+        notListed > 0
+          ? `<p style="font-size:13px;color:${MUTED};margin:12px 0 0;">
+               … y ${notListed} más.
+               <a href="${escapeHtml(adminUrl)}/admin/candidatos" style="color:${ACCENT};font-weight:600;">Verlos todos en el admin →</a>
+             </p>`
+          : ''
+      }`
       : `
       <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">
         Hoy no entraron productos nuevos. Los destacados de Mercado Libre cambian
@@ -213,8 +271,10 @@ export function buildDigestText(input: DigestInput): string {
   ];
 
   if (newCandidates.length > 0) {
-    lines.push(`Nuevos desde ayer (${newCandidates.length}):`);
-    newCandidates.forEach((c) => lines.push(`  - ${c.name} — ${formatCLP(c.price)} (${c.category})`));
+    const listed = sampleAcrossCategories(newCandidates, MAX_LISTED);
+    lines.push(`Nuevos desde ayer (${newCandidates.length}): ${countByCategory(newCandidates)}`);
+    listed.forEach((c) => lines.push(`  - ${c.name} — ${formatCLP(c.price)} (${categoryName(c.category)})`));
+    if (newCandidates.length > listed.length) lines.push(`  … y ${newCandidates.length - listed.length} más en el admin.`);
   } else {
     lines.push('Hoy no entraron productos nuevos.');
   }
