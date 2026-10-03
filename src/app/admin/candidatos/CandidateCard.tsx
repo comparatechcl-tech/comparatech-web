@@ -5,25 +5,29 @@ import Image from 'next/image';
 import { ExternalLink } from 'lucide-react';
 import { ProductCandidate } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
-import { bestMlUrl, mlProductUrl } from '@/lib/ml-urls';
-import { approveCandidate, rejectCandidate, verifyAffiliateLink } from './actions';
+import { mlProductUrl } from '@/lib/ml-urls';
+import { checkAffiliateLink } from '@/lib/actions/catalog-admin';
+import { approveCandidate, rejectCandidate } from './actions';
 
 type LinkCheck =
   | { status: 'idle' }
   | { status: 'checking' }
-  | { status: 'direct' }
-  | { status: 'wrong_offer' }
-  | { status: 'unknown' }
+  | { status: 'ok' }
+  | { status: 'otro_producto'; featuredProductId: string | null }
+  | { status: 'indeterminado' }
   | { status: 'error'; message: string };
 
 export function CandidateCard({
   candidate,
   selected = false,
   onToggleSelect,
+  directLinks = false,
 }: {
   candidate: ProductCandidate;
   selected?: boolean;
   onToggleSelect?: () => void;
+  /** Con links directos activos, aprobar no requiere pegar un link. */
+  directLinks?: boolean;
 }) {
   const [affiliateUrl, setAffiliateUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -33,23 +37,19 @@ export function CandidateCard({
   function handleVerifyLink() {
     setLinkCheck({ status: 'checking' });
     startTransition(async () => {
-      const result = await verifyAffiliateLink(affiliateUrl, candidate.ml_product_id, candidate.seller_id);
-      if (!result.ok) {
-        setLinkCheck({ status: 'error', message: result.error });
-        return;
-      }
-      if (result.direct) {
-        setLinkCheck({ status: 'direct' });
-      } else {
-        setLinkCheck({ status: result.reason === 'wrong_offer' ? 'wrong_offer' : 'unknown' });
-      }
+      const result = await checkAffiliateLink(affiliateUrl, candidate.ml_product_id);
+      if (!result.ok) setLinkCheck({ status: 'error', message: result.error });
+      else if (result.verdict === 'coincide') setLinkCheck({ status: 'ok' });
+      else if (result.verdict === 'otra_ficha')
+        setLinkCheck({ status: 'otro_producto', featuredProductId: result.featuredProductId });
+      else setLinkCheck({ status: 'indeterminado' });
     });
   }
 
   function handleApprove() {
     setError(null);
     startTransition(async () => {
-      const result = await approveCandidate(candidate.id, candidate.name, affiliateUrl);
+      const result = await approveCandidate(candidate.id, affiliateUrl);
       if (!result.ok) setError(result.error);
     });
   }
@@ -61,6 +61,8 @@ export function CandidateCard({
       if (!result.ok) setError(result.error);
     });
   }
+
+  const canApprove = !isPending && (affiliateUrl.trim().length > 0 || directLinks);
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 sm:flex-row">
@@ -87,36 +89,28 @@ export function CandidateCard({
           {candidate.category} · {candidate.seller_nickname ?? 'vendedor desconocido'} · reputación{' '}
           {candidate.seller_reputation} · {candidate.seller_sales_count.toLocaleString('es-CL')} ventas
         </p>
-        {/* Antes esto era una búsqueda por nombre, que devolvía una parrilla
-            de variantes y vendedores donde había que adivinar cuál era la
-            oferta del precio de arriba. Ahora se enlaza directo a ella. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <a
-            href={bestMlUrl(candidate)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
-          >
-            {candidate.ml_item_id ? 'Ir a la oferta de este precio' : 'Ver en Mercado Libre'}
-            <ExternalLink size={11} />
-          </a>
-          {candidate.ml_item_id && candidate.ml_product_id && (
-            <a
-              href={mlProductUrl(candidate.ml_product_id)}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs text-muted hover:text-fg hover:underline"
-            >
-              ver todas las ofertas
-            </a>
-          )}
-        </div>
+
+        {/* La ficha de catálogo muestra la oferta ganadora, que es la del
+            precio de arriba. Desde ahí hay que generar el link de afiliado. */}
+        <a
+          href={mlProductUrl(candidate.ml_product_id)}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex w-fit items-center gap-1 text-xs font-medium text-accent hover:underline"
+        >
+          Abrir la ficha en Mercado Libre <ExternalLink size={11} />
+        </a>
+
         {/* En un teléfono, input y botón lado a lado dejaban el campo del
             link con menos de la mitad del ancho. Se apilan hasta sm. */}
         <div className="mt-1 flex flex-col gap-2 sm:flex-row">
           <input
             type="url"
-            placeholder="Pega acá el link de afiliado real"
+            placeholder={
+              directLinks
+                ? 'Opcional: los links directos están activos'
+                : 'Pega acá el link de afiliado'
+            }
             value={affiliateUrl}
             onChange={(e) => {
               setAffiliateUrl(e.target.value);
@@ -132,30 +126,37 @@ export function CandidateCard({
             {linkCheck.status === 'checking' ? 'Verificando…' : 'Verificar link'}
           </button>
         </div>
-        {linkCheck.status === 'direct' && (
-          <p className="text-xs text-accent">✓ El link lleva a la oferta exacta del vendedor aprobado.</p>
+
+        {linkCheck.status === 'ok' && (
+          <p className="text-xs text-accent">✓ El link lleva a la ficha de este producto.</p>
         )}
-        {linkCheck.status === 'wrong_offer' && (
+        {linkCheck.status === 'otro_producto' && (
           <p className="text-xs text-red-400">
-            ⚠ Este link destaca la oferta de otro vendedor, no la de {candidate.seller_nickname ?? 'este vendedor'} —
-            puede mostrar un precio distinto al aprobado. Genera el link de nuevo desde la oferta específica de ese
-            vendedor.
+            ⚠ Este link lleva a otra ficha
+            {linkCheck.featuredProductId ? ` (${linkCheck.featuredProductId})` : ''}. El comprador vería otro
+            producto: genera el link desde la ficha de este.
           </p>
         )}
-        {linkCheck.status === 'unknown' && (
-          <p className="text-xs text-amber-400">No se pudo identificar qué oferta destaca este link. Revísalo a mano antes de aprobar.</p>
+        {linkCheck.status === 'indeterminado' && (
+          <p className="text-xs text-amber-400">
+            No se pudo comprobar a qué ficha lleva: tu perfil de afiliado no está mostrando el producto. Puedes
+            aprobar igual.
+          </p>
         )}
         {linkCheck.status === 'error' && (
-          <p className="text-xs text-amber-400">No se pudo verificar el link ({linkCheck.message}). Revísalo a mano antes de aprobar.</p>
+          <p className="text-xs text-amber-400">
+            No se pudo verificar el link ({linkCheck.message}). Puedes aprobar igual; se revisa al publicar.
+          </p>
         )}
         {error && <p className="text-xs text-red-400">{error}</p>}
+
         <div className="mt-1 flex gap-2">
           <button
             onClick={handleApprove}
-            disabled={isPending || !affiliateUrl.trim()}
+            disabled={!canApprove}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Aprobar
+            {isPending ? 'Publicando…' : 'Aprobar'}
           </button>
           <button
             onClick={handleReject}

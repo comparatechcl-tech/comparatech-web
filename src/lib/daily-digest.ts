@@ -25,7 +25,13 @@ export interface DigestInput {
   newCandidates: DigestCandidate[];
   pendingTotal: number;
   publishedTotal: number;
-  needsAttention: { name: string }[];
+  /** Fuera del sitio y no se arreglan solos: el link lleva a otro producto. */
+  needsLink: { name: string }[];
+  /**
+   * Fuera del sitio pero en pausa automática: Mercado Libre se quedó sin
+   * vendedor para esa ficha, o el que tiene no es verde. Vuelven solos.
+   */
+  pausedCount: number;
   adminUrl: string;
 }
 
@@ -54,7 +60,7 @@ function escapeHtml(value: string): string {
 }
 
 export function buildDigestSubject(input: DigestInput): string {
-  const { newCandidates, pendingTotal, needsAttention } = input;
+  const { newCandidates, pendingTotal, needsLink } = input;
 
   const parts: string[] = [];
   if (newCandidates.length > 0) {
@@ -63,8 +69,11 @@ export function buildDigestSubject(input: DigestInput): string {
   if (pendingTotal > 0) {
     parts.push(`${pendingTotal} por revisar`);
   }
-  if (needsAttention.length > 0) {
-    parts.push(`${needsAttention.length} con problema`);
+  // Solo lo que requiere acción va al asunto. Antes decía "47 con
+  // problema" sumando productos que se arreglan solos, y el número asustaba
+  // sin decir qué hacer.
+  if (needsLink.length > 0) {
+    parts.push(`${needsLink.length} ${plural(needsLink.length, 'necesita link nuevo', 'necesitan link nuevo')}`);
   }
 
   return parts.length > 0 ? `ComparaTech · ${parts.join(' · ')}` : 'ComparaTech · sin novedades hoy';
@@ -90,7 +99,7 @@ function candidateRow(c: DigestCandidate): string {
 }
 
 export function buildDigestHtml(input: DigestInput): string {
-  const { newCandidates, pendingTotal, publishedTotal, needsAttention, adminUrl } = input;
+  const { newCandidates, pendingTotal, publishedTotal, needsLink, pausedCount, adminUrl } = input;
 
   const newSection =
     newCandidates.length > 0
@@ -105,31 +114,43 @@ export function buildDigestHtml(input: DigestInput): string {
         de a poco, así que hay días sin novedades.
       </p>`;
 
-  // Estos son los que se cayeron del sitio solos: el vendedor dejó de
-  // ofrecer el producto o el link quedó apuntando a otra oferta. No se
-  // arreglan solos, hay que generarles un link nuevo.
+  // Lo único del correo que requiere acción: links que llevan a otro
+  // producto. El resto de lo que está fuera del sitio vuelve solo.
   const attentionSection =
-    needsAttention.length > 0
+    needsLink.length > 0
       ? `
       <div style="margin-top:28px;padding:14px 16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;">
         <div style="font-size:14px;color:#9a3412;font-weight:600;">
-          ${needsAttention.length}
-          ${plural(needsAttention.length, 'producto necesita', 'productos necesitan')}
+          ${needsLink.length}
+          ${plural(needsLink.length, 'producto necesita', 'productos necesitan')}
           un link nuevo
         </div>
         <div style="font-size:13px;color:#9a3412;margin-top:4px;line-height:1.5;">
           ${plural(
-            needsAttention.length,
-            'Dejó de mostrarse en el sitio porque el vendedor ya no lo ofrece, o porque su link apunta a otra oferta.',
-            'Dejaron de mostrarse en el sitio porque el vendedor ya no los ofrece, o porque sus links apuntan a otra oferta.'
+            needsLink.length,
+            'Su link de afiliado abre otra ficha, así que el comprador vería otro producto.',
+            'Sus links de afiliado abren otra ficha, así que el comprador vería otro producto.'
           )}
-          ${plural(needsAttention.length, 'Se recupera', 'Se recuperan')} generando el link
-          de nuevo desde Mercado Libre.
+          Se arregla generando el link desde la ficha correcta y guardándolo en el admin.
         </div>
         <ul style="margin:8px 0 0;padding-left:18px;font-size:13px;color:#9a3412;">
-          ${needsAttention.map((p) => `<li style="margin:2px 0;">${escapeHtml(p.name)}</li>`).join('')}
+          ${needsLink.map((p) => `<li style="margin:2px 0;">${escapeHtml(p.name)}</li>`).join('')}
         </ul>
+        <a href="${escapeHtml(adminUrl)}/admin/problemas"
+           style="display:inline-block;margin-top:10px;font-size:13px;font-weight:600;color:#9a3412;">
+          Resolver en el admin →
+        </a>
       </div>`
+      : '';
+
+  const pausedNote =
+    pausedCount > 0
+      ? `
+      <p style="font-size:13px;color:${MUTED};margin:20px 0 0;line-height:1.5;">
+        ${pausedCount} ${plural(pausedCount, 'producto está', 'productos están')} en pausa automática:
+        Mercado Libre se quedó sin vendedor verde para esa ficha.
+        ${plural(pausedCount, 'Vuelve', 'Vuelven')} a publicarse solos, sin que hagas nada.
+      </p>`
       : '';
 
   return `<!doctype html>
@@ -167,10 +188,11 @@ export function buildDigestHtml(input: DigestInput): string {
 
           ${newSection}
           ${attentionSection}
+          ${pausedNote}
 
           <p style="font-size:12px;color:${MUTED};margin:28px 0 24px;border-top:1px solid ${BORDER};padding-top:16px;line-height:1.6;">
             ${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.
-            Los precios se actualizan solos todos los días siguiendo la oferta a la que apunta cada link.
+            Los precios se comparan contra Mercado Libre cada 30 minutos.
           </p>
 
         </td></tr>
@@ -182,7 +204,7 @@ export function buildDigestHtml(input: DigestInput): string {
 }
 
 export function buildDigestText(input: DigestInput): string {
-  const { newCandidates, pendingTotal, publishedTotal, needsAttention, adminUrl } = input;
+  const { newCandidates, pendingTotal, publishedTotal, needsLink, pausedCount, adminUrl } = input;
   const lines = [
     `ComparaTech — resumen del catálogo`,
     ``,
@@ -197,9 +219,12 @@ export function buildDigestText(input: DigestInput): string {
     lines.push('Hoy no entraron productos nuevos.');
   }
 
-  if (needsAttention.length > 0) {
-    lines.push('', `${needsAttention.length} ${plural(needsAttention.length, 'producto necesita', 'productos necesitan')} un link nuevo:`);
-    needsAttention.forEach((p) => lines.push(`  - ${p.name}`));
+  if (needsLink.length > 0) {
+    lines.push('', `${needsLink.length} ${plural(needsLink.length, 'producto necesita', 'productos necesitan')} un link nuevo: ${adminUrl}/admin/problemas`);
+    needsLink.forEach((p) => lines.push(`  - ${p.name}`));
+  }
+  if (pausedCount > 0) {
+    lines.push('', `${pausedCount} ${plural(pausedCount, 'producto en pausa automática', 'productos en pausa automática')} (vuelven solos).`);
   }
 
   lines.push('', `${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.`);

@@ -9,6 +9,8 @@ import { ProductJsonLd } from '@/components/seo/ProductJsonLd';
 import { VariantLinks } from '@/components/product/VariantLinks';
 import { resolveDescription } from '@/lib/product-description';
 import { truncateAtWord } from '@/lib/text';
+import { buyUrl } from '@/lib/outbound';
+import { PriceFreshness } from '@/components/product/PriceFreshness';
 
 export async function generateStaticParams() {
   const products = await getAllProducts();
@@ -38,6 +40,7 @@ export async function generateMetadata({
   return {
     title: product.name,
     description,
+    alternates: { canonical: `/producto/${product.slug}` },
     openGraph: {
       title: product.name,
       description,
@@ -78,9 +81,10 @@ export default async function ProductoPage({
           <h1 className="mt-1 font-heading text-2xl font-bold sm:text-3xl">{product.name}</h1>
           <div className="mt-3">
             <PriceTag price={product.price} originalPrice={product.original_price} />
+            <PriceFreshness checkedAt={product.price_checked_at} />
           </div>
           <p className="mt-4 text-sm leading-relaxed text-muted">{resolveDescription(product)}</p>
-          <AffiliateButton href={product.affiliate_url} className="mt-6 w-full sm:w-auto" />
+          <AffiliateButton href={buyUrl(product)} className="mt-6 w-full sm:w-auto" />
           <p className="mt-3 text-xs text-muted">
             Al hacer clic serás dirigido a Mercado Libre para completar tu
             compra. Como afiliados, podemos ganar una comisión.

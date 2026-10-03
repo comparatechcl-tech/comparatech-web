@@ -12,6 +12,7 @@ const STEPS = [
 
 export const metadata: Metadata = {
   title: 'Nosotros',
+  alternates: { canonical: '/nosotros' },
   description: 'Quiénes están detrás de ComparaTech y cómo elegimos qué recomendar.',
 };
 

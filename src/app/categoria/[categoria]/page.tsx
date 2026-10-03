@@ -23,6 +23,7 @@ export async function generateMetadata({
 
   return {
     title: `${info.name} — Mejores precios en Chile`,
+    alternates: { canonical: `/categoria/${categoria}` },
     description: `Compara precios y ofertas de ${info.name.toLowerCase()} en Mercado Libre Chile.`,
   };
 }

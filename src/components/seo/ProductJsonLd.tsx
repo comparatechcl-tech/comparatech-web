@@ -1,5 +1,6 @@
 import { Product } from '@/lib/types';
 import { resolveDescription } from '@/lib/product-description';
+import { buyUrl } from '@/lib/outbound';
 
 export function ProductJsonLd({ product }: { product: Product }) {
   const jsonLd = {
@@ -16,7 +17,7 @@ export function ProductJsonLd({ product }: { product: Product }) {
       priceCurrency: 'CLP',
       price: product.price,
       availability: 'https://schema.org/InStock',
-      url: product.affiliate_url,
+      url: buyUrl(product),
     },
   };
 

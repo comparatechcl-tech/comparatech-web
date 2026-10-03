@@ -1,6 +1,10 @@
+import { cache } from 'react';
 import { getSupabase } from '@/lib/supabase/client';
 import { MOCK_PRODUCTS } from '@/lib/mock-data';
 import { Product } from '@/lib/types';
+import { getAffiliateSettings } from '@/lib/settings';
+import { resolveOutboundUrl } from '@/lib/outbound';
+import { stripDiacritics } from '@/lib/text';
 
 /**
  * Capa de acceso a datos de productos. Si Supabase está configurado (env
@@ -9,7 +13,12 @@ import { Product } from '@/lib/types';
  * desarrollo del resto de las páginas a la espera de credenciales.
  */
 
-export async function getAllProducts(): Promise<Product[]> {
+/**
+ * `cache` hace que el layout y la página compartan una sola lectura por
+ * render: antes cada sección (menú, ofertas, recién agregados) volvía a
+ * pedir el catálogo completo.
+ */
+const fetchActiveProducts = cache(async (): Promise<Product[]> => {
   const supabase = getSupabase();
   if (!supabase) return MOCK_PRODUCTS;
 
@@ -23,8 +32,21 @@ export async function getAllProducts(): Promise<Product[]> {
     .eq('is_hidden', false)
     .order('created_at', { ascending: false });
 
-  if (error || !data) return MOCK_PRODUCTS;
-  return data as Product[];
+  // Con Supabase configurado, un error NO puede caer a los datos de ejemplo:
+  // el sitio publicaría productos inventados con links que no llevan a
+  // ninguna parte. Fallar es mejor — durante una regeneración, Next sigue
+  // sirviendo la última versión buena de la página.
+  if (error) throw new Error(`No se pudo leer el catálogo: ${error.message}`);
+  return (data ?? []) as Product[];
+});
+
+function withOutbound(products: Product[], settings: Awaited<ReturnType<typeof getAffiliateSettings>>) {
+  return products.map((p) => ({ ...p, outbound_url: resolveOutboundUrl(p, settings) }));
+}
+
+export async function getAllProducts(): Promise<Product[]> {
+  const [products, settings] = await Promise.all([fetchActiveProducts(), getAffiliateSettings()]);
+  return withOutbound(products, settings);
 }
 
 export async function getProductBySlug(slug: string): Promise<Product | null> {
@@ -33,27 +55,42 @@ export async function getProductBySlug(slug: string): Promise<Product | null> {
     return MOCK_PRODUCTS.find((p) => p.slug === slug) ?? null;
   }
 
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .eq('slug', slug)
-    .eq('is_active', true)
-    .eq('is_hidden', false)
-    .single();
+  const [{ data, error }, settings] = await Promise.all([
+    supabase
+      .from('products')
+      .select('*')
+      .eq('slug', slug)
+      .eq('is_active', true)
+      .eq('is_hidden', false)
+      .maybeSingle(),
+    getAffiliateSettings(),
+  ]);
 
-  if (error || !data) return null;
-  return data as Product;
+  if (error) throw new Error(`No se pudo leer el producto: ${error.message}`);
+  if (!data) return null;
+  return withOutbound([data as Product], settings)[0];
 }
 
 /**
- * Clave con la que se agrupan las variantes de un mismo producto. ML entrega
- * `parent_id` (guardado como ml_family_id) y todos los colores del mismo
- * modelo lo comparten. Un producto sin familia —cargado a mano, o subido
- * antes de que existiera la columna— es su propio grupo, así que nunca se
- * pierde nada por no tener el dato.
+ * Nombre comparable: sin tildes, mayúsculas ni puntuación. Mercado Libre a
+ * veces tiene el mismo artículo en fichas de catálogo distintas —había tres
+ * "Audifonos Bluetooth Inalámbricos Blik Air500 Blanco", cada una con su
+ * propia ficha y su propia familia—, y por familia no se detectan.
  */
-function variantKey(product: Product): string {
-  return product.ml_family_id || product.id;
+function normalizedName(name: string): string {
+  return stripDiacritics(name.toLowerCase()).replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** Deja el más barato de cada grupo, respetando el orden original. */
+function keepCheapestBy(products: Product[], keyOf: (p: Product) => string): Product[] {
+  const best = new Map<string, Product>();
+  for (const product of products) {
+    const key = keyOf(product);
+    const current = best.get(key);
+    if (!current || product.price < current.price) best.set(key, product);
+  }
+  const chosen = new Set(best.values());
+  return products.filter((p) => chosen.has(p));
 }
 
 /**
@@ -61,27 +98,16 @@ function variantKey(product: Product): string {
  *
  * El prospector trae cada color como un producto separado: había dos "Silla
  * Gamer Vidita GX2000" idénticas en el home y dos audífonos Sleve Pulse ANC
- * al mismo precio. De 11 productos publicados, 10 eran pares de variantes.
+ * al mismo precio. Primero se agrupa por familia de ML (`parent_id`, que
+ * comparten los colores del mismo modelo) y después por nombre, para atrapar
+ * el mismo artículo publicado en fichas distintas.
  *
- * Se muestra la más barata de cada familia, que es la que le sirve a quien
- * compara precios — y en 3 de 5 familias los colores costaban distinto. Ante
- * el mismo precio gana la más reciente, que es como venían ordenadas.
+ * Se muestra el más barato de cada grupo, que es el que le sirve a quien
+ * compara precios. Ante el mismo precio gana el más reciente.
  */
 export function collapseVariants(products: Product[]): Product[] {
-  const bestByFamily = new Map<string, Product>();
-
-  for (const product of products) {
-    const key = variantKey(product);
-    const current = bestByFamily.get(key);
-    if (!current || product.price < current.price) {
-      bestByFamily.set(key, product);
-    }
-  }
-
-  // Respeta el orden en que venían los productos, quedándose con el
-  // representante elegido de cada familia.
-  const chosen = new Set(bestByFamily.values());
-  return products.filter((p) => chosen.has(p));
+  const byFamily = keepCheapestBy(products, (p) => p.ml_family_id || p.id);
+  return keepCheapestBy(byFamily, (p) => normalizedName(p.name));
 }
 
 /** Catálogo para listados: una tarjeta por producto real, sin variantes repetidas. */
@@ -90,17 +116,19 @@ export async function getCatalogProducts(): Promise<Product[]> {
 }
 
 /**
- * Las otras variantes del mismo producto (otros colores), para ofrecerlas en
- * la ficha. Sin esto, colapsar los listados escondería opciones reales: que
- * los Redmi Buds rosados sean más baratos no significa que alguien no quiera
- * los negros.
+ * Las otras versiones del mismo producto (otros colores, u otras fichas del
+ * mismo artículo), para ofrecerlas en la ficha. Sin esto, colapsar los
+ * listados escondería opciones reales: que los Redmi Buds rosados sean más
+ * baratos no significa que alguien no quiera los negros.
  */
 export async function getSiblingVariants(product: Product): Promise<Product[]> {
-  if (!product.ml_family_id) return [];
-
   const all = await getAllProducts();
+  const name = normalizedName(product.name);
   return all.filter(
-    (p) => p.id !== product.id && p.ml_family_id === product.ml_family_id
+    (p) =>
+      p.id !== product.id &&
+      ((product.ml_family_id && p.ml_family_id === product.ml_family_id) ||
+        normalizedName(p.name) === name)
   );
 }
 
@@ -142,8 +170,8 @@ export function savingsAmount(product: Product): number {
 /**
  * Productos en oferta, de mayor a menor descuento.
  *
- * Todos cumplen ya las reglas del Programa de Afiliados por venir del mismo
- * catálogo: vendedor con reputación verde y link generado a mano.
+ * El descuento es el del ganador de la caja de compra contra su precio de
+ * lista, ambos informados por Mercado Libre — no una etiqueta puesta a mano.
  */
 export async function getDeals(minDiscount = MIN_DEAL_DISCOUNT): Promise<Product[]> {
   const all = await getCatalogProducts();

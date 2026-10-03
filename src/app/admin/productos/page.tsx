@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { Product, RrssStatus } from '@/lib/types';
 import { CATEGORIES } from '@/lib/categories';
+import { readAffiliateSettings } from '@/lib/settings';
+import { resolveOutboundUrl } from '@/lib/outbound';
 import { Flame } from 'lucide-react';
 import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
 import { ProductsList } from './ProductsList';
@@ -31,7 +33,11 @@ export default async function ProductosPage({
   if (categoria) query = query?.eq('category', categoria);
   if (rrss) query = query?.eq('rrss_status', rrss);
 
-  let products: Product[] = admin ? ((await query)?.data ?? []) : [];
+  const settings = await readAffiliateSettings(admin);
+  let products: Product[] = (admin ? ((await query)?.data ?? []) : []).map((p: Product) => ({
+    ...p,
+    outbound_url: resolveOutboundUrl(p, settings),
+  }));
 
   // Vista para armar contenido de redes: deja solo lo rebajado y lo ordena
   // por descuento. Es la pregunta concreta que hay que responder antes de

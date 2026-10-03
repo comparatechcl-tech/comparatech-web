@@ -15,6 +15,12 @@ type MockProduct = Omit<
   | 'ml_domain_id'
   | 'seller_id'
   | 'rrss_status'
+  | 'inactive_reason'
+  | 'inactive_since'
+  | 'price_checked_at'
+  | 'winner_item_id'
+  | 'link_target_product_id'
+  | 'link_checked_at'
 >;
 
 const RAW_MOCK_PRODUCTS: MockProduct[] = [
@@ -169,4 +175,10 @@ export const MOCK_PRODUCTS: Product[] = RAW_MOCK_PRODUCTS.map((p) => ({
   ml_domain_id: null,
   seller_id: null,
   rrss_status: 'sin_usar',
+  inactive_reason: null,
+  inactive_since: null,
+  price_checked_at: null,
+  winner_item_id: null,
+  link_target_product_id: null,
+  link_checked_at: null,
 }));

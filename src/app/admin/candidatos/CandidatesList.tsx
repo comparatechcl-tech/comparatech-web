@@ -5,7 +5,13 @@ import { ProductCandidate } from '@/lib/types';
 import { CandidateCard } from './CandidateCard';
 import { rejectCandidates } from './actions';
 
-export function CandidatesList({ candidates }: { candidates: ProductCandidate[] }) {
+export function CandidatesList({
+  candidates,
+  directLinks = false,
+}: {
+  candidates: ProductCandidate[];
+  directLinks?: boolean;
+}) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +73,13 @@ export function CandidatesList({ candidates }: { candidates: ProductCandidate[] 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
       {visible.map((c) => (
-        <CandidateCard key={c.id} candidate={c} selected={selected.has(c.id)} onToggleSelect={() => toggle(c.id)} />
+        <CandidateCard
+          key={c.id}
+          candidate={c}
+          selected={selected.has(c.id)}
+          onToggleSelect={() => toggle(c.id)}
+          directLinks={directLinks}
+        />
       ))}
     </div>
   );

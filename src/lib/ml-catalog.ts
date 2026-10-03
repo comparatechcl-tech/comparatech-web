@@ -22,6 +22,8 @@ export const ROOT_CATEGORIES = [
   'MLC1000', // Electrónica, Audio y Video
   'MLC1574', // Hogar y Muebles
   'MLC5726', // Electrodomésticos
+  'MLC1144', // Consolas y Videojuegos
+  'MLC1039', // Cámaras y Accesorios
 ];
 
 export interface MlOffer {
@@ -110,15 +112,42 @@ export async function getProduct(productId: string, token: string): Promise<unkn
   return getJson(`${API}/products/${productId}`, token);
 }
 
-/** Ofertas de un producto. ML las devuelve ordenadas de menor a mayor precio. */
-export async function getProductOffers(productId: string, token: string): Promise<MlOffer[]> {
-  const data = (await getJson(`${API}/products/${productId}/items`, token)) as
-    | { results?: MlOffer[] }
-    | null;
+export type WinnersResult =
+  | { status: 'ok'; offers: MlOffer[] }
+  | { status: 'no_winner' }
+  | { status: 'error'; detail: string };
 
-  return (data?.results ?? []).filter(
-    (o) => o && typeof o.price === 'number' && o.price > 0 && o.seller_id
-  );
+/**
+ * Ofertas que compiten por la caja de compra de un producto de catálogo, en
+ * el orden en que ML las rankea. La primera es la que ve el comprador al
+ * abrir la ficha /p/{id}: es el precio que corresponde publicar.
+ *
+ * Distingue dos casos que antes se trataban igual, y que explicaban buena
+ * parte de los productos caídos:
+ *  - 404 "No winners found": ML no tiene ganador ahora mismo. Ocurre y se
+ *    revierte solo; el producto queda en pausa, no muerto.
+ *  - cualquier otro error (red, 5xx, 429): no dice nada sobre el producto.
+ *    El cron anterior lo interpretaba como "la oferta desapareció" y
+ *    desactivaba el producto por un tropiezo de la API.
+ */
+export async function getWinners(productId: string, token: string): Promise<WinnersResult> {
+  try {
+    const res = await fetchWithTimeout(
+      `${API}/products/${productId}/items`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      8000
+    );
+    if (res.status === 404) return { status: 'no_winner' };
+    if (!res.ok) return { status: 'error', detail: `HTTP ${res.status}` };
+
+    const data = (await res.json()) as { results?: MlOffer[] };
+    const offers = (data.results ?? []).filter(
+      (o) => o && typeof o.price === 'number' && o.price > 0 && o.seller_id
+    );
+    return offers.length > 0 ? { status: 'ok', offers } : { status: 'no_winner' };
+  } catch (e) {
+    return { status: 'error', detail: e instanceof Error ? e.message : 'fallo de red' };
+  }
 }
 
 /**

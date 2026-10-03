@@ -6,6 +6,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { Product } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
 import { AffiliateButton } from '@/components/product/AffiliateButton';
+import { buyUrl } from '@/lib/outbound';
 
 function parseNumeric(value: string | number): number | null {
   const n = typeof value === 'number' ? value : parseFloat(value);
@@ -80,7 +81,7 @@ export function CompareClient({
                 >
                   {formatCLP(p.price)}
                 </p>
-                <AffiliateButton href={p.affiliate_url} className="w-full text-xs sm:text-sm" />
+                <AffiliateButton href={buyUrl(p)} className="w-full text-xs sm:text-sm" />
               </div>
             ))}
           </div>

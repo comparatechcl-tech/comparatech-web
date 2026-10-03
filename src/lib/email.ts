@@ -46,6 +46,9 @@ export async function sendEmail(params: {
         subject: params.subject,
         html: params.html,
         ...(params.text ? { text: params.text } : {}),
+        // Gmail ofrecía traducir el resumen "del inglés": sin este
+        // encabezado adivina el idioma y con textos cortos se equivoca.
+        headers: { 'Content-Language': 'es' },
       }),
       signal: AbortSignal.timeout(10_000),
     });

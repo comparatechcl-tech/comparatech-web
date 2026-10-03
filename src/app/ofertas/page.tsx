@@ -6,6 +6,7 @@ import { formatCLP } from '@/lib/format';
 
 export const metadata: Metadata = {
   title: 'Ofertas del día',
+  alternates: { canonical: '/ofertas' },
   description:
     'Los mayores descuentos del catálogo, verificados contra el precio de lista de Mercado Libre y actualizados todos los días.',
 };

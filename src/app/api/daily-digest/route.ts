@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
     new_candidates: input.newCandidates.length,
     pending_total: input.pendingTotal,
     published_total: input.publishedTotal,
-    needs_attention: input.needsAttention.length,
+    needs_link: input.needsLink.length,
+    paused: input.pausedCount,
   });
 }

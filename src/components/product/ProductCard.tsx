@@ -5,12 +5,12 @@ import { Product } from '@/lib/types';
 import { getCategoryInfo } from '@/lib/queries/categories';
 import { PriceTag } from './PriceTag';
 import { AffiliateButton } from './AffiliateButton';
+import { buyUrl } from '@/lib/outbound';
+import { specBadges } from '@/lib/spec-badges';
 
 export function ProductCard({ product }: { product: Product }) {
   const categoryName = getCategoryInfo(product.category)?.name ?? product.category;
-  const specBadges = Object.values(product.specs)
-    .filter((v): v is string => typeof v === 'string' && v.length <= 16)
-    .slice(0, 3);
+  const badges = specBadges(product.specs);
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-surface transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow">
@@ -36,9 +36,9 @@ export function ProductCard({ product }: { product: Product }) {
           <h3 className="line-clamp-2 font-heading text-sm font-medium text-fg transition group-hover:text-accent">
             {product.name}
           </h3>
-          {specBadges.length > 0 && (
+          {badges.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
-              {specBadges.map((v) => (
+              {badges.map((v) => (
                 <span
                   key={v}
                   className="rounded-md border border-border bg-surface2 px-1.5 py-0.5 text-[10px] text-muted"
@@ -54,7 +54,7 @@ export function ProductCard({ product }: { product: Product }) {
         </div>
       </Link>
       <div className="px-4 pb-4">
-        <AffiliateButton href={product.affiliate_url} className="w-full text-xs" />
+        <AffiliateButton href={buyUrl(product)} className="w-full text-xs" />
       </div>
     </div>
   );

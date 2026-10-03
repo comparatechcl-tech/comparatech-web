@@ -1,0 +1,48 @@
+name: Refrescar precios
+
+# El plan gratuito de Vercel solo permite crons diarios, y en Mercado Libre
+# un precio de hace 24 horas ya puede estar mal. Este workflow llama al mismo
+# endpoint que el cron de Vercel, pero cada 30 minutos.
+#
+# Requiere el secreto CRON_SECRET (Settings → Secrets and variables →
+# Actions), con el mismo valor que la variable de Vercel. La URL se puede
+# cambiar con la variable SITE_URL cuando el sitio tenga dominio propio.
+#
+# GitHub puede atrasar unos minutos las ejecuciones programadas en horas de
+# mucha demanda; para esto da igual.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+# Si una corrida se atrasa, que no se monte con la siguiente.
+concurrency:
+  group: refresh-prices
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Llamar al endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://comparatech-web.vercel.app' }}
+        run: |
+          # Sin el secreto no hay nada que hacer, pero tampoco es una falla:
+          # así no llega un correo de error cada media hora mientras no se
+          # configura. El aviso queda en la pestaña Actions.
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::Falta el secreto CRON_SECRET en Settings → Secrets and variables → Actions"
+            exit 0
+          fi
+          # --retry cubre caídas pasajeras (502/503/504 o timeout): sin esto,
+          # un token de ML que no responde una vez dispara un correo de fallo.
+          curl -fsS --max-time 90 --retry 2 --retry-delay 30 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$SITE_URL/api/cron/refresh-prices"
+          echo

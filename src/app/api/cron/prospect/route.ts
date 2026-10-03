@@ -15,39 +15,37 @@ import {
   firstPictureUrl,
   getHighlightedProductIds,
   getProduct,
-  getProductOffers,
   getSellers,
   getSubcategories,
+  getWinners,
   isGreenSeller,
   mapWithConcurrency,
   type MlOffer,
-  type MlSeller,
 } from '@/lib/ml-catalog';
 
 /**
  * Prospección diaria del catálogo.
  *
- * Reemplaza al escenario de Make, que consumía créditos del plan gratuito y
- * chocaba contra el límite de ML al renovar su token ("Rate limiter
- * grant_type refresh_token was exceeded"). Acá se usa client_credentials,
- * que no necesita refresh.
- *
- * También amplía la fuente: Make miraba los destacados de dos o tres
- * categorías raíz —20 productos fijos cada una, casi los mismos todos los
- * días, por eso entraba alrededor de un candidato nuevo por jornada—. Este
- * recorre las subcategorías, que son unas 68 entre las cinco ramas del
- * proyecto y suman más de mil destacados.
+ * Recorre los destacados de las subcategorías de las ramas que sigue el
+ * proyecto, descarta lo que ya conoce, analiza el resto y deja en la cola de
+ * revisión lo que agrega algo al sitio. Después refresca la cola y manda el
+ * resumen por correo.
  *
  * El orden de las llamadas es lo que hace que todo entre en el techo de 60
  * segundos de la función:
  *   1. destacados de todas las subcategorías (una llamada cada una)
- *   2. se descartan los IDs ya conocidos, sin gastar una sola llamada más
- *   3. ficha de catálogo de los que quedan
- *   4. ofertas SOLO de los que caen dentro de la taxonomía del sitio
+ *   2. se descarta lo ya visto, sin gastar una sola llamada más
+ *   3. ficha de catálogo de lo que queda
+ *   4. ganador de la caja de compra SOLO de lo que cae en la taxonomía
  *   5. reputación de los vendedores, en lotes de 20
  *
+ * Lo descartado se recuerda en prospect_seen. Antes no: el cron analizaba
+ * cada día los mismos ~60 destacados —el 82% fuera del mapa de dominios—,
+ * los volvía a descartar, y nunca llegaba al resto de la lista. Había 675
+ * destacados sin revisar y entraban 1 a 4 candidatos por día.
+ *
  * Parámetros útiles para correrlo a mano:
- *   ?dry=1    analiza y reporta sin escribir nada
+ *   ?dry=1    analiza y reporta sin escribir nada ni mandar correo
  *   ?limit=N  cambia el tope de productos nuevos por corrida
  */
 
@@ -57,106 +55,131 @@ export const maxDuration = 60;
 const TIME_BUDGET_MS = 45_000;
 
 /**
- * Tope de productos nuevos analizados por corrida. Lo que no alcanza a
- * entrar queda para el día siguiente: como los IDs ya vistos se descartan
- * antes de gastar llamadas, cada corrida avanza sobre lo que falta.
+ * Tope de productos nuevos analizados por corrida. Medido: 400 fichas en
+ * 7,7 segundos, así que 300 deja holgura de sobra. Lo que no alcanza entra
+ * en la corrida siguiente.
  */
-const DEFAULT_MAX_NEW_PRODUCTS = 60;
+const DEFAULT_MAX_NEW_PRODUCTS = 300;
 
 const CONCURRENCY = 6;
 
-function pickCheapestGreenOffer(
-  offers: MlOffer[],
-  sellers: Map<number, MlSeller>
-): MlOffer | null {
-  // ML devuelve las ofertas de menor a mayor precio, así que la primera de
-  // vendedor verde ya es la más barata que podemos publicar.
-  return offers.find((o) => isGreenSeller(sellers.get(o.seller_id))) ?? null;
-}
+const DAY_MS = 86_400_000;
+
+/**
+ * Cuándo vuelve a mirarse algo descartado. Los dominios fuera del mapa no
+ * vencen por tiempo: vuelven solos el día que el dominio se suma al mapa.
+ */
+const RETRY_AFTER_DAYS: Record<string, number> = {
+  sin_datos: 30,
+  sin_ganador: 3,
+  ganador_no_verde: 7,
+  familia_publicada: 7,
+  variante_del_lote: 7,
+};
 
 type SupabaseAdmin = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
 
+interface SeenRecord {
+  ml_product_id: string;
+  reason: string;
+  domain_id: string | null;
+}
+
+/** IDs que la prospección miró hace poco y no vale la pena volver a analizar. */
+async function loadExcludedSeen(admin: SupabaseAdmin): Promise<Set<string>> {
+  const { data } = await admin.from('prospect_seen').select('ml_product_id, reason, domain_id, seen_at');
+  const now = Date.now();
+  const excluded = new Set<string>();
+
+  for (const row of data ?? []) {
+    if (row.reason === 'dominio_no_mapeado') {
+      // Si el dominio ya está en el mapa, vuelve a ser elegible.
+      if (!categoryFromDomain(row.domain_id)) excluded.add(row.ml_product_id);
+      continue;
+    }
+    const retryDays = RETRY_AFTER_DAYS[row.reason] ?? 7;
+    if (now - new Date(row.seen_at).getTime() < retryDays * DAY_MS) excluded.add(row.ml_product_id);
+  }
+  return excluded;
+}
+
 /**
- * Vuelve a mirar en ML los candidatos que esperan revisión y actualiza su
- * precio, su descuento y la oferta a la que apuntan.
+ * Vuelve a mirar en ML los candidatos que esperan revisión y actualiza
+ * precio, descuento y vendedor con el ganador de la caja de compra — el mismo
+ * criterio con que se publica, para que el precio que se revisa sea el que
+ * después se muestra.
  *
- * Un candidato que ya no tiene ninguna oferta de vendedor verde no se puede
- * aprobar, así que se rechaza: dejarlo en la cola solo hace perder tiempo a
- * quien revisa.
+ * Un candidato sin ganador no se rechaza: suele ser temporal, y rechazarlo
+ * lo sacaría para siempre de la prospección.
  */
 async function refreshPendingCandidates(
   admin: SupabaseAdmin,
   token: string,
   outOfTime: () => boolean,
   dryRun: boolean
-): Promise<{ updated: number; dropped: number }> {
+): Promise<{ updated: number; unavailable: number }> {
   const { data } = await admin
     .from('product_candidates')
-    .select('id, ml_product_id, ml_item_id, price, original_price')
+    .select('id, ml_product_id, ml_item_id, price, original_price, seller_id')
     .eq('status', 'pending_review');
 
   const pending = data ?? [];
-  if (pending.length === 0) return { updated: 0, dropped: 0 };
+  if (pending.length === 0) return { updated: 0, unavailable: 0 };
 
-  const withOffers = (
-    await mapWithConcurrency(pending, CONCURRENCY, async (candidate) => {
-      if (outOfTime()) return null;
-      const offers = await getProductOffers(candidate.ml_product_id, token);
-      return { candidate, offers };
-    })
-  ).filter(Boolean) as { candidate: (typeof pending)[number]; offers: MlOffer[] }[];
+  const checked = await mapWithConcurrency(pending, CONCURRENCY, async (candidate) => ({
+    candidate,
+    winners: outOfTime()
+      ? ({ status: 'error', detail: 'sin tiempo' } as const)
+      : await getWinners(candidate.ml_product_id, token),
+  }));
 
   const sellers = await getSellers(
-    withOffers.flatMap((d) => d.offers.map((o) => o.seller_id)),
+    checked.flatMap(({ winners }) => (winners.status === 'ok' ? [winners.offers[0].seller_id] : [])),
     token
   );
 
   let updated = 0;
-  let dropped = 0;
+  let unavailable = 0;
 
-  for (const { candidate, offers } of withOffers) {
-    const offer = pickCheapestGreenOffer(offers, sellers);
-
-    if (!offer) {
-      dropped++;
-      if (!dryRun) {
-        await admin
-          .from('product_candidates')
-          .update({ status: 'rejected', reviewed_at: new Date().toISOString() })
-          .eq('id', candidate.id);
-      }
+  for (const { candidate, winners } of checked) {
+    if (winners.status !== 'ok') {
+      if (winners.status === 'no_winner') unavailable++;
+      continue;
+    }
+    const winner = winners.offers[0];
+    const seller = sellers.get(winner.seller_id);
+    if (!isGreenSeller(seller)) {
+      unavailable++;
       continue;
     }
 
     const listPrice =
-      typeof offer.original_price === 'number' && offer.original_price > offer.price
-        ? offer.original_price
+      typeof winner.original_price === 'number' && winner.original_price > winner.price
+        ? winner.original_price
         : null;
-
     const changed =
-      offer.price !== candidate.price ||
+      winner.price !== candidate.price ||
       listPrice !== candidate.original_price ||
-      offer.item_id !== candidate.ml_item_id;
-
+      winner.item_id !== candidate.ml_item_id;
     if (!changed) continue;
-    updated++;
 
+    updated++;
     if (!dryRun) {
       await admin
         .from('product_candidates')
         .update({
-          price: offer.price,
+          price: winner.price,
           original_price: listPrice,
-          ml_item_id: offer.item_id,
-          seller_id: offer.seller_id,
-          seller_nickname: sellers.get(offer.seller_id)?.nickname ?? null,
-          seller_sales_count: sellers.get(offer.seller_id)?.salesCount ?? 0,
+          ml_item_id: winner.item_id,
+          seller_id: winner.seller_id,
+          seller_nickname: seller?.nickname ?? null,
+          seller_sales_count: seller?.salesCount ?? 0,
         })
         .eq('id', candidate.id);
     }
   }
 
-  return { updated, dropped };
+  return { updated, unavailable };
 }
 
 /**
@@ -221,23 +244,26 @@ export async function GET(req: NextRequest) {
     ),
   ];
 
-  // 3. Fuera lo ya conocido, antes de gastar llamadas de detalle. Incluye
-  //    los candidatos rechazados: si alguien ya dijo que no, no vuelve a la
-  //    cola de revisión.
-  const [{ data: knownProducts }, { data: knownCandidates }] = await Promise.all([
+  // 3. Fuera lo ya conocido, antes de gastar llamadas de detalle: lo
+  //    publicado, lo que ya pasó por revisión —incluido lo rechazado: si
+  //    alguien dijo que no, no vuelve a la cola— y lo descartado hace poco.
+  const [{ data: knownProducts }, { data: knownCandidates }, excludedSeen] = await Promise.all([
     admin.from('products').select('ml_product_id, ml_family_id, price').eq('is_active', true),
     admin.from('product_candidates').select('ml_product_id'),
+    loadExcludedSeen(admin),
   ]);
 
   const alreadySeen = new Set<string>(
     [
       ...(knownProducts ?? []).map((p) => p.ml_product_id),
       ...(knownCandidates ?? []).map((c) => c.ml_product_id),
+      ...excludedSeen,
     ].filter(Boolean) as string[]
   );
 
   const unseen = highlighted.filter((id) => !alreadySeen.has(id));
   const toInspect = unseen.slice(0, maxNewProducts);
+  const seenRecords: SeenRecord[] = [];
 
   // 4. Ficha de catálogo de cada producto nuevo.
   const fetched = (
@@ -250,20 +276,22 @@ export async function GET(req: NextRequest) {
 
   // 5. El mapa de dominios (lib/categories) hace de lista blanca: define de
   //    qué se trata el sitio. Recorrer subcategorías enteras trae cosas que
-  //    no pintan nada acá —una tanda de walkie-talkies, sets de
-  //    destornilladores, una pantalla de repuesto para iPhone— y mandarlas a
-  //    revisión humana devuelve el problema que veníamos resolviendo.
+  //    no pintan nada acá —walkie-talkies, sets de destornilladores,
+  //    pantallas de repuesto— y mandarlas a revisión humana sería ruido.
   //
-  //    Se filtra antes de pedir las ofertas, así el descarte no cuesta una
+  //    Se filtra antes de pedir el ganador, así el descarte no cuesta una
   //    segunda llamada. Los dominios rechazados se reportan: si aparece uno
-  //    que sí interesa, se suma al mapa y entra en la corrida siguiente.
+  //    que sí interesa, se suma al mapa y sus productos vuelven solos.
   const unmappedDomains = new Map<string, number>();
   const relevant = [];
 
   for (const { productId, product } of fetched) {
     const name = (product as { name?: string })?.name?.trim();
     const imageUrl = firstPictureUrl(product);
-    if (!name || !imageUrl) continue;
+    if (!name || !imageUrl) {
+      seenRecords.push({ ml_product_id: productId, reason: 'sin_datos', domain_id: null });
+      continue;
+    }
 
     const enrichment = enrichFromMlProduct(product, name);
     const category = categoryFromDomain(enrichment.domainId);
@@ -271,59 +299,70 @@ export async function GET(req: NextRequest) {
     if (!category) {
       const domain = enrichment.domainId ?? '(sin dominio)';
       unmappedDomains.set(domain, (unmappedDomains.get(domain) ?? 0) + 1);
+      seenRecords.push({
+        ml_product_id: productId,
+        reason: 'dominio_no_mapeado',
+        domain_id: enrichment.domainId,
+      });
       continue;
     }
 
     relevant.push({ productId, name, imageUrl, enrichment, category });
   }
 
-  // 6. Ofertas de los que sí interesan.
-  const withOffers = (
+  // 6. Ganador de la caja de compra de los que sí interesan: es el precio
+  //    que se va a publicar, porque es el que ve el comprador en la ficha.
+  let skippedNoWinner = 0;
+  const withWinner = (
     await mapWithConcurrency(relevant, CONCURRENCY, async (item) => {
       if (outOfTime()) return null;
-      const offers = await getProductOffers(item.productId, token);
-      return offers.length > 0 ? { ...item, offers } : null;
+      const winners = await getWinners(item.productId, token);
+      if (winners.status === 'no_winner') {
+        skippedNoWinner++;
+        seenRecords.push({ ml_product_id: item.productId, reason: 'sin_ganador', domain_id: item.enrichment.domainId });
+        return null;
+      }
+      // Un error transitorio no se recuerda: se reintenta mañana.
+      return winners.status === 'ok' ? { ...item, winner: winners.offers[0] } : null;
     })
-  ).filter(Boolean) as (typeof relevant[number] & { offers: MlOffer[] })[];
+  ).filter(Boolean) as (typeof relevant[number] & { winner: MlOffer })[];
 
-  // 7. Reputación de todos los vendedores involucrados, en lotes de 20.
+  // 7. Reputación de los ganadores, en lotes de 20.
   const sellers = await getSellers(
-    withOffers.flatMap((d) => d.offers.map((o) => o.seller_id)),
+    withWinner.map((d) => d.winner.seller_id),
     token
   );
 
-  // 8. Un candidato por producto, con la oferta más barata de vendedor
-  //    verde. Solo reputación verde entra al sitio, según las reglas del
-  //    Programa de Afiliados (CLAUDE.md).
+  // 8. Solo entra si el ganador tiene reputación verde: es quien le vende al
+  //    comprador, y el Programa de Afiliados solo admite vendedores verdes.
   let skippedNoGreenSeller = 0;
   const candidates = [];
 
-  for (const item of withOffers) {
-    const offer = pickCheapestGreenOffer(item.offers, sellers);
-    if (!offer) {
+  for (const item of withWinner) {
+    const seller = sellers.get(item.winner.seller_id);
+    if (!isGreenSeller(seller)) {
       skippedNoGreenSeller++;
+      seenRecords.push({ ml_product_id: item.productId, reason: 'ganador_no_verde', domain_id: item.enrichment.domainId });
       continue;
     }
-    const seller = sellers.get(offer.seller_id);
 
     candidates.push({
       ml_product_id: item.productId,
       ml_family_id: item.enrichment.familyId,
       ml_domain_id: item.enrichment.domainId,
-      // Guarda a qué oferta corresponde el precio. El panel de revisión
-      // enlaza directo a ella, para no tener que buscarla a mano entre las
-      // decenas de vendedores y variantes que devuelve una búsqueda por
-      // nombre — y el link de afiliado se genera desde la oferta correcta.
-      ml_item_id: offer.item_id,
+      ml_item_id: item.winner.item_id,
       name: item.name,
       brand: item.enrichment.brand,
       category: item.category,
-      price: offer.price,
-      original_price: offer.original_price ?? null,
+      price: item.winner.price,
+      original_price:
+        typeof item.winner.original_price === 'number' && item.winner.original_price > item.winner.price
+          ? item.winner.original_price
+          : null,
       image_url: item.imageUrl,
       description: item.enrichment.description,
       specs: item.enrichment.specs,
-      seller_id: offer.seller_id,
+      seller_id: item.winner.seller_id,
       seller_nickname: seller?.nickname ?? null,
       seller_reputation: 'verde',
       seller_sales_count: seller?.salesCount ?? 0,
@@ -331,54 +370,52 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 9. Los mismos filtros que ya aplicaba el endpoint de Make: colores
-  //    repetidos dentro del lote y familias que el sitio ya publica.
+  // 9. Colores repetidos dentro del lote y familias que el sitio ya publica.
   const { kept, dropped: sameBatchVariants } = collapseCandidateFamilies(candidates);
   const { fresh, skipped: skippedInCatalog } = partitionCandidates(
     kept,
     buildPublishedCatalog(knownProducts ?? [])
   );
-
-  let inserted = 0;
-  if (fresh.length > 0 && !dryRun) {
-    const { error } = await admin
-      .from('product_candidates')
-      .upsert(fresh, { onConflict: 'ml_product_id' });
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 502 });
-    }
-    inserted = fresh.length;
+  for (const c of sameBatchVariants) {
+    seenRecords.push({ ml_product_id: c.ml_product_id, reason: 'variante_del_lote', domain_id: c.ml_domain_id });
+  }
+  for (const { candidate } of skippedInCatalog) {
+    seenRecords.push({ ml_product_id: candidate.ml_product_id, reason: 'familia_publicada', domain_id: candidate.ml_domain_id });
   }
 
-  // 10. Refresca la cola de revisión.
-  //
-  //     Los candidatos quedaban con el precio del día que entraron y podían
-  //     esperar días antes de que alguien los mirara: un parlante JBL subió
-  //     $6.000 en 24 horas y otro producto ya ni se ofrecía. Quien revisaba
-  //     abría el link y encontraba otro precio.
-  //
-  //     Como todavía no tienen link de afiliado, acá sí corresponde re-elegir
-  //     la oferta más barata con vendedor verde — a diferencia de los
-  //     productos publicados, donde el precio debe seguir al link ya generado.
+  let inserted = 0;
+  if (!dryRun) {
+    if (fresh.length > 0) {
+      const { error } = await admin
+        .from('product_candidates')
+        .upsert(fresh, { onConflict: 'ml_product_id' });
+      if (error) return NextResponse.json({ error: error.message }, { status: 502 });
+      inserted = fresh.length;
+    }
+
+    if (seenRecords.length > 0) {
+      const now = new Date().toISOString();
+      await admin
+        .from('prospect_seen')
+        .upsert(seenRecords.map((r) => ({ ...r, seen_at: now })), { onConflict: 'ml_product_id' });
+    }
+  }
+
+  // 10. Refresca la cola de revisión: los candidatos pueden esperar días y
+  //     el precio con que entraron deja de ser el que se ve en la ficha.
   const refreshed = await refreshPendingCandidates(admin, token, outOfTime, dryRun);
 
-  // 11. El resumen diario sale desde acá, después de prospectar y refrescar,
-  //     para que refleje el estado del día y no el de ayer. Antes lo enviaba
-  //     un escenario de Make cuyo módulo de Gmail tenía el asunto y el
-  //     contenido vacíos: el correo llegaba en blanco todos los días y cada
-  //     intento de arreglarlo era a ciegas sobre una configuración que no se
-  //     versiona. Si el envío falla, queda el motivo en la respuesta.
+  // 11. El resumen sale al final, para que refleje el estado del día.
   const digest = dryRun ? { ok: true as const, skipped: 'dry_run' } : await sendDailyDigest(admin);
 
   return NextResponse.json({
     ok: true,
     dry_run: dryRun,
     inserted,
-    candidates_refreshed: refreshed.updated,
-    candidates_dropped: refreshed.dropped,
-    digest,
     would_insert: fresh.length,
+    candidates_refreshed: refreshed.updated,
+    candidates_unavailable: refreshed.unavailable,
+    digest,
     new_candidates: fresh.map((c) => ({
       name: c.name,
       category: c.category,
@@ -390,10 +427,12 @@ export async function GET(req: NextRequest) {
     already_known: highlighted.length - unseen.length,
     inspected: toInspect.length,
     pending_for_next_run: Math.max(unseen.length - toInspect.length, 0),
+    remembered_discards: seenRecords.length,
     skipped_unmapped_domain: [...unmappedDomains.values()].reduce((a, b) => a + b, 0),
     unmapped_domains: Object.fromEntries(
       [...unmappedDomains.entries()].sort((a, b) => b[1] - a[1])
     ),
+    skipped_no_winner: skippedNoWinner,
     skipped_no_green_seller: skippedNoGreenSeller,
     skipped_same_batch_variants: sameBatchVariants.length,
     skipped_already_in_catalog: skippedInCatalog.length,

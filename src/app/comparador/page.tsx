@@ -4,6 +4,7 @@ import { CompareClient } from '@/components/compare/CompareClient';
 
 export const metadata: Metadata = {
   title: 'Comparador de productos',
+  alternates: { canonical: '/comparador' },
   description: 'Compara specs y precios de dos productos lado a lado.',
 };
 

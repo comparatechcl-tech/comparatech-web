@@ -29,6 +29,21 @@ export interface Product {
   seller_id: number | null;
   rrss_status: RrssStatus;
   created_at: string;
+  /** Por qué está fuera del sitio. null si está activo. */
+  inactive_reason: 'sin_ganador' | 'ganador_no_verde' | 'link_otro_producto' | null;
+  inactive_since: string | null;
+  /** Última vez que se comparó el precio contra la ficha de Mercado Libre. */
+  price_checked_at: string | null;
+  /** Oferta ganadora de la caja de compra en la última revisión. */
+  winner_item_id: string | null;
+  /** Ficha de catálogo a la que lleva el link de afiliado. */
+  link_target_product_id: string | null;
+  link_checked_at: string | null;
+  /**
+   * Destino del botón "Ver en Mercado Libre" según la configuración vigente.
+   * No es una columna: se calcula al leer el producto (ver lib/outbound).
+   */
+  outbound_url?: string;
 }
 
 export interface ProductCandidate {

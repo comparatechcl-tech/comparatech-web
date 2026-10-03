@@ -15,7 +15,7 @@ export async function gatherDigestInput(admin: SupabaseAdmin): Promise<DigestInp
   // zona horaria del servidor y del cambio de hora en Chile.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  const [newRes, pendingRes, publishedRes, attentionRes] = await Promise.all([
+  const [newRes, pendingRes, publishedRes, offSiteRes] = await Promise.all([
     admin
       .from('product_candidates')
       .select('name, price, category, image_url, seller_nickname')
@@ -31,21 +31,25 @@ export async function gatherDigestInput(admin: SupabaseAdmin): Promise<DigestInp
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
       .eq('is_hidden', false),
-    // Se cayeron del sitio solos y no se recuperan sin intervención: el
-    // vendedor dejó de ofrecer el producto, o el link apunta a otra oferta.
+    // Todo lo que está fuera del sitio sin que nadie lo haya ocultado. Se
+    // separa abajo entre lo que requiere acción y lo que vuelve solo.
     admin
       .from('products')
-      .select('name')
+      .select('name, inactive_reason')
       .eq('is_active', false)
       .eq('is_hidden', false)
-      .order('created_at', { ascending: false }),
+      .order('inactive_since', { ascending: false, nullsFirst: false }),
   ]);
+
+  const offSite = (offSiteRes.data ?? []) as { name: string; inactive_reason: string | null }[];
+  const needsLink = offSite.filter((p) => p.inactive_reason === 'link_otro_producto');
 
   return {
     newCandidates: (newRes.data ?? []) as DigestCandidate[],
     pendingTotal: pendingRes.count ?? 0,
     publishedTotal: publishedRes.count ?? 0,
-    needsAttention: (attentionRes.data ?? []) as { name: string }[],
+    needsLink: needsLink.map((p) => ({ name: p.name })),
+    pausedCount: offSite.length - needsLink.length,
     adminUrl: SITE_URL,
   };
 }

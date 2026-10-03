@@ -1,11 +1,16 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Search, Check, Tags, ChartNoAxesColumn, Link2, Smartphone, Headphones, Sofa, WashingMachine, Package, Flame } from 'lucide-react';
+import { Search, Check, Tags, ChartNoAxesColumn, Link2, Smartphone, Headphones, Sofa, WashingMachine, Package, Flame, Gamepad2 } from 'lucide-react';
 import { getFeaturedProducts, getDeals } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FounderBio } from '@/components/brand/FounderBio';
 import { QuickCompare } from '@/components/compare/QuickCompare';
 import { getSiteCategories } from '@/lib/queries/site-categories';
+
+// El canonical va por pagina y no en el layout: ahi convertiria a todo el
+// sitio en duplicado de la home.
+export const metadata: Metadata = { alternates: { canonical: '/' } };
 
 // Revalida cada 5 minutos: así el catálogo se actualiza solo (sin tener que
 // hacer un redeploy manual) cuando se cargan productos nuevos en Supabase.
@@ -53,6 +58,11 @@ const CATEGORY_STYLE: Record<
     icon: Headphones,
     glow: 'rgba(0,212,255,0.4)',
     desc: 'Audífonos, parlantes y más',
+  },
+  gaming: {
+    icon: Gamepad2,
+    glow: 'rgba(168,85,247,0.4)',
+    desc: 'Consolas, controles y accesorios',
   },
   hogar: {
     icon: Sofa,

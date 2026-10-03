@@ -16,6 +16,7 @@ export const CATEGORIES: CategoryInfo[] = [
   { slug: 'celulares', name: 'Celulares' },
   { slug: 'computacion', name: 'Computación' },
   { slug: 'audio', name: 'Audio' },
+  { slug: 'gaming', name: 'Gaming' },
   { slug: 'electronica', name: 'Electrónica' },
   { slug: 'hogar', name: 'Hogar' },
   { slug: 'electrodomesticos', name: 'Electrodomésticos' },
@@ -29,9 +30,11 @@ export const CATEGORIES: CategoryInfo[] = [
  * que viene del bloque de destacados y es demasiado gruesa: por eso los
  * audífonos entraban como "celulares" y una silla gamer como "computación".
  *
- * Los identificadores están verificados contra el domain_discovery de ML.
- * La lista crece a medida que llegan tipos de producto nuevos; lo que no
- * esté acá conserva la categoría que venga en el candidato.
+ * Hace de lista blanca de la prospección: lo que no está acá no llega a la
+ * cola de revisión. Los identificadores salen del domain_discovery de ML o
+ * del reporte de dominios descartados que devuelve el cron de prospección.
+ * Al sumar uno, los productos que se habían descartado por ese dominio
+ * vuelven solos a ser analizados.
  */
 const DOMAIN_TO_CATEGORY: Record<string, string> = {
   // Audio
@@ -51,12 +54,29 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   'MLC-3D_PRINTER_FILAMENTS': 'computacion',
   'MLC-MEMORY_CARDS': 'computacion',
   'MLC-TABLETS': 'computacion',
+  // Teclados de escritorio: hasta ahora solo estaban los de notebook, así
+  // que todos los teclados gamer se descartaban.
+  'MLC-PC_KEYBOARDS': 'computacion',
+  'MLC-HARD_DRIVES_AND_SSDS': 'computacion',
+  'MLC-PENDRIVES': 'computacion',
+  'MLC-ROUTERS_AND_WIRELESS_SYSTEMS': 'computacion',
+  'MLC-VIDEO_CAPTURE_DEVICES': 'computacion',
+  'MLC-STABILIZERS_AND_UPS': 'computacion',
+  'MLC-USB_HUBS': 'computacion',
 
   // Electrónica
   'MLC-SMARTWATCHES': 'electronica',
   'MLC-TELEVISIONS': 'electronica',
   'MLC-MOBILE_DEVICE_CHARGERS': 'electronica',
   'MLC-WIRELESS_ANTENNAS_AND_ADAPTERS': 'electronica',
+  'MLC-STREAMING_MEDIA_DEVICES': 'electronica',
+  'MLC-PROJECTORS': 'electronica',
+  'MLC-DRONES': 'electronica',
+  'MLC-VIDEO_CAMERAS': 'electronica',
+
+  // Gaming
+  'MLC-GAME_CONSOLES': 'gaming',
+  'MLC-GAMEPADS_AND_JOYSTICKS': 'gaming',
 
   // Hogar
   'MLC-OFFICE_CHAIRS': 'hogar',
