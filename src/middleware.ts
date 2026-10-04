@@ -1,32 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkBasicAuth, getAdminCredentials } from '@/lib/basic-auth';
 
 /**
- * Protege /admin con Basic Auth simple (usuario/clave en variables de
- * entorno). Es una herramienta interna de 2 personas, no hace falta un
- * sistema de sesiones — el navegador recuerda las credenciales.
+ * Protege /admin con Basic Auth, una clave por persona (ADMIN_USERS). Es
+ * una herramienta interna de pocas personas, no hace falta un sistema de
+ * sesiones — el navegador recuerda las credenciales.
+ *
+ * Las acciones del admin vuelven a verificar por su cuenta (requireAdmin):
+ * este middleware solo cubre las páginas.
  */
-export function middleware(req: NextRequest) {
-  const user = process.env.ADMIN_USER;
-  const password = process.env.ADMIN_PASSWORD;
 
-  if (!user || !password) {
-    return new NextResponse('Admin no configurado (faltan ADMIN_USER / ADMIN_PASSWORD)', { status: 500 });
+// Ni en un iframe, ni en Google, ni en el caché de un proxy: la respuesta
+// de /admin (aunque sea el 401) no tiene nada que hacer fuera del navegador
+// de quien la pidió.
+const PRIVATE_HEADERS = {
+  'X-Frame-Options': 'DENY',
+  'X-Robots-Tag': 'noindex, nofollow',
+  'Cache-Control': 'no-store',
+};
+
+export function middleware(req: NextRequest) {
+  // Falla cerrado: sin credenciales configuradas no se entra, en vez de
+  // dejar el admin abierto por una variable olvidada en Vercel.
+  if (getAdminCredentials().length === 0) {
+    return new NextResponse('Admin no configurado (falta ADMIN_USERS)', {
+      status: 500,
+      headers: PRIVATE_HEADERS,
+    });
   }
 
-  const auth = req.headers.get('authorization');
-  if (auth) {
-    const [scheme, encoded] = auth.split(' ');
-    if (scheme === 'Basic' && encoded) {
-      const [reqUser, reqPassword] = Buffer.from(encoded, 'base64').toString().split(':');
-      if (reqUser === user && reqPassword === password) {
-        return NextResponse.next();
-      }
-    }
+  if (checkBasicAuth(req.headers.get('authorization'))) {
+    return NextResponse.next();
   }
 
   return new NextResponse('Autenticación requerida', {
     status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="ComparaTech Admin"' },
+    headers: {
+      ...PRIVATE_HEADERS,
+      'WWW-Authenticate': 'Basic realm="ComparaTech Admin", charset="UTF-8"',
+    },
   });
 }
 

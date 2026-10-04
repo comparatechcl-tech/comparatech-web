@@ -1,6 +1,27 @@
 export type SellerReputation = 'verde' | 'amarillo' | 'naranja' | 'rojo';
 export type RrssStatus = 'sin_usar' | 'seleccionado' | 'publicado';
 
+/**
+ * Señales de la oferta ganadora tal como las informa Mercado Libre en la
+ * última revisión de precio (ver lib/pricing). Se guardan para mostrar en
+ * la ficha solo datos ciertos: nada de "llega mañana" ni promesas que ML no
+ * confirma.
+ */
+export interface OfferInfo {
+  free_shipping: boolean;
+  /** Enviado con Full (logistic_type 'fulfillment'). */
+  is_full: boolean;
+  /** La vende Mercado Libre directamente (tag 'first_party'). */
+  sold_by_ml: boolean;
+  official_store: boolean;
+  /** "Garantía de fábrica: 2 años". null si no hay o dice "Sin garantía". */
+  warranty: string | null;
+  /** Cuántos vendedores ofrecen el producto en la ficha. */
+  offers_count: number | null;
+  /** ¿El ganador es además el precio más bajo? null si no se pudo saber. */
+  is_lowest: boolean | null;
+}
+
 export interface Product {
   id: string;
   slug: string;
@@ -44,6 +65,18 @@ export interface Product {
    * No es una columna: se calcula al leer el producto (ver lib/outbound).
    */
   outbound_url?: string;
+  // Columnas agregadas por migraciones posteriores. Son opcionales porque
+  // el sitio tiene que seguir funcionando mientras la migración no se
+  // aplica (ver lib/supabase/errors).
+  offer_info?: OfferInfo | null;
+  /** Categoría hoja de ML del ganador ("MLC3697"). */
+  ml_category_id?: string | null;
+  /** Categoría raíz de ML: define si la comisión es 4% u 8% (lib/commission). */
+  ml_root_category?: string | null;
+  rrss_published_at?: string | null;
+  rrss_channel?: string | null;
+  deleted_at?: string | null;
+  admin_note?: string | null;
 }
 
 export interface ProductCandidate {
@@ -66,9 +99,18 @@ export interface ProductCandidate {
   seller_reputation: SellerReputation;
   seller_sales_count: number;
   affiliate_url: string | null;
-  status: 'pending_review' | 'approved' | 'rejected';
+  status: 'pending_review' | 'approved' | 'rejected' | 'expired';
   source: string;
   prospected_at: string;
+  reject_reason?: string | null;
+  reviewed_by?: string | null;
+  /** Posición en los destacados de ML de su categoría (1 = el primero). */
+  highlight_position?: number | null;
+  highlight_category_id?: string | null;
+  ml_root_category?: string | null;
+  is_full?: boolean | null;
+  official_store?: boolean | null;
+  checked_at?: string | null;
 }
 
 export interface CategoryInfo {

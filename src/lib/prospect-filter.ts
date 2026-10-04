@@ -14,6 +14,8 @@
  * de unos mismos Redmi Buds había $7.300 de diferencia.
  */
 
+import { estimateCommission } from '@/lib/commission';
+
 /**
  * Cuánto más barato tiene que ser un color nuevo de un producto ya publicado
  * para que valga la pena revisarlo.
@@ -131,4 +133,26 @@ export function partitionCandidates<T extends CandidateLike>(
   }
 
   return { fresh, skipped };
+}
+
+/** Comisión mínima por venta, en pesos, si MIN_COMMISSION_CLP no dice otra cosa. */
+export const DEFAULT_MIN_COMMISSION_CLP = 700;
+
+/** El piso configurado en MIN_COMMISSION_CLP, o el por defecto si falta o no es un número. */
+export function minCommissionFromEnv(raw: string | undefined = process.env.MIN_COMMISSION_CLP): number {
+  const value = Number(raw ?? DEFAULT_MIN_COMMISSION_CLP);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_MIN_COMMISSION_CLP;
+}
+
+/**
+ * ¿La venta de este producto deja al menos `min` pesos de comisión?
+ *
+ * Revisar y publicar un producto cuesta lo mismo sea caro o barato, pero un
+ * cable de $9.990 en Tecnología deja $400 por venta: no paga el rato de
+ * revisarlo. La comisión depende de la categoría raíz (lib/commission), así
+ * que un producto de Hogar pasa el piso con la mitad del precio que uno de
+ * Tecnología.
+ */
+export function passesCommissionFloor(price: number, root: string | null, min: number): boolean {
+  return estimateCommission(price, root) >= min;
 }

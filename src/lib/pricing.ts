@@ -20,17 +20,28 @@
  *
  * Lo usan el cron de precios y las acciones del admin, para que "revisar
  * ahora" haga exactamente lo mismo que la corrida automática.
+ *
+ * Cada cambio de precio queda además en price_history. Es lo único que
+ * permite decir con honestidad "bajó" o "el más bajo del mes": el precio de
+ * lista que informa el vendedor puede estar inflado, el historial no. Un día
+ * sin registrar es un dato que no se recupera.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  getRootCategory,
   getSellers,
   getWinners,
   isGreenSeller,
   mapWithConcurrency,
+  type MlOffer,
   type MlSeller,
   type WinnersResult,
 } from '@/lib/ml-catalog';
+import { readAffiliateSettings } from '@/lib/settings';
+import { getSupabaseAdmin } from '@/lib/supabase/server';
+import { isMissingSchemaError } from '@/lib/supabase/errors';
+import type { OfferInfo } from '@/lib/types';
 
 import type { InactiveReason } from '@/lib/inactive-reasons';
 
@@ -55,6 +66,23 @@ export interface PricedProduct {
   winner_item_id: string | null;
   link_target_product_id: string | null;
   link_checked_at: string | null;
+  // No están en PRICED_COLUMNS (la usan otros módulos y no puede cambiar).
+  // Si quien llama no las lee, quedan undefined y se escriben igual: así
+  // solo cuesta una escritura de más, nunca un dato desactualizado.
+  ml_category_id?: string | null;
+  ml_root_category?: string | null;
+  offer_info?: OfferInfo | null;
+}
+
+/** Fila para price_history: el precio que vio el comprador en ese momento. */
+export interface PriceObservation {
+  product_id: string;
+  ml_product_id: string;
+  price: number;
+  original_price: number | null;
+  seller_id: number;
+  winner_item_id: string;
+  observed_at: string;
 }
 
 export interface PricingOutcome {
@@ -64,6 +92,8 @@ export interface PricingOutcome {
   priceChanged: boolean;
   reactivated: boolean;
   deactivated: boolean;
+  /** Solo cuando cambió el precio: lo que se agrega al historial. */
+  observation?: PriceObservation;
 }
 
 function listPriceOf(offer: { price: number; original_price: number | null }): number | null {
@@ -72,12 +102,77 @@ function listPriceOf(offer: { price: number; original_price: number | null }): n
     : null;
 }
 
-function decide(
+const NO_WARRANTY_RE = /^sin garant[ií]a/i;
+
+function warrantyText(text: string | null | undefined): string | null {
+  const t = text?.trim();
+  return t && !NO_WARRANTY_RE.test(t) ? t : null;
+}
+
+/**
+ * "Garantía de fábrica: 2 años". El campo `warranty` de la oferta ya viene
+ * armado; si falta, se arma desde sale_terms (tipo + plazo), que es de donde
+ * ML lo saca para mostrarlo en su ficha.
+ */
+function warrantyOf(offer: MlOffer): string | null {
+  const direct = warrantyText(offer.warranty);
+  if (direct) return direct;
+
+  const term = (id: string) => offer.sale_terms?.find((t) => t?.id === id)?.value_name?.trim() || null;
+  const type = term('WARRANTY_TYPE');
+  const time = term('WARRANTY_TIME');
+  if (type && NO_WARRANTY_RE.test(type)) return null;
+  if (type && time) return warrantyText(`${type}: ${time}`);
+  return warrantyText(type ?? time);
+}
+
+/**
+ * Señales del ganador para la ficha. Cada una sale de un campo explícito de
+ * ML: si el campo no viene, la señal queda en false o null, nunca supuesta.
+ */
+export function offerInfoFrom(offers: MlOffer[], total: number): OfferInfo {
+  const winner = offers[0];
+  const lowest = Math.min(...offers.map((o) => o.price));
+  return {
+    free_shipping: winner.shipping?.free_shipping === true,
+    is_full: winner.shipping?.logistic_type === 'fulfillment',
+    sold_by_ml: (winner.tags ?? []).includes('first_party'),
+    official_store: winner.official_store_id != null,
+    warranty: warrantyOf(winner),
+    offers_count: total,
+    // Si ML no mandó todas las ofertas no se puede afirmar que es el más
+    // barato: queda sin saber en vez de anunciar algo que no se comprobó.
+    is_lowest: offers.length >= total ? winner.price === lowest : null,
+  };
+}
+
+const OFFER_INFO_KEYS: (keyof OfferInfo)[] = [
+  'free_shipping',
+  'is_full',
+  'sold_by_ml',
+  'official_store',
+  'warranty',
+  'offers_count',
+  'is_lowest',
+];
+
+function sameOfferInfo(a: OfferInfo, b: OfferInfo | null | undefined): boolean {
+  return !!b && OFFER_INFO_KEYS.every((key) => a[key] === b[key]);
+}
+
+/**
+ * Decide qué cambia en un producto a partir de lo que respondió ML. Es pura
+ * (no consulta nada) para poder probar cada caso sin red.
+ *
+ * `roots` trae la categoría raíz de cada category_id ya consultada.
+ */
+export function decide(
   product: PricedProduct,
   winners: WinnersResult,
   sellers: Map<number, MlSeller>,
   now: string,
-  checkLink: boolean
+  checkLink: boolean,
+  roots: Map<string, string | null> = new Map()
 ): PricingOutcome {
   const base = { id: product.id, priceChanged: false, reactivated: false, deactivated: false };
 
@@ -88,6 +183,7 @@ function decide(
 
   const patch: Record<string, unknown> = { price_checked_at: now };
   let reason: InactiveReason | null = null;
+  let observation: PriceObservation | undefined;
 
   if (winners.status === 'no_winner') {
     reason = 'sin_ganador';
@@ -104,6 +200,30 @@ function decide(
     if (winner.seller_id !== product.seller_id) patch.seller_id = winner.seller_id;
     if (winner.item_id !== product.winner_item_id) patch.winner_item_id = winner.item_id;
     if (seller.salesCount !== product.seller_sales_count) patch.seller_sales_count = seller.salesCount;
+
+    const offerInfo = offerInfoFrom(winners.offers, winners.total);
+    if (!sameOfferInfo(offerInfo, product.offer_info)) patch.offer_info = offerInfo;
+
+    // La raíz define la comisión (lib/commission). Solo se escribe cuando
+    // cambia la categoría o si antes no se pudo averiguar.
+    const categoryId = winner.category_id || null;
+    if (categoryId) {
+      if (categoryId !== product.ml_category_id) patch.ml_category_id = categoryId;
+      const root = roots.get(categoryId);
+      if (root && root !== product.ml_root_category) patch.ml_root_category = root;
+    }
+
+    if ('price' in patch || 'original_price' in patch) {
+      observation = {
+        product_id: product.id,
+        ml_product_id: product.ml_product_id,
+        price: winner.price,
+        original_price: listPrice,
+        seller_id: winner.seller_id,
+        winner_item_id: winner.item_id,
+        observed_at: now,
+      };
+    }
 
     if (!isGreenSeller(seller)) {
       reason = 'ganador_no_verde';
@@ -128,6 +248,7 @@ function decide(
       patch,
       priceChanged,
       deactivated: product.is_active,
+      ...(observation ? { observation } : {}),
     };
   }
 
@@ -141,6 +262,7 @@ function decide(
     patch,
     priceChanged,
     reactivated: !product.is_active,
+    ...(observation ? { observation } : {}),
   };
 }
 
@@ -161,12 +283,19 @@ export async function priceProducts(
      * Con los links directos encendidos (ver lib/outbound) el botón de
      * compra se arma desde la ficha y el link guardado no se usa: que lleve
      * a otro producto deja de importar y no se verifica.
+     *
+     * Si no se pasa, se lee de la configuración. Antes valía false por
+     * omisión, y las acciones del admin que no lo pasaban sacaban del sitio
+     * por "link a otro producto" a productos que con links directos no
+     * tenían ningún problema.
      */
     directLinks?: boolean;
   } = {}
 ): Promise<PricingOutcome[]> {
   const concurrency = options.concurrency ?? 6;
-  const checkLink = !options.directLinks;
+  const directLinks =
+    options.directLinks ?? (await readAffiliateSettings(getSupabaseAdmin())).directLinks;
+  const checkLink = !directLinks;
 
   const fetched = await mapWithConcurrency(products, concurrency, async (product) => {
     const winners: WinnersResult = options.outOfTime?.()
@@ -203,29 +332,96 @@ export async function priceProducts(
     });
   }
 
+  // Raíz de cada categoría nueva o que todavía no se conoce. getRootCategory
+  // guarda las respuestas en memoria, así que en la práctica son pocas
+  // llamadas por corrida aunque el catálogo tenga cientos de productos.
+  const pendingCategories = new Set<string>();
+  for (const { product, winners } of fetched) {
+    const categoryId = winners.status === 'ok' ? winners.offers[0].category_id : null;
+    if (categoryId && (categoryId !== product.ml_category_id || !product.ml_root_category)) {
+      pendingCategories.add(categoryId);
+    }
+  }
+  const roots = new Map<string, string | null>();
+  await mapWithConcurrency([...pendingCategories], 4, async (categoryId) => {
+    if (options.outOfTime?.()) return;
+    roots.set(categoryId, await getRootCategory(categoryId, token));
+  });
+
   const now = new Date().toISOString();
   return fetched.map(({ product, winners }) => {
     const target = targets.get(product.id);
-    if (!target) return decide(product, winners, sellers, now, checkLink);
+    if (!target) return decide(product, winners, sellers, now, checkLink, roots);
 
-    const outcome = decide({ ...product, link_target_product_id: target }, winners, sellers, now, checkLink);
+    const outcome = decide(
+      { ...product, link_target_product_id: target },
+      winners,
+      sellers,
+      now,
+      checkLink,
+      roots
+    );
     outcome.patch.link_target_product_id = target;
     outcome.patch.link_checked_at = now;
     return outcome;
   });
 }
 
-/** Escribe los cambios. Devuelve cuántas escrituras fallaron. */
+/**
+ * Columnas de la migración 0016. Si todavía no se aplicó, el update que las
+ * incluye falla entero; se reintenta sin ellas para que el precio y la
+ * disponibilidad se sigan actualizando igual.
+ */
+const OPTIONAL_COLUMNS = ['offer_info', 'ml_category_id', 'ml_root_category'];
+
+function withoutOptionalColumns(patch: Record<string, unknown>): Record<string, unknown> {
+  const rest = { ...patch };
+  for (const column of OPTIONAL_COLUMNS) delete rest[column];
+  return rest;
+}
+
+/**
+ * Escribe los cambios y agrega al historial los precios que cambiaron.
+ * Devuelve cuántas escrituras de productos fallaron.
+ */
 export async function applyPricing(
   admin: SupabaseClient,
   outcomes: PricingOutcome[],
   concurrency = 8
 ): Promise<number> {
   const writes = outcomes.filter((o) => Object.keys(o.patch).length > 0);
+  const observations: PriceObservation[] = [];
+
+  // Apenas un update confirma que faltan las columnas nuevas, el resto de la
+  // corrida las omite de entrada en vez de fallar y reintentar cada uno.
+  let skipOptional = false;
+
   const results = await mapWithConcurrency(writes, concurrency, async (o) => {
-    const { error } = await admin.from('products').update(o.patch).eq('id', o.id);
+    let patch = skipOptional ? withoutOptionalColumns(o.patch) : o.patch;
+    let { error } = await admin.from('products').update(patch).eq('id', o.id);
+
+    const hadOptional = OPTIONAL_COLUMNS.some((column) => column in patch);
+    if (error && hadOptional && isMissingSchemaError(error)) {
+      skipOptional = true;
+      patch = withoutOptionalColumns(o.patch);
+      ({ error } = await admin.from('products').update(patch).eq('id', o.id));
+    }
+
+    // Al historial solo va lo que quedó escrito en products: si el update
+    // falló, el sitio sigue mostrando el precio anterior.
+    if (!error && o.observation) observations.push(o.observation);
     return error ? 1 : 0;
   });
+
+  if (observations.length > 0) {
+    const { error } = await admin.from('price_history').insert(observations);
+    // Sin la migración 0016 la tabla no existe y no hay nada que hacer. Un
+    // historial incompleto no justifica marcar la corrida como fallida.
+    if (error && !isMissingSchemaError(error)) {
+      console.warn('[pricing] no se pudo guardar el historial de precios:', error.message);
+    }
+  }
+
   return results.reduce<number>((sum, failed) => sum + failed, 0);
 }
 

@@ -1,15 +1,11 @@
 /**
  * Enriquecimiento de productos desde la API de Mercado Libre.
  *
- * Vive acá y no dentro de un route handler porque tres lugares distintos
- * necesitan exactamente las mismas reglas y no pueden divergir:
- *  - /api/catalog-prospect, al guardar candidatos nuevos
+ * Vive acá y no dentro de un route handler porque varios lugares necesitan
+ * exactamente las mismas reglas y no pueden divergir:
+ *  - /api/cron/prospect, al guardar candidatos nuevos
  *  - /api/cron/refresh-prices, al reparar productos que quedaron incompletos
  *  - los scripts de backfill del catálogo ya publicado
- *
- * La razón original de calcular esto en TypeScript en vez de en Make sigue
- * vigente: el body crudo del módulo HTTP de Make ya rompió antes la fórmula
- * de reputación por comillas anidadas.
  */
 
 import { buildDescription } from '@/lib/product-description';
@@ -76,7 +72,22 @@ export function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 500
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(id));
 }
 
+/**
+ * Token en memoria del proceso. Cada corrida del cron y cada acción del admin
+ * pedían uno nuevo; con el cron cada 30 minutos más la prospección, eso es
+ * pedirle a ML decenas de tokens al día que duran 6 horas. Una instancia
+ * caliente de Vercel reusa el mismo hasta poco antes de que venza.
+ */
+let cachedToken: { value: string; expiresAt: number } | null = null;
+
+/** Margen antes del vencimiento: un token a punto de vencer puede morir a media corrida. */
+const TOKEN_MARGIN_MS = 10 * 60 * 1000;
+/** Tope de reuso aunque ML diga que dura más. */
+const TOKEN_MAX_REUSE_MS = 5 * 60 * 60 * 1000;
+
 export async function getMlToken(): Promise<string | null> {
+  if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.value;
+
   try {
     const res = await fetchWithTimeout('https://api.mercadolibre.com/oauth/token', {
       method: 'POST',
@@ -87,7 +98,18 @@ export async function getMlToken(): Promise<string | null> {
         client_secret: process.env.ML_CLIENT_SECRET ?? '',
       }),
     }).then((r) => r.json());
-    return res.access_token ?? null;
+
+    const token: string | null = typeof res.access_token === 'string' ? res.access_token : null;
+    if (!token) return null;
+
+    const lifetimeMs =
+      typeof res.expires_in === 'number' && res.expires_in > 0
+        ? res.expires_in * 1000 - TOKEN_MARGIN_MS
+        : TOKEN_MAX_REUSE_MS;
+    const reuseMs = Math.min(lifetimeMs, TOKEN_MAX_REUSE_MS);
+    cachedToken = reuseMs > 0 ? { value: token, expiresAt: Date.now() + reuseMs } : null;
+
+    return token;
   } catch {
     return null;
   }

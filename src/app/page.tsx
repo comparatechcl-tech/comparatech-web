@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Search, Check, Tags, ChartNoAxesColumn, Link2, Smartphone, Headphones, Sofa, WashingMachine, Package, Flame, Gamepad2 } from 'lucide-react';
-import { getFeaturedProducts, getDeals } from '@/lib/queries/products';
+import { Search, Check, Tags, ChartNoAxesColumn, Link2, Smartphone, Headphones, Sofa, WashingMachine, Package, Flame, Gamepad2, Sparkles } from 'lucide-react';
+import { getCatalogProducts, getDeals } from '@/lib/queries/products';
 import { ProductGrid } from '@/components/product/ProductGrid';
+import { DealStrip } from '@/components/product/DealStrip';
 import { FounderBio } from '@/components/brand/FounderBio';
 import { QuickCompare } from '@/components/compare/QuickCompare';
 import { getSiteCategories } from '@/lib/queries/site-categories';
@@ -86,10 +87,38 @@ const COMPARADOR_CARD = {
   desc: 'Compara 2 productos en detalle',
 };
 
+/** Cuántas ofertas van en la franja del celular y en la grilla de escritorio. */
+const DEALS_MOBILE = 8;
+const DEALS_DESKTOP = 4;
+const PICKS_LIMIT = 4;
+const NEW_LIMIT = 8;
+
 export default async function HomePage() {
-  const featured = await getFeaturedProducts(8);
-  const categories = await getSiteCategories();
-  const deals = (await getDeals()).slice(0, 4);
+  const [catalog, categories, allDeals] = await Promise.all([
+    getCatalogProducts(),
+    getSiteCategories(),
+    getDeals(),
+  ]);
+  const deals = allDeals.slice(0, DEALS_MOBILE);
+
+  // Lo que eligió Roxana a mano desde el admin. Si no marcó nada, el bloque
+  // no aparece: mejor nada que una sección vacía.
+  const picks = catalog.filter((p) => p.is_featured).slice(0, PICKS_LIMIT);
+
+  // "Recién agregados" no repite lo que ya está más arriba: con un catálogo
+  // chico, las mismas tarjetas dos veces en la portada parecían un relleno.
+  const shownAbove = new Set([...deals, ...picks].map((p) => p.id));
+  const fresh = catalog.filter((p) => !shownAbove.has(p.id)).slice(0, NEW_LIMIT);
+
+  // El comparador rápido recibe solo lo que usa para elegir: mandar el
+  // catálogo completo (descripciones incluidas) inflaba el HTML de la home.
+  const compareOptions = catalog.map(({ slug, name, category, ml_domain_id, seller_sales_count }) => ({
+    slug,
+    name,
+    category,
+    ml_domain_id,
+    seller_sales_count,
+  }));
 
   const categoryCards = [
     ...categories.map((c) => {
@@ -100,9 +129,11 @@ export default async function HomePage() {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
-      {/* Hero */}
-      <section className="relative mb-16 overflow-hidden rounded-3xl border border-border bg-surface px-6 py-12 sm:px-10 sm:py-16">
+    <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 sm:pt-10">
+      {/* Hero. En el celular queda solo el título y el buscador: todo lo
+          demás empujaba la primera oferta fuera de la pantalla, y el tráfico
+          de redes llega casi entero desde el teléfono. */}
+      <section className="relative mb-6 overflow-hidden rounded-3xl border border-border bg-surface px-5 py-6 sm:mb-16 sm:px-10 sm:py-16">
         <div
           className="pointer-events-none absolute inset-0 -z-10"
           style={{
@@ -112,19 +143,19 @@ export default async function HomePage() {
         />
         <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
           <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface2 px-3.5 py-1.5 text-xs font-medium text-muted">
+            <span className="hidden items-center gap-1.5 rounded-full border border-border bg-surface2 px-3.5 py-1.5 text-xs font-medium text-muted sm:inline-flex">
               Compara · Elige · Ahorra
             </span>
-            <h1 className="mt-5 font-heading text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl">
+            <h1 className="font-heading text-3xl font-extrabold leading-[1.08] tracking-tight sm:mt-5 sm:text-5xl">
               Encuentra el mejor <br className="hidden sm:block" />
               producto al <span className="text-accent">mejor precio</span>
             </h1>
-            <p className="mt-4 max-w-md text-muted">
+            <p className="mt-4 hidden max-w-md text-muted sm:block">
               Compara especificaciones y precios de celulares, computadores,
               audífonos y más, todo en una sola tabla.
             </p>
 
-            <ul className="mt-6 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+            <ul className="mt-6 hidden grid-cols-2 gap-x-6 gap-y-2 sm:grid">
               {BENEFITS.map((b) => (
                 <li key={b} className="flex items-center gap-2 text-sm text-muted">
                   <Check size={15} className="shrink-0 text-accent" />
@@ -133,12 +164,13 @@ export default async function HomePage() {
               ))}
             </ul>
 
-            <form action="/buscar" method="get" className="mt-7 flex max-w-md gap-2">
+            <form action="/buscar" method="get" role="search" className="mt-5 flex max-w-md gap-2 sm:mt-7">
               <div className="relative flex-1">
                 <Search size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
                 <input
                   type="text"
                   name="q"
+                  aria-label="Buscar productos"
                   placeholder="Busca un producto, marca o modelo..."
                   className="w-full rounded-xl border border-border bg-surface2 py-3 pl-10 pr-3 text-sm text-fg placeholder:text-muted transition focus:border-accent focus:outline-none"
                 />
@@ -169,9 +201,9 @@ export default async function HomePage() {
           y el destino de lo que se publica en redes. Solo aparece si hay
           rebajas de verdad, para no dejar una sección vacía. */}
       {deals.length > 0 && (
-        <section className="mb-16">
-          <div className="mb-5 flex items-baseline justify-between gap-4">
-            <h2 className="flex items-center gap-2 font-heading text-2xl font-bold">
+        <section className="mb-12 sm:mb-16">
+          <div className="mb-3 flex items-baseline justify-between gap-4 sm:mb-5">
+            <h2 className="flex items-center gap-2 font-heading text-xl font-bold sm:text-2xl">
               <Flame size={22} className="text-accent" />
               Ofertas del día
             </h2>
@@ -179,7 +211,16 @@ export default async function HomePage() {
               Ver todas →
             </Link>
           </div>
-          <ProductGrid products={deals} />
+          {/* Franja deslizable en el celular, grilla en pantallas grandes. */}
+          <div className="sm:hidden">
+            <DealStrip
+              products={deals.map(({ description: _description, ...card }) => card)}
+              placement="home-ofertas"
+            />
+          </div>
+          <div className="hidden sm:block">
+            <ProductGrid products={deals.slice(0, DEALS_DESKTOP)} placement="home-ofertas" />
+          </div>
         </section>
       )}
 
@@ -220,20 +261,35 @@ export default async function HomePage() {
       </section>
 
       {/* Comparador rápido */}
-      {featured.length >= 2 && (
+      {compareOptions.length >= 2 && (
         <section className="mb-16">
-          <QuickCompare products={featured} />
+          <QuickCompare products={compareOptions} />
+        </section>
+      )}
+
+      {/* Elección de Roxana: los productos marcados como destacados. */}
+      {picks.length > 0 && (
+        <section className="mb-16">
+          <div className="mb-5 flex items-baseline justify-between">
+            <h2 className="flex items-center gap-2 font-heading text-2xl font-bold">
+              <Sparkles size={20} className="text-accent" />
+              Elección de Roxana
+            </h2>
+          </div>
+          <ProductGrid products={picks} placement="home" />
         </section>
       )}
 
       {/* Recién agregados */}
-      <section className="mb-16">
-        <div className="mb-5 flex items-baseline justify-between">
-          <h2 className="font-heading text-2xl font-bold">Recién agregados</h2>
-          <span className="text-sm text-muted">{featured.length} productos</span>
-        </div>
-        <ProductGrid products={featured} />
-      </section>
+      {fresh.length > 0 && (
+        <section className="mb-16">
+          <div className="mb-5 flex items-baseline justify-between">
+            <h2 className="font-heading text-2xl font-bold">Recién agregados</h2>
+            <span className="text-sm text-muted">{fresh.length} productos</span>
+          </div>
+          <ProductGrid products={fresh} placement="home-nuevos" />
+        </section>
+      )}
 
       {/* ¿Por qué usar ComparaTech? */}
       <section className="mb-16 text-center">

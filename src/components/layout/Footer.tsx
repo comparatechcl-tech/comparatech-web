@@ -1,9 +1,27 @@
 import Link from 'next/link';
+import { Send } from 'lucide-react';
 import { CategoryInfo } from '@/lib/types';
 import { SocialLinks } from '@/components/brand/SocialLinks';
 import { Logo } from '@/components/brand/Logo';
 
+/**
+ * Canal de Telegram, si está configurado. Solo se acepta un https:// para
+ * que una variable mal cargada no termine como link roto o raro en todas
+ * las páginas.
+ */
+function telegramUrl(): string | null {
+  const raw = process.env.NEXT_PUBLIC_TELEGRAM_URL?.trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).protocol === 'https:' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 export function Footer({ categories }: { categories: CategoryInfo[] }) {
+  const telegram = telegramUrl();
+
   return (
     <footer className="border-t border-border bg-surface">
       <div className="mx-auto max-w-6xl px-4 py-10 text-sm text-muted">
@@ -23,6 +41,16 @@ export function Footer({ categories }: { categories: CategoryInfo[] }) {
               mejor, sin vueltas.
             </p>
             <SocialLinks className="mt-4" />
+            {telegram && (
+              <a
+                href={telegram}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 inline-flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs font-medium text-accent transition hover:bg-accent/15"
+              >
+                <Send size={14} /> Recibe ofertas en Telegram
+              </a>
+            )}
           </div>
 
           <div>
@@ -54,6 +82,16 @@ export function Footer({ categories }: { categories: CategoryInfo[] }) {
               <li>
                 <Link href="/nosotros" className="transition hover:text-accent">
                   Nosotros
+                </Link>
+              </li>
+              <li>
+                <Link href="/privacidad" className="transition hover:text-accent">
+                  Privacidad
+                </Link>
+              </li>
+              <li>
+                <Link href="/terminos" className="transition hover:text-accent">
+                  Términos
                 </Link>
               </li>
             </ul>

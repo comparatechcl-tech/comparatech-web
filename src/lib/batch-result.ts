@@ -19,7 +19,17 @@ export type BatchOutcome =
   /** Ninguno de los links pegados era de este producto. */
   | 'sin_link'
   /** No se pudo guardar (el detalle va en `detail`). */
-  | 'error';
+  | 'error'
+  /**
+   * El link pegado para este producto es de otra cuenta de afiliado: no se
+   * guardó, porque la comisión se la pagaría ML a otro.
+   */
+  | 'otra_cuenta'
+  /**
+   * Otro color del mismo modelo (mismo ml_family_id) venía en la tanda y se
+   * publicó solo el más barato: el sitio muestra una tarjeta por modelo.
+   */
+  | 'omitido_variante';
 
 export interface BatchItemResult {
   id: string;
@@ -40,4 +50,14 @@ export type BatchResult =
       unmatchedLinks: string[];
       linksFound: number;
     }
+  | { ok: false; error: string };
+
+/**
+ * Aprobar un candidato de a uno. `outcome` dice si quedó a la vista o en
+ * pausa —y por qué— según la revisión de precio que se hace al aprobar.
+ * `reason`: el motivo de la pausa (lib/inactive-reasons) o 'pendiente' si
+ * Mercado Libre no respondió y se revisa en la próxima pasada del cron.
+ */
+export type ApproveResult =
+  | { ok: true; outcome: 'publicado' | 'en_pausa'; reason?: string; slug: string }
   | { ok: false; error: string };

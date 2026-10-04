@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { formatTimeAgo } from '@/lib/format';
 
 /**
- * "Precio verificado hace 12 minutos".
+ * "Precio revisado hace 12 minutos". Dice "revisado" y no "verificado": habla
+ * de cuándo se miró el precio, no garantiza el descuento.
  *
  * Es componente de cliente a propósito: la página se sirve desde caché y se
  * regenera cada pocos minutos, así que un texto calculado en el servidor
@@ -27,7 +28,7 @@ export function PriceFreshness({ checkedAt }: { checkedAt: string | null }) {
 
   return (
     <p className="mt-1.5 text-xs text-muted">
-      Precio verificado en Mercado Libre {label}
+      Precio revisado en Mercado Libre {label}
     </p>
   );
 }

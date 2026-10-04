@@ -12,8 +12,9 @@ name: Refrescar precios
 
 on:
   schedule:
-    # Minutos poco concurridos: en punto y a la media son los que más atrasa.
-    - cron: '11,41 * * * *'
+    # Cada 2 horas: es solo un respaldo de pg_cron, que corre cada 30
+    # minutos. Minuto 23 porque en punto y a la media son los que más atrasa.
+    - cron: '23 */2 * * *'
   workflow_dispatch:
 
 # Si una corrida se atrasa, que no se monte con la siguiente.
@@ -34,7 +35,7 @@ jobs:
           SITE_URL: ${{ vars.SITE_URL || 'https://comparatech-web.vercel.app' }}
         run: |
           # Sin el secreto no hay nada que hacer, pero tampoco es una falla:
-          # así no llega un correo de error cada media hora mientras no se
+          # así no llega un correo de error cada 2 horas mientras no se
           # configura. El aviso queda en la pestaña Actions.
           if [ -z "$CRON_SECRET" ]; then
             echo "::warning::Falta el secreto CRON_SECRET en Settings → Secrets and variables → Actions"
@@ -42,7 +43,20 @@ jobs:
           fi
           # --retry cubre caídas pasajeras (502/503/504 o timeout): sin esto,
           # un token de ML que no responde una vez dispara un correo de fallo.
-          curl -fsS --max-time 90 --retry 2 --retry-delay 30 \
+          # Sin -f a propósito: así se guarda y muestra la respuesta aunque
+          # sea un 500, que trae el resumen con el motivo.
+          code=$(curl -sS -o out.json -w '%{http_code}' --max-time 90 --retry 2 --retry-delay 30 \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "$SITE_URL/api/cron/refresh-prices"
+            "$SITE_URL/api/cron/refresh-prices") || code=000
+          cat out.json 2>/dev/null || true
           echo
+          # El endpoint responde 500 con ok:false si hubo escrituras fallidas
+          # o si más de la mitad de los productos quedó sin revisar.
+          if [ "$code" != "200" ]; then
+            echo "::error::El refresco de precios respondió HTTP $code"
+            exit 1
+          fi
+          if ! jq -e '.ok == true' out.json > /dev/null; then
+            echo "::error::El refresco de precios no terminó bien (ok distinto de true)"
+            exit 1
+          fi

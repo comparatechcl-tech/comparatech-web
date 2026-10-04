@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { ThemeProvider } from 'next-themes';
+import { Analytics } from '@vercel/analytics/next';
 import './globals.css';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { SITE_URL } from '@/lib/site';
 import { getSiteCategories } from '@/lib/queries/site-categories';
+import { UtmCapture } from '@/components/analytics/UtmCapture';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -52,6 +54,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <main className="flex-1">{children}</main>
           <Footer categories={categories} />
         </ThemeProvider>
+        {/* Visitas agregadas de Vercel (sin cookies) y el origen de la visita
+            para los clics a Mercado Libre. Ver /privacidad. */}
+        <Analytics />
+        <UtmCapture />
       </body>
     </html>
   );

@@ -9,8 +9,11 @@ export function PriceTag({
 }) {
   const discount = formatDiscountPct(price, originalPrice);
 
+  // flex-wrap: en la grilla de dos columnas del celular (~163 px por tarjeta)
+  // precio, precio tachado y -X% no caben en una línea, y la tarjeta tiene
+  // overflow-hidden: sin wrap el -X% quedaba cortado.
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <span className="font-heading text-xl font-bold text-fg">
         {formatCLP(price)}
       </span>

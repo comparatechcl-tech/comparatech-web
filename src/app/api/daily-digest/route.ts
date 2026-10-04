@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
+import { isCronAuthorized } from '@/lib/cron-auth';
 import { gatherDigestInput } from '@/lib/digest-data';
 import { buildDigestHtml, buildDigestSubject, buildDigestText } from '@/lib/daily-digest';
 
@@ -17,7 +18,7 @@ import { buildDigestHtml, buildDigestSubject, buildDigestText } from '@/lib/dail
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -44,5 +45,8 @@ export async function GET(req: NextRequest) {
     published_total: input.publishedTotal,
     needs_link: input.needsLink.length,
     paused: input.pausedCount,
+    days_since_last_approval: input.daysSinceLastApproval,
+    last_price_check_minutes: input.lastPriceCheckMinutes,
+    errors: input.errors,
   });
 }

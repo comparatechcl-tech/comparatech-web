@@ -41,7 +41,9 @@ const DIRECT_PRODUCT_RE = /mercadolibre\.cl\/(?:[^/?#]+\/)?p\/(MLC\d+)/;
  *
  * Abre el link, así que cuenta como un clic en las métricas del afiliado:
  * se usa solo cuando un producto con un link nunca verificado está por
- * volver al sitio, no en cada corrida.
+ * volver al sitio, no en cada corrida. inspectAffiliateLink memoiza el
+ * resultado diez minutos, así que si el admin acaba de verificar o guardar
+ * ese mismo link, no se vuelve a abrir.
  */
 export async function resolveLinkTarget(
   affiliateUrl: string,

@@ -17,6 +17,8 @@
  * directos a la ficha (ver lib/outbound).
  */
 
+import { isAllowedAffiliateUrl } from '@/lib/outbound';
+
 /**
  * ML solo entrega la redirección real del acortador meli.la si el request
  * trae un User-Agent de navegador — con el de fetch() por defecto el link no
@@ -81,19 +83,87 @@ export function extractFeatured(html: string): { productId: string | null; itemI
 }
 
 /**
+ * Hosts por los que puede pasar la cadena de redirecciones. El link pegado
+ * tiene que estar en la lista estricta de lib/outbound, pero los saltos
+ * intermedios de ML pasan por subdominios propios (perfil social, login,
+ * seguimiento) que no conviene enumerar uno por uno: lo que importa es no
+ * seguir nunca a un dominio que no sea de Mercado Libre. Un link que redirige
+ * afuera no es de la cuenta y además haría que el servidor abriera cualquier
+ * URL que alguien pegue.
+ */
+function isMercadoLibreHop(url: string): boolean {
+  if (isAllowedAffiliateUrl(url)) return true;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || u.port || u.username || u.password) return false;
+    return u.hostname.endsWith('.mercadolibre.cl') || u.hostname.endsWith('.mercadolibre.com');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resultados recientes por URL. Abrir un meli.la cuenta como un clic de
+ * afiliado: el admin lo abre al tocar "Verificar" y otra vez al "Aprobar" o
+ * "Guardar", y ML podría tomar los clics repetidos desde la IP del servidor
+ * como fraude. Diez minutos cubren ese ir y venir.
+ *
+ * Solo se guardan los resultados buenos: si ML estaba lento, el siguiente
+ * intento tiene que volver a probar.
+ */
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const inspectCache = new Map<string, { at: number; result: InspectResult }>();
+
+/** Para los tests. */
+export function clearInspectCache(): void {
+  inspectCache.clear();
+}
+
+function readCache(url: string, now: number): InspectResult | null {
+  const hit = inspectCache.get(url);
+  if (!hit) return null;
+  if (now - hit.at > CACHE_TTL_MS) {
+    inspectCache.delete(url);
+    return null;
+  }
+  return hit.result;
+}
+
+function writeCache(url: string, result: InspectResult, now: number): void {
+  // El Map vive mientras viva la instancia: se limpian los vencidos para que
+  // no crezca sin tope en una instancia que dure mucho.
+  for (const [key, value] of inspectCache) {
+    if (now - value.at > CACHE_TTL_MS) inspectCache.delete(key);
+  }
+  inspectCache.set(url, { at: now, result });
+}
+
+/**
  * Sigue el link salto por salto —para poder leer los parámetros de cada
  * URL intermedia— y analiza la página donde aterriza.
  *
  * Ojo: abrir un meli.la cuenta como un clic en las métricas del afiliado.
- * Se usa al guardar o verificar un link, no en barridos periódicos.
+ * Se usa al guardar o verificar un link, no en barridos periódicos, y el
+ * resultado queda memoizado diez minutos (ver inspectCache).
  */
 export async function inspectAffiliateLink(
   url: string,
   timeoutMs = 10_000
 ): Promise<InspectResult> {
-  let current = url.trim();
-  if (!current) return { ok: false, error: 'Falta el link' };
+  const start = url.trim();
+  if (!start) return { ok: false, error: 'Falta el link' };
+  if (!isAllowedAffiliateUrl(start)) return { ok: false, error: 'Ese link no es de Mercado Libre' };
 
+  const cached = readCache(start, Date.now());
+  if (cached) return cached;
+
+  const result = await fetchAndInspect(start, timeoutMs);
+  if (result.ok) writeCache(start, result, Date.now());
+  return result;
+}
+
+async function fetchAndInspect(start: string, timeoutMs: number): Promise<InspectResult> {
+  let current = start;
   let mattWord: string | null = null;
   let mattTool: string | null = null;
 
@@ -112,6 +182,9 @@ export async function inspectAffiliateLink(
       const location = res.headers.get('location');
       if (res.status >= 300 && res.status < 400 && location) {
         current = new URL(location, current).toString();
+        if (!isMercadoLibreHop(current)) {
+          return { ok: false, error: 'El link redirige fuera de Mercado Libre' };
+        }
         continue;
       }
 
@@ -130,4 +203,26 @@ export async function inspectAffiliateLink(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudo abrir el link' };
   }
+}
+
+/**
+ * ¿El link es de la cuenta de ComparaTech? Compara los parámetros que se
+ * leyeron del link con los esperados (lib/settings: expectedAffiliateParams).
+ *
+ * Solo rechaza con evidencia: si el link no trae matt_word, o no hay un
+ * valor esperado con qué comparar, no se puede decir que sea ajeno.
+ */
+export function checkAffiliateOwnership(
+  info: { mattWord: string | null; mattTool: string | null },
+  expected: { word: string | null; tool: string | null }
+): string | null {
+  const word = info.mattWord?.trim();
+  if (word && expected.word && word !== expected.word) {
+    return `Este link es de otra cuenta de afiliado (matt_word=${word}). Genéralo con la cuenta ComparaTech.`;
+  }
+  const tool = info.mattTool?.trim();
+  if (tool && expected.tool && tool !== expected.tool) {
+    return `Este link es de otra cuenta de afiliado (matt_tool=${tool}). Genéralo con la cuenta ComparaTech.`;
+  }
+  return null;
 }

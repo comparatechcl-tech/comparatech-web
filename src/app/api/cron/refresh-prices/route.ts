@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
+import { isCronAuthorized } from '@/lib/cron-auth';
+import { pingHealthcheck, startCronRun } from '@/lib/cron-runs';
+import { fetchAllRows } from '@/lib/admin-stats';
+import { syncTelegramPosts } from '@/lib/social/telegram';
 import { enrichFromMl, getMlToken } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
-import { mapWithConcurrency } from '@/lib/ml-catalog';
+import { mapWithConcurrency, mlErrorCounts } from '@/lib/ml-catalog';
 import { resolveLinkTarget } from '@/lib/link-check';
 import { readAffiliateSettings } from '@/lib/settings';
 import {
@@ -29,11 +33,30 @@ import {
  * de esperar los 5 minutos de revalidación.
  *
  * Los productos ocultados a mano no se tocan: esa decisión es humana.
+ *
+ * Una corrida que no pudo hacer su trabajo responde 500 (ver isHealthy): así
+ * el curl -f de GitHub Actions y el healthcheck lo notan. Antes respondía
+ * 200 aunque ML hubiera fallado en la mitad de los productos, y un precio
+ * viejo pasaba días sin que nadie se enterara.
  */
 
 export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
 
-const TIME_BUDGET_MS = 45_000;
+/** Desde aquí no se piden más datos a ML: lo que falta queda para la próxima. */
+const TIME_BUDGET_MS = 40_000;
+
+/**
+ * Hasta cuándo se puede empezar a escribir. Las consultas a ML que ya
+ * estaban en curso al cumplirse el presupuesto pueden tardar hasta ~17 s más
+ * (timeout de 8 s con un reintento), así que se deja un margen propio para
+ * las escrituras: si se empiezan muy tarde, Vercel corta la función a los
+ * 60 s en medio de ellas y la corrida queda a medias sin aviso.
+ */
+const WRITE_DEADLINE_MS = 52_000;
+
+/** Sobre esta proporción de errores transitorios, la corrida cuenta como fallida. */
+const MAX_TRANSIENT_RATIO = 0.5;
 
 /**
  * Productos con datos incompletos que se reparan por corrida. Cada uno
@@ -98,55 +121,133 @@ async function repairMissingData(
   return results.reduce<number>((a, b) => a + b, 0);
 }
 
+type Summary = ReturnType<typeof summarizePricing>;
+
+/**
+ * ¿La corrida hizo su trabajo? Falla si alguna escritura no se guardó o si
+ * más de la mitad de los productos no se pudo revisar (ML caído, token
+ * rechazado, sin tiempo): en ambos casos el sitio queda con precios viejos.
+ */
+function isHealthy(summary: Pick<Summary, 'revisados' | 'errores_transitorios'>, writeErrors: number): boolean {
+  if (writeErrors > 0) return false;
+  if (summary.revisados === 0) return true;
+  return summary.errores_transitorios / summary.revisados <= MAX_TRANSIENT_RATIO;
+}
+
 export async function GET(req: NextRequest) {
-  if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const startedAt = Date.now();
   const outOfTime = () => Date.now() - startedAt > TIME_BUDGET_MS;
+  const healthcheckUrl = process.env.HEALTHCHECK_REFRESH_URL;
 
   const admin = getSupabaseAdmin();
   if (!admin) {
-    return NextResponse.json({ error: 'Supabase admin no configurado' }, { status: 500 });
+    await pingHealthcheck(healthcheckUrl, false);
+    return NextResponse.json({ ok: false, error: 'Supabase admin no configurado' }, { status: 500 });
   }
 
-  const { data, error } = await admin
-    .from('products')
-    .select(
-      `${PRICED_COLUMNS}, name, brand, specs, description, ml_family_id, ml_domain_id, category`
-    )
-    .not('ml_product_id', 'is', null)
-    .eq('is_hidden', false);
+  const run = await startCronRun(admin, 'refresh-prices');
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const rows = (data ?? []) as unknown as (PricedProduct & RepairRow)[];
-  if (rows.length === 0) return NextResponse.json({ ok: true, revisados: 0 });
+  // Los contadores de errores de ML viven en el proceso y se acumulan entre
+  // corridas que reutilizan la misma función: se reporta solo lo de esta.
+  const mlErrorsBefore = mlErrorCounts();
+  const mlErrorsThisRun = () => {
+    const delta: Record<string, number> = {};
+    for (const [endpoint, n] of Object.entries(mlErrorCounts())) {
+      const d = n - (mlErrorsBefore[endpoint] ?? 0);
+      if (d > 0) delta[endpoint] = d;
+    }
+    return delta;
+  };
 
-  const token = await getMlToken();
-  if (!token) {
-    return NextResponse.json({ error: 'No se pudo obtener token de ML' }, { status: 502 });
+  /** Cierra la bitácora, avisa al healthcheck y responde. */
+  const finish = async (ok: boolean, body: Record<string, unknown>, status: number, error?: string) => {
+    const payload = { ok, ...body, elapsed_ms: Date.now() - startedAt };
+    await Promise.all([run.finish(ok, payload, error), pingHealthcheck(healthcheckUrl, ok)]);
+    return NextResponse.json(payload, { status });
+  };
+
+  try {
+    // De a páginas: PostgREST corta en 1.000 filas y el catálogo crece.
+    const { rows: data, error } = await fetchAllRows<PricedProduct & RepairRow>(
+      (from, to) =>
+        admin
+          .from('products')
+          .select(`${PRICED_COLUMNS}, name, brand, specs, description, ml_family_id, ml_domain_id, category`)
+          .not('ml_product_id', 'is', null)
+          .eq('is_hidden', false)
+          .order('id', { ascending: true })
+          .range(from, to) as unknown as PromiseLike<{ data: unknown; error: { code?: string; message: string } | null }>
+    );
+
+    if (error) return finish(false, { error: error.message }, 500, error.message);
+    const rows = data;
+    if (rows.length === 0) return finish(true, { revisados: 0 }, 200);
+
+    const token = await getMlToken();
+    if (!token) return finish(false, { error: 'No se pudo obtener token de ML' }, 502, 'sin token de ML');
+
+    const { directLinks } = await readAffiliateSettings(admin);
+    const outcomes = await priceProducts(rows, token, {
+      concurrency: 6,
+      outOfTime,
+      directLinks,
+      verifyLink: (p) => resolveLinkTarget(p.affiliate_url, p.ml_product_id, token),
+    });
+    const summary = summarizePricing(outcomes);
+
+    // Escribir tarde es peor que no escribir: Vercel corta a los 60 s y la
+    // corrida quedaría a medias sin respuesta. Lo no escrito se reintenta en
+    // la próxima corrida (cada 30 minutos).
+    const writesSkipped = Date.now() - startedAt > WRITE_DEADLINE_MS;
+    const writeErrors = writesSkipped ? 0 : await applyPricing(admin, outcomes);
+
+    // Los posts de Telegram muestran el precio publicado: se corrigen apenas
+    // cambió, si queda tiempo. Que falle no tumba el refresco.
+    let telegram: { edited: number; skipped?: string } | { error: string } = { edited: 0, skipped: 'sin tiempo' };
+    if (!writesSkipped && !outOfTime()) {
+      try {
+        telegram = await syncTelegramPosts(admin);
+      } catch (err) {
+        telegram = { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    const repaired = !writesSkipped && !outOfTime() ? await repairMissingData(admin, rows, token, outOfTime) : 0;
+
+    const visible = !writesSkipped && (hasVisibleChanges(outcomes) || repaired > 0);
+    if (visible) {
+      revalidatePath('/', 'layout');
+      revalidateTag('catalog');
+    }
+
+    const ok = !writesSkipped && isHealthy(summary, writeErrors);
+    return finish(
+      ok,
+      {
+        ...summary,
+        datos_reparados: repaired,
+        errores_de_escritura: writeErrors,
+        escrituras_omitidas_por_tiempo: writesSkipped,
+        telegram,
+        sitio_actualizado: visible,
+        // 429/5xx/red por endpoint de ML: muestra si ML nos está limitando.
+        errores_ml: mlErrorsThisRun(),
+      },
+      ok ? 200 : 500,
+      ok
+        ? undefined
+        : writesSkipped
+          ? 'sin tiempo para escribir'
+          : writeErrors > 0
+            ? `${writeErrors} escrituras fallidas`
+            : `${summary.errores_transitorios} de ${summary.revisados} con error transitorio`
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return finish(false, { error: message }, 500, message);
   }
-
-  const { directLinks } = await readAffiliateSettings(admin);
-  const outcomes = await priceProducts(rows, token, {
-    concurrency: 6,
-    outOfTime,
-    directLinks,
-    verifyLink: (p) => resolveLinkTarget(p.affiliate_url, p.ml_product_id, token),
-  });
-  const writeErrors = await applyPricing(admin, outcomes);
-  const repaired = await repairMissingData(admin, rows, token, outOfTime);
-
-  const visible = hasVisibleChanges(outcomes) || repaired > 0;
-  if (visible) revalidatePath('/', 'layout');
-
-  return NextResponse.json({
-    ok: true,
-    ...summarizePricing(outcomes),
-    datos_reparados: repaired,
-    errores_de_escritura: writeErrors,
-    sitio_actualizado: visible,
-    elapsed_ms: Date.now() - startedAt,
-  });
 }

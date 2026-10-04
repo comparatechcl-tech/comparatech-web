@@ -115,12 +115,34 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   // Hogar: lo que acompaña a la tecnología en la casa. Lo decorativo, la
   // ropa de cama o el aseo quedan fuera a propósito: no es de lo que trata
   // el sitio.
+  //
+  // Hogar y Muebles (MLC1574) paga 8% de comisión, el doble que Tecnología
+  // (ver lib/commission): a igual precio, cada venta deja el doble. Evidencia
+  // de la raíz, verificada con GET /categories/{id} (octubre 2026), a partir
+  // de la categoría que devuelve domain_discovery para cada dominio:
+  //   OFFICE_CHAIRS      MLC440271 Sillas de Oficina → MLC1574 > Muebles para el Hogar
+  //   HOME_OFFICE_DESKS  MLC174439 Escritorios       → MLC1574 > Muebles para el Hogar
+  //   TV_STORAGE_UNITS   MLC160851 Racks             → MLC1574 > Muebles para el Hogar
+  //   LIGHT_BULBS        MLC163740 Ampolletas        → MLC1574 > Iluminación para el Hogar
+  //                      (incluye las ampolletas inteligentes wifi)
+  //   LED_STRIPS         MLC163822 Cintas LED        → MLC1574 > Iluminación para el Hogar
   'MLC-OFFICE_CHAIRS': 'hogar',
   'MLC-HOME_OFFICE_DESKS': 'hogar',
   'MLC-TV_STORAGE_UNITS': 'hogar',
   'MLC-LIGHT_BULBS': 'hogar',
   'MLC-LED_STRIPS': 'hogar',
   'MLC-EMERGENCY_LIGHTS': 'hogar',
+  // Lámparas de escritorio, incluidas las LED y las barras de luz para
+  // monitor. MLC163820 Lámparas de Mesa → MLC1574 > Iluminación para el
+  // Hogar > Lámparas. Ojo: el mismo dominio también cubre MLC175553
+  // "Lamparas Portátiles", que cuelga de Computación (MLC1648, 4%); la
+  // comisión de cada candidato se calcula con la raíz real de su ganador,
+  // así que esos se estiman a la tasa que corresponde.
+  'MLC-TABLE_AND_DESK_LAMPS': 'hogar',
+  // No se agregaron, aunque su raíz es MLC1574: lámparas de pie
+  // (MLC-FLOOR_LAMPS, MLC1585) y de techo/pared: son decoración, no
+  // tecnología. Tampoco MLC-LED_STAGE_LIGHTS: su raíz es Electrónica
+  // (MLC1000), no Hogar.
 
   // Electrodomésticos
   'MLC-MICROWAVES': 'electrodomesticos',

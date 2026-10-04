@@ -6,7 +6,9 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: '*',
       allow: '/',
-      disallow: ['/api/', '/admin/'],
+      // '/admin' sin barra también: la regla '/admin/' no cubre la portada
+      // del admin. Igual responden 401 y llevan X-Robots-Tag: noindex.
+      disallow: ['/admin', '/admin/', '/api/'],
     },
     sitemap: `${SITE_URL}/sitemap.xml`,
   };

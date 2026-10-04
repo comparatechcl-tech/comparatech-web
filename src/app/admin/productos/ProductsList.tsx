@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
-import { Product } from '@/lib/types';
-import { formatCLP } from '@/lib/format';
-import { ProductAdminCard } from './ProductAdminCard';
+import { buyUrl } from '@/lib/outbound';
+import { buildCaption } from '@/lib/content/captions';
+import { ProductAdminCard, type AdminProduct } from './ProductAdminCard';
 
-export function ProductsList({ products }: { products: Product[] }) {
+export function ProductsList({ products, siteUrl }: { products: AdminProduct[]; siteUrl: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -23,12 +24,23 @@ export function ProductsList({ products }: { products: Product[] }) {
     setSelected((prev) => (prev.size === products.length ? new Set() : new Set(products.map((p) => p.id))));
   }
 
-  function handleCopySelected() {
+  // Cada producto con su texto completo (aviso de publicidad y hora del
+  // precio incluidos) y el mismo link de compra que usa el sitio. Antes se
+  // copiaba el affiliate_url pelado, sin aviso.
+  async function handleCopySelected() {
+    const now = new Date();
     const chosen = products.filter((p) => selected.has(p.id));
-    const text = chosen.map((p) => `${p.name} — ${formatCLP(p.price)}\n${p.affiliate_url}`).join('\n\n');
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    const text = chosen
+      .map((p) => buildCaption(p, 'whatsapp', { now, siteUrl, link: buyUrl(p) }))
+      .join('\n\n— — —\n\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyError(false);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopyError(true);
+    }
   }
 
   if (products.length === 0) {
@@ -53,12 +65,18 @@ export function ProductsList({ products }: { products: Product[] }) {
           className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
         >
           {copied ? <Check size={13} className="text-accent" /> : <Copy size={13} />}
-          {copied ? 'Copiado' : 'Copiar seleccionados'}
+          {copied ? 'Copiado' : copyError ? 'No se pudo copiar' : 'Copiar seleccionados'}
         </button>
       </div>
 
       {products.map((p) => (
-        <ProductAdminCard key={p.id} product={p} selected={selected.has(p.id)} onToggleSelect={() => toggle(p.id)} />
+        <ProductAdminCard
+          key={p.id}
+          product={p}
+          siteUrl={siteUrl}
+          selected={selected.has(p.id)}
+          onToggleSelect={() => toggle(p.id)}
+        />
       ))}
     </div>
   );

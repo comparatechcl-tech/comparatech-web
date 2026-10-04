@@ -25,8 +25,8 @@ export function FounderBio({ compact = false }: { compact?: boolean }) {
           Roxana — Fundadora de ComparaTech
         </p>
         <p className="mt-1 text-sm text-muted">
-          Cada producto que ves acá lo revisamos a fondo: precio, specs y
-          opiniones reales, para ahorrarte el tiempo de comparar por tu
+          Cada producto que ves acá lo revisamos a fondo: precio, vendedor y
+          especificaciones, para ahorrarte el tiempo de comparar por tu
           cuenta. La idea es simple: explicarte qué conviene comprar y por
           qué, sin letra chica ni tecnicismos.
         </p>

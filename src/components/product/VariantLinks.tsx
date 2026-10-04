@@ -1,7 +1,16 @@
+'use client';
+
+// Componente de cliente porque <Image loader={...}> recibe una función, y
+// una función no puede pasar de un componente de servidor a uno de cliente
+// (next/image lo es). Todo lo que importa es código puro.
 import Link from 'next/link';
 import Image from 'next/image';
 import { Product } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
+import mlImageLoader from '@/lib/ml-image-loader';
+
+/** Lo único que lee el bloque: lo que llega al navegador queda en el HTML. */
+export type VariantLink = Pick<Product, 'id' | 'slug' | 'name' | 'price' | 'image_url' | 'specs'>;
 
 /**
  * Otras variantes (colores) del mismo producto.
@@ -11,7 +20,7 @@ import { formatCLP } from '@/lib/format';
  * que los Redmi Buds rosados cuesten $300 menos no significa que nadie quiera
  * los negros.
  */
-export function VariantLinks({ variants }: { variants: Product[] }) {
+export function VariantLinks({ variants }: { variants: VariantLink[] }) {
   if (variants.length === 0) return null;
 
   return (
@@ -27,7 +36,7 @@ export function VariantLinks({ variants }: { variants: Product[] }) {
             className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3 transition hover:border-accent/40"
           >
             <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-white">
-              <Image src={v.image_url} alt="" fill sizes="48px" className="object-contain" />
+              <Image loader={mlImageLoader} src={v.image_url} alt="" fill sizes="48px" className="object-contain" />
             </span>
             <span className="min-w-0">
               <span className="block truncate text-sm font-medium text-fg">
@@ -49,7 +58,7 @@ export function VariantLinks({ variants }: { variants: Product[] }) {
  * mejor rótulo. Los nombres completos de ML miden 76-90 caracteres y son casi
  * idénticos entre sí, así que no distinguen nada.
  */
-function variantLabel(product: Product): string {
+function variantLabel(product: VariantLink): string {
   const color = product.specs?.Color;
   return typeof color === 'string' && color.trim() ? color : product.name;
 }

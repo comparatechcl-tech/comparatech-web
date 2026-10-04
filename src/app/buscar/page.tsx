@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
-import { getCatalogProducts } from '@/lib/queries/products';
+import Link from 'next/link';
+import { getCatalogProducts, getDeals } from '@/lib/queries/products';
+import { getPopulatedCategories } from '@/lib/categories';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { FilterPanel } from '@/components/search/FilterPanel';
 import { formatDiscountPct } from '@/lib/format';
+import { searchProducts } from '@/lib/search';
 import { stripDiacritics } from '@/lib/text';
 
 export const metadata: Metadata = {
@@ -17,6 +20,9 @@ interface SearchParams {
   minDiscount?: string;
 }
 
+/** Ofertas que se sugieren cuando la búsqueda no encuentra nada. */
+const FALLBACK_DEALS = 8;
+
 export default async function BuscarPage({
   searchParams,
 }: {
@@ -25,13 +31,16 @@ export default async function BuscarPage({
   const params = await searchParams;
   const all = await getCatalogProducts();
 
-  const q = params.q ? stripDiacritics(params.q.toLowerCase().trim()) : undefined;
+  const q = params.q?.trim() ?? '';
   const brand = params.brand ? stripDiacritics(params.brand.toLowerCase().trim()) : undefined;
   const maxPrice = params.maxPrice ? Number(params.maxPrice) : undefined;
   const minDiscount = params.minDiscount ? Number(params.minDiscount) : undefined;
 
-  const results = all.filter((p) => {
-    if (q && !stripDiacritics(p.name.toLowerCase()).includes(q)) return false;
+  // Con texto, cada palabra se busca por separado y en orden de relevancia
+  // (ver lib/search). Sin texto, el catálogo completo para filtrar.
+  const matches = q ? searchProducts(all, q) : all;
+
+  const results = matches.filter((p) => {
     if (brand && !stripDiacritics(p.brand.toLowerCase()).includes(brand)) return false;
     if (maxPrice && p.price > maxPrice) return false;
     if (minDiscount) {
@@ -40,6 +49,14 @@ export default async function BuscarPage({
     }
     return true;
   });
+
+  // Una búsqueda sin resultados no puede ser un callejón sin salida: quien
+  // busca ya quiere comprar algo, así que se le ofrece lo mejor de hoy y el
+  // camino a las categorías.
+  const noResults = q !== '' && results.length === 0;
+  const [deals, categories] = noResults
+    ? [(await getDeals()).slice(0, FALLBACK_DEALS), getPopulatedCategories(all)]
+    : [[], []];
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
@@ -54,7 +71,40 @@ export default async function BuscarPage({
           }}
         />
       </div>
-      <ProductGrid products={results} />
+
+      {noResults ? (
+        <div>
+          <p className="mb-2 font-heading text-lg font-semibold text-fg">
+            No encontramos “{q}”.{' '}
+            <Link href="/ofertas" className="text-accent hover:underline">
+              Mira las ofertas de hoy
+            </Link>
+          </p>
+          {categories.length > 0 && (
+            <nav aria-label="Categorías" className="mb-8 flex flex-wrap gap-2">
+              {categories.map((c) => (
+                <Link
+                  key={c.slug}
+                  href={`/categoria/${c.slug}`}
+                  className="rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-muted transition hover:border-accent/40 hover:text-fg"
+                >
+                  {c.name}
+                </Link>
+              ))}
+            </nav>
+          )}
+          {deals.length > 0 && <ProductGrid products={deals} placement="buscar" />}
+        </div>
+      ) : (
+        <>
+          {q && (
+            <p className="mb-4 text-sm text-muted">
+              {results.length === 1 ? '1 resultado' : `${results.length} resultados`} para “{q}”
+            </p>
+          )}
+          <ProductGrid products={results} placement="buscar" />
+        </>
+      )}
     </div>
   );
 }

@@ -7,12 +7,19 @@
  * acá, Make solo tiene que mapear dos campos y el contenido queda
  * versionado, revisable y probable como cualquier otro código.
  *
+ * El correo existe para una sola cosa: que se apruebe lo que más paga. Antes
+ * listaba primero lo más barato, que es justo lo que menos comisión deja, y
+ * nada avisaba cuando pasaban días sin publicar. Ahora el asunto cambia
+ * cuando el sitio lleva más de 3 días sin productos nuevos, y arriba va la
+ * tanda que más deja con un botón directo a aprobarla.
+ *
  * El HTML usa tablas y estilos en línea a propósito: los clientes de correo
  * no soportan flexbox ni hojas de estilo externas.
  */
 
-import { formatCLP } from '@/lib/format';
+import { formatCLP, formatDiscountPct } from '@/lib/format';
 import { getCategoryInfo } from '@/lib/categories';
+import { estimateCommission } from '@/lib/commission';
 
 export interface DigestCandidate {
   name: string;
@@ -20,10 +27,20 @@ export interface DigestCandidate {
   category: string;
   image_url: string;
   seller_nickname: string | null;
+  original_price?: number | null;
+  /** Raíz de ML (migración 0018). Sin ella la comisión se estima con la tasa más baja. */
+  ml_root_category?: string | null;
+  /** Familia de ML: los colores de un mismo modelo la comparten. */
+  ml_family_id?: string | null;
 }
 
+export type DigestAttribution = 'pendiente' | 'confirmada' | 'fallida';
+
 export interface DigestInput {
+  /** Entraron en las últimas 24 horas, de la que más comisión deja a la que menos. */
   newCandidates: DigestCandidate[];
+  /** Los que más pagan de toda la cola de revisión, ya ordenados (máximo 10). */
+  topToApprove: DigestCandidate[];
   pendingTotal: number;
   publishedTotal: number;
   /** Fuera del sitio y no se arreglan solos: el link lleva a otro producto. */
@@ -34,6 +51,18 @@ export interface DigestInput {
    */
   pausedCount: number;
   adminUrl: string;
+  /** Días de calendario desde la última aprobación; null si no se sabe. */
+  daysSinceLastApproval: number | null;
+  /** A dónde lleva hoy el botón de compra del sitio. */
+  linkMode: { directLinks: boolean; word: string | null };
+  /** Resultado de la prueba de atribución de los links directos. */
+  attribution: DigestAttribution;
+  /** Minutos desde la revisión de precios más reciente; null si no se sabe. */
+  lastPriceCheckMinutes: number | null;
+  /** Clics hacia Mercado Libre ayer (hora de Chile); null si no se miden todavía. */
+  clicsAyer: number | null;
+  /** Consultas que fallaron al armar el correo. */
+  errors: string[];
 }
 
 const BG = '#f4f6f9';
@@ -42,6 +71,19 @@ const TEXT = '#0f172a';
 const MUTED = '#64748b';
 const BORDER = '#e2e8f0';
 const ACCENT = '#0e7490';
+const WARN_BG = '#fff7ed';
+const WARN_BORDER = '#fed7aa';
+const WARN_TEXT = '#9a3412';
+
+/** Cuántos van en el bloque "Top 10 para aprobar hoy". */
+export const TOP_TO_APPROVE = 10;
+
+/**
+ * Desde cuántos días sin aprobar nada el asunto pasa a avisarlo. Un fin de
+ * semana sin publicar es normal; más que eso, el sitio se estanca y deja de
+ * aparecer en búsquedas nuevas.
+ */
+export const STALE_APPROVAL_DAYS = 3;
 
 /**
  * Elige entre singular y plural. Existe para no volver a escribir frases
@@ -52,35 +94,46 @@ function plural(count: number, singular: string, many: string): string {
   return count === 1 ? singular : many;
 }
 
-/**
- * Cuántos candidatos nuevos se listan con foto. Desde que la prospección
- * recuerda lo descartado entran decenas por día —113 en la primera corrida—
- * y un correo con todos no se lee: más arriba va el conteo por categoría y
- * el resto se revisa en el admin.
- */
-const MAX_LISTED = 10;
-
 function categoryName(slug: string): string {
   return getCategoryInfo(slug)?.name ?? slug;
 }
 
-/**
- * Muestra variada: uno de cada categoría por vuelta. Tomar los primeros por
- * precio daba diez repetidores wifi seguidos.
- */
-function sampleAcrossCategories(candidates: DigestCandidate[], max: number): DigestCandidate[] {
-  const groups = new Map<string, DigestCandidate[]>();
-  for (const c of candidates) groups.set(c.category, [...(groups.get(c.category) ?? []), c]);
+/** Comisión estimada de una venta del candidato, en pesos. */
+export function candidateCommission(c: Pick<DigestCandidate, 'price' | 'ml_root_category'>): number {
+  return estimateCommission(c.price, c.ml_root_category ?? null);
+}
 
-  const sample: DigestCandidate[] = [];
-  while (sample.length < Math.min(max, candidates.length)) {
-    for (const group of groups.values()) {
-      const next = group.shift();
-      if (next) sample.push(next);
-      if (sample.length === max) break;
+function discountOf(c: Pick<DigestCandidate, 'price' | 'original_price'>): number {
+  return formatDiscountPct(c.price, c.original_price ?? null) ?? 0;
+}
+
+/**
+ * De la que más comisión deja a la que menos; a igual comisión, el de mayor
+ * descuento primero (es el que más fácil se vende). No modifica la lista.
+ */
+export function rankForApproval<T extends DigestCandidate>(candidates: T[]): T[] {
+  return [...candidates].sort(
+    (a, b) => candidateCommission(b) - candidateCommission(a) || discountOf(b) - discountOf(a)
+  );
+}
+
+/**
+ * Los primeros `max` de una lista ya ordenada, uno por familia: diez colores
+ * del mismo iPhone no son diez decisiones distintas. El admin los agrupa
+ * igual al revisar.
+ */
+export function pickTopToApprove<T extends DigestCandidate>(ranked: T[], max = TOP_TO_APPROVE): T[] {
+  const families = new Set<string>();
+  const top: T[] = [];
+  for (const c of ranked) {
+    if (top.length >= max) break;
+    if (c.ml_family_id) {
+      if (families.has(c.ml_family_id)) continue;
+      families.add(c.ml_family_id);
     }
+    top.push(c);
   }
-  return sample;
+  return top;
 }
 
 /** "86 de Computación · 10 de Audio · …", de la categoría con más a la con menos. */
@@ -93,16 +146,56 @@ function countByCategory(candidates: DigestCandidate[]): string {
     .join(' · ');
 }
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Link del botón principal: la cola ordenada por lo que más paga. */
+function approveUrl(adminUrl: string): string {
+  return `${adminUrl}/admin/candidatos?orden=valor`;
+}
+
+/** "Modo de links: meli.la · matt_word=comparatech". */
+export function linkModeLine(input: Pick<DigestInput, 'linkMode' | 'attribution'>): string {
+  const { directLinks, word } = input.linkMode;
+  const mode = directLinks
+    ? `directos (${input.attribution === 'confirmada' ? 'atribución confirmada' : 'sin comprobar'})`
+    : 'meli.la';
+  return `Modo de links: ${mode}${word ? ` · matt_word=${word}` : ''}`;
+}
+
+/** "Salud: precios revisados hace 12 min". */
+export function healthLine(minutes: number | null): string {
+  return minutes === null
+    ? 'Salud: no se sabe cuándo se revisaron los precios por última vez'
+    : `Salud: precios revisados hace ${minutes} min`;
+}
+
+/** "⚠ Datos incompletos: falló productos publicados, clics de ayer". Vacío si no hubo errores. */
+export function errorsLine(errors: string[]): string {
+  return errors.length > 0 ? `⚠ Datos incompletos: falló ${errors.join(', ')}` : '';
+}
+
+function isStale(days: number | null): days is number {
+  return days !== null && days > STALE_APPROVAL_DAYS;
 }
 
 export function buildDigestSubject(input: DigestInput): string {
-  const { newCandidates, pendingTotal, needsLink } = input;
+  const { newCandidates, pendingTotal, needsLink, daysSinceLastApproval } = input;
+
+  // Lo más caro de todo es no publicar: el ingreso sale de productos nuevos
+  // en el sitio. Cuando eso pasa, el asunto lo dice antes que nada.
+  if (isStale(daysSinceLastApproval)) {
+    return (
+      `ComparaTech · ${daysSinceLastApproval} días sin publicar · ` +
+      `${pendingTotal} ${plural(pendingTotal, 'listo para aprobar', 'listos para aprobar')}`
+    );
+  }
 
   const parts: string[] = [];
   if (newCandidates.length > 0) {
@@ -122,6 +215,7 @@ export function buildDigestSubject(input: DigestInput): string {
 }
 
 function candidateRow(c: DigestCandidate): string {
+  const discount = formatDiscountPct(c.price, c.original_price ?? null);
   return `
   <tr>
     <td style="padding:12px 0;border-bottom:1px solid ${BORDER};" valign="top" width="64">
@@ -135,55 +229,99 @@ function candidateRow(c: DigestCandidate): string {
       </div>
     </td>
     <td style="padding:12px 0;border-bottom:1px solid ${BORDER};text-align:right;white-space:nowrap;" valign="top">
-      <div style="font-size:15px;color:${ACCENT};font-weight:700;">${formatCLP(c.price)}</div>
+      <div style="font-size:15px;color:${TEXT};font-weight:700;">${escapeHtml(formatCLP(c.price))}</div>
+      <div style="font-size:12px;color:${ACCENT};font-weight:600;margin-top:3px;">
+        Comisión est. ${escapeHtml(formatCLP(candidateCommission(c)))}${discount ? ` · -${discount}%` : ''}
+      </div>
     </td>
   </tr>`;
 }
 
 export function buildDigestHtml(input: DigestInput): string {
-  const { newCandidates, pendingTotal, publishedTotal, needsLink, pausedCount, adminUrl } = input;
+  const {
+    newCandidates,
+    topToApprove,
+    pendingTotal,
+    publishedTotal,
+    needsLink,
+    pausedCount,
+    adminUrl,
+    daysSinceLastApproval,
+    clicsAyer,
+    errors,
+  } = input;
 
-  const listed = sampleAcrossCategories(newCandidates, MAX_LISTED);
-  const notListed = newCandidates.length - listed.length;
+  const top = topToApprove.slice(0, TOP_TO_APPROVE);
+  const staleNote = isStale(daysSinceLastApproval)
+    ? `<div style="font-size:13px;color:${WARN_TEXT};margin-top:8px;font-weight:600;">
+         ${daysSinceLastApproval} días sin publicar productos nuevos
+       </div>`
+    : '';
+
+  const errorsBlock =
+    errors.length > 0
+      ? `
+      <div style="margin-top:20px;padding:10px 14px;background:${WARN_BG};border:1px solid ${WARN_BORDER};border-radius:10px;font-size:13px;color:${WARN_TEXT};line-height:1.5;">
+        ${escapeHtml(errorsLine(errors))}. Los números de abajo pueden estar incompletos.
+      </div>`
+      : '';
+
+  const heroSection =
+    pendingTotal > 0
+      ? `<div style="font-size:34px;font-weight:700;color:${TEXT};line-height:1;">${pendingTotal}</div>
+         <div style="font-size:13px;color:${MUTED};margin-top:6px;">
+           ${plural(pendingTotal, 'producto listo para aprobar', 'productos listos para aprobar')}
+         </div>
+         ${staleNote}
+         <a href="${escapeHtml(approveUrl(adminUrl))}"
+            style="display:inline-block;margin-top:14px;padding:10px 20px;background:${ACCENT};color:#fff;
+                   font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
+           Aprobar la tanda de hoy
+         </a>`
+      : // Un "0" gigante con un botón al lado invita a entrar a una pantalla vacía.
+        `<div style="font-size:15px;font-weight:600;color:${TEXT};">Cola de revisión al día</div>
+         <div style="font-size:13px;color:${MUTED};margin-top:4px;">No queda nada pendiente por aprobar.</div>
+         ${staleNote}`;
+
+  const topSection =
+    top.length > 0
+      ? `
+      <h2 style="font-size:15px;color:${TEXT};margin:28px 0 4px;">Top ${TOP_TO_APPROVE} para aprobar hoy</h2>
+      <p style="font-size:13px;color:${MUTED};margin:0 0 4px;line-height:1.5;">
+        Los que más comisión dejan por venta de toda la cola.
+      </p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        ${top.map(candidateRow).join('')}
+      </table>
+      <p style="font-size:13px;margin:12px 0 0;">
+        <a href="${escapeHtml(approveUrl(adminUrl))}" style="color:${ACCENT};font-weight:600;">Aprobar la tanda de hoy →</a>
+      </p>`
+      : '';
 
   const newSection =
     newCandidates.length > 0
       ? `
       <h2 style="font-size:15px;color:${TEXT};margin:28px 0 4px;">Nuevos desde ayer (${newCandidates.length})</h2>
-      ${
-        notListed > 0
-          ? `<p style="font-size:13px;color:${MUTED};margin:0 0 4px;line-height:1.5;">${escapeHtml(countByCategory(newCandidates))}</p>`
-          : ''
-      }
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-        ${listed.map(candidateRow).join('')}
-      </table>
-      ${
-        notListed > 0
-          ? `<p style="font-size:13px;color:${MUTED};margin:12px 0 0;">
-               … y ${notListed} más.
-               <a href="${escapeHtml(adminUrl)}/admin/candidatos" style="color:${ACCENT};font-weight:600;">Verlos todos en el admin →</a>
-             </p>`
-          : ''
-      }`
+      <p style="font-size:13px;color:${MUTED};margin:0;line-height:1.5;">${escapeHtml(countByCategory(newCandidates))}</p>`
       : `
       <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">
         Hoy no entraron productos nuevos. Los destacados de Mercado Libre cambian
         de a poco, así que hay días sin novedades.
       </p>`;
 
-  // Lo único del correo que requiere acción: links que llevan a otro
-  // producto. El resto de lo que está fuera del sitio vuelve solo.
+  // Lo único del correo que requiere acción además de aprobar: links que
+  // llevan a otro producto. El resto de lo que está fuera del sitio vuelve
+  // solo.
   const attentionSection =
     needsLink.length > 0
       ? `
-      <div style="margin-top:28px;padding:14px 16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;">
-        <div style="font-size:14px;color:#9a3412;font-weight:600;">
+      <div style="margin-top:28px;padding:14px 16px;background:${WARN_BG};border:1px solid ${WARN_BORDER};border-radius:10px;">
+        <div style="font-size:14px;color:${WARN_TEXT};font-weight:600;">
           ${needsLink.length}
           ${plural(needsLink.length, 'producto necesita', 'productos necesitan')}
           un link nuevo
         </div>
-        <div style="font-size:13px;color:#9a3412;margin-top:4px;line-height:1.5;">
+        <div style="font-size:13px;color:${WARN_TEXT};margin-top:4px;line-height:1.5;">
           ${plural(
             needsLink.length,
             'Su link de afiliado abre otra ficha, así que el comprador vería otro producto.',
@@ -191,11 +329,11 @@ export function buildDigestHtml(input: DigestInput): string {
           )}
           Se arregla generando el link desde la ficha correcta y guardándolo en el admin.
         </div>
-        <ul style="margin:8px 0 0;padding-left:18px;font-size:13px;color:#9a3412;">
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:13px;color:${WARN_TEXT};">
           ${needsLink.map((p) => `<li style="margin:2px 0;">${escapeHtml(p.name)}</li>`).join('')}
         </ul>
         <a href="${escapeHtml(adminUrl)}/admin/problemas"
-           style="display:inline-block;margin-top:10px;font-size:13px;font-weight:600;color:#9a3412;">
+           style="display:inline-block;margin-top:10px;font-size:13px;font-weight:600;color:${WARN_TEXT};">
           Resolver en el admin →
         </a>
       </div>`
@@ -211,6 +349,11 @@ export function buildDigestHtml(input: DigestInput): string {
       </p>`
       : '';
 
+  const clicksLine =
+    clicsAyer === null
+      ? ''
+      : `<br>${clicsAyer} ${plural(clicsAyer, 'clic', 'clics')} hacia Mercado Libre ayer.`;
+
   return `<!doctype html>
 <html lang="es">
 <body style="margin:0;padding:24px 12px;background:${BG};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
@@ -223,34 +366,23 @@ export function buildDigestHtml(input: DigestInput): string {
           <div style="font-size:18px;font-weight:700;color:${TEXT};">
             Compara<span style="color:${ACCENT};">Tech</span>
           </div>
-          <div style="font-size:13px;color:${MUTED};margin-top:2px;">Resumen del catálogo</div>
+          <div style="font-size:13px;color:${MUTED};margin-top:2px;">Qué aprobar hoy</div>
+
+          ${errorsBlock}
 
           <div style="margin-top:20px;padding:18px;background:${BG};border-radius:10px;text-align:center;">
-            ${
-              pendingTotal > 0
-                ? `<div style="font-size:34px;font-weight:700;color:${TEXT};line-height:1;">${pendingTotal}</div>
-                   <div style="font-size:13px;color:${MUTED};margin-top:6px;">
-                     ${plural(pendingTotal, 'producto esperando revisión', 'productos esperando revisión')}
-                   </div>
-                   <a href="${escapeHtml(adminUrl)}/admin/candidatos"
-                      style="display:inline-block;margin-top:14px;padding:10px 20px;background:${ACCENT};color:#fff;
-                             font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
-                     Revisar ahora
-                   </a>`
-                : // Un "0" gigante con un botón "Revisar ahora" al lado invita
-                  // a entrar a una pantalla vacía.
-                  `<div style="font-size:15px;font-weight:600;color:${TEXT};">Cola de revisión al día</div>
-                   <div style="font-size:13px;color:${MUTED};margin-top:4px;">No queda nada pendiente por aprobar.</div>`
-            }
+            ${heroSection}
           </div>
 
+          ${topSection}
           ${newSection}
           ${attentionSection}
           ${pausedNote}
 
           <p style="font-size:12px;color:${MUTED};margin:28px 0 24px;border-top:1px solid ${BORDER};padding-top:16px;line-height:1.6;">
-            ${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.
-            Los precios se comparan contra Mercado Libre cada 30 minutos.
+            ${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.${clicksLine}<br>
+            ${escapeHtml(linkModeLine(input))}<br>
+            ${escapeHtml(healthLine(input.lastPriceCheckMinutes))}
           </p>
 
         </td></tr>
@@ -262,19 +394,44 @@ export function buildDigestHtml(input: DigestInput): string {
 }
 
 export function buildDigestText(input: DigestInput): string {
-  const { newCandidates, pendingTotal, publishedTotal, needsLink, pausedCount, adminUrl } = input;
-  const lines = [
-    `ComparaTech — resumen del catálogo`,
-    ``,
-    `${pendingTotal} ${plural(pendingTotal, 'producto espera', 'productos esperan')} revisión: ${adminUrl}/admin/candidatos`,
-    ``,
-  ];
+  const {
+    newCandidates,
+    topToApprove,
+    pendingTotal,
+    publishedTotal,
+    needsLink,
+    pausedCount,
+    adminUrl,
+    daysSinceLastApproval,
+    clicsAyer,
+    errors,
+  } = input;
+
+  const lines = [`ComparaTech — qué aprobar hoy`, ``];
+  if (errors.length > 0) lines.push(errorsLine(errors), ``);
+  if (isStale(daysSinceLastApproval)) lines.push(`${daysSinceLastApproval} días sin publicar productos nuevos.`);
+
+  lines.push(
+    `${pendingTotal} ${plural(pendingTotal, 'producto listo', 'productos listos')} para aprobar.`,
+    `Aprobar la tanda de hoy: ${approveUrl(adminUrl)}`,
+    ``
+  );
+
+  const top = topToApprove.slice(0, TOP_TO_APPROVE);
+  if (top.length > 0) {
+    lines.push(`Top ${TOP_TO_APPROVE} para aprobar hoy:`);
+    for (const c of top) {
+      const discount = formatDiscountPct(c.price, c.original_price ?? null);
+      lines.push(
+        `  - ${c.name} — ${formatCLP(c.price)} · Comisión est. ${formatCLP(candidateCommission(c))}` +
+          `${discount ? ` · -${discount}%` : ''} (${categoryName(c.category)})`
+      );
+    }
+    lines.push('');
+  }
 
   if (newCandidates.length > 0) {
-    const listed = sampleAcrossCategories(newCandidates, MAX_LISTED);
     lines.push(`Nuevos desde ayer (${newCandidates.length}): ${countByCategory(newCandidates)}`);
-    listed.forEach((c) => lines.push(`  - ${c.name} — ${formatCLP(c.price)} (${categoryName(c.category)})`));
-    if (newCandidates.length > listed.length) lines.push(`  … y ${newCandidates.length - listed.length} más en el admin.`);
   } else {
     lines.push('Hoy no entraron productos nuevos.');
   }
@@ -288,5 +445,7 @@ export function buildDigestText(input: DigestInput): string {
   }
 
   lines.push('', `${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.`);
+  if (clicsAyer !== null) lines.push(`${clicsAyer} ${plural(clicsAyer, 'clic', 'clics')} hacia Mercado Libre ayer.`);
+  lines.push(linkModeLine(input), healthLine(input.lastPriceCheckMinutes));
   return lines.join('\n');
 }

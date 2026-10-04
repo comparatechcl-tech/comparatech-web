@@ -1,0 +1,22 @@
+# Dependabot: revisa las dependencias de npm una vez por semana.
+#
+# Solo abre pull requests de parches (15.5.x → 15.5.y) y de seguridad
+# (estas últimas las abre siempre, por fuera de este calendario, si está
+# activado "Dependabot security updates" en Settings → Code security). Los
+# saltos de versión mayor o menor (Next 16, React 19) se hacen a mano y
+# probando, nunca solos.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: America/Santiago
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
+    groups:
+      parches:
+        update-types: ['patch']

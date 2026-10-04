@@ -2,6 +2,9 @@
 
 import { Search, SlidersHorizontal } from 'lucide-react';
 
+// Los campos no tienen <label> visible (el placeholder hace de etiqueta),
+// así que llevan aria-label: el placeholder desaparece al escribir y un
+// lector de pantalla no siempre lo anuncia.
 export function FilterPanel({
   defaultValues,
 }: {
@@ -17,6 +20,7 @@ export function FilterPanel({
         <input
           type="text"
           name="q"
+          aria-label="Buscar"
           placeholder="Buscar producto..."
           defaultValue={defaultValues.q}
           className="w-full rounded-xl border border-border bg-surface2 py-2.5 pl-9 pr-3 text-sm text-fg placeholder:text-muted transition focus:border-accent focus:outline-none"
@@ -25,6 +29,7 @@ export function FilterPanel({
       <input
         type="text"
         name="brand"
+        aria-label="Marca"
         placeholder="Marca"
         defaultValue={defaultValues.brand}
         className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-muted transition focus:border-accent focus:outline-none"
@@ -32,12 +37,14 @@ export function FilterPanel({
       <input
         type="number"
         name="maxPrice"
+        aria-label="Precio máximo"
         placeholder="Precio máximo (CLP)"
         defaultValue={defaultValues.maxPrice}
         className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-muted transition focus:border-accent focus:outline-none"
       />
       <select
         name="minDiscount"
+        aria-label="Descuento mínimo"
         defaultValue={defaultValues.minDiscount ?? ''}
         className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-fg transition focus:border-accent focus:outline-none sm:col-span-2"
       >

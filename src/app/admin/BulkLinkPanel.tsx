@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Check, Copy, ExternalLink } from 'lucide-react';
 import { republishBatch } from '@/lib/actions/catalog-admin';
 import { approveBatch } from './candidatos/actions';
-import { MAX_BATCH, type BatchItemResult, type BatchResult } from '@/lib/batch-result';
+import { MAX_BATCH, type BatchItemResult, type BatchOutcome, type BatchResult } from '@/lib/batch-result';
 import { reasonInfo } from '@/lib/inactive-reasons';
 
 /**
@@ -30,14 +30,24 @@ export function BulkLinkPanel({
   mode,
   directLinks = false,
   onDone,
+  refreshOnDone = true,
 }: {
   /** En el orden en que se copian las URLs. */
   items: BulkItem[];
   mode: 'republicar' | 'aprobar';
-  /** Con links directos, aprobar no requiere generar links. */
+  /**
+   * true solo si los links directos están encendidos Y su atribución está
+   * confirmada (directLinksUsable). Encendidos sin confirmar no alcanza: el
+   * servidor rechaza aprobar sin meli.la, así que el panel los pide igual.
+   */
   directLinks?: boolean;
-  /** Ids que quedaron guardados, para sacarlos de la lista. */
-  onDone?: (ids: string[]) => void;
+  /** Ids que quedaron guardados, para sacarlos de la lista, y el resultado de cada uno. */
+  onDone?: (ids: string[], items: BatchItemResult[]) => void;
+  /**
+   * Releer la página al terminar. La cola de candidatos lo apaga: quita las
+   * tarjetas sola y recarga recién al pasar a la siguiente tanda.
+   */
+  refreshOnDone?: boolean;
 }) {
   const router = useRouter();
   const [pasted, setPasted] = useState('');
@@ -64,11 +74,11 @@ export function BulkLinkPanel({
       const res = mode === 'aprobar' ? await approveBatch(ids, text) : await republishBatch(ids, text);
       setResult(res);
       if (!res.ok) return;
-      const saved = res.items.filter((i) => i.outcome !== 'sin_link' && i.outcome !== 'error').map((i) => i.id);
+      const saved = res.items.filter((i) => isSaved(i.outcome)).map((i) => i.id);
       if (saved.length > 0) {
         setPasted('');
-        onDone?.(saved);
-        router.refresh();
+        onDone?.(saved, res.items);
+        if (refreshOnDone) router.refresh();
       }
     });
   }
@@ -76,16 +86,26 @@ export function BulkLinkPanel({
   return (
     <div className="rounded-xl border border-accent/30 bg-accent/5 p-4">
       <p className="text-sm font-semibold text-fg">
-        {mode === 'aprobar' ? `Aprobar ${count} seleccionado${plural} en bloque` : `Republicar ${count} en bloque`}
+        {count === 0
+          ? 'Listo'
+          : mode === 'aprobar'
+            ? `Aprobar ${count} seleccionado${plural} en bloque`
+            : `Republicar ${count} en bloque`}
       </p>
 
-      {tooMany ? (
+      {count === 0 ? (
+        <p className="mt-1 text-xs text-muted">
+          No quedan productos por {mode === 'aprobar' ? 'aprobar' : 'republicar'} en esta selección.
+        </p>
+      ) : tooMany ? (
         <p className="mt-1 text-xs text-amber-400">
           Son {count}: el máximo por tanda es {MAX_BATCH}. Deja seleccionados {MAX_BATCH} o menos.
         </p>
       ) : skipLinks ? (
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted">Los links directos están encendidos: no hace falta generar links.</p>
+          <p className="text-xs text-muted">
+            La atribución de los links directos está confirmada: no hace falta generar links.
+          </p>
           <button
             onClick={submit}
             disabled={isPending}
@@ -96,6 +116,12 @@ export function BulkLinkPanel({
         </div>
       ) : (
         <ol className="mt-3 flex flex-col gap-4 text-xs text-muted">
+          {mode === 'aprobar' && (
+            <li className="rounded-md border border-border bg-surface px-3 py-2 text-fg">
+              Pega un link meli.la por producto (Generador de links de ML). Los links directos no se usan hasta
+              comprobar la atribución.
+            </li>
+          )}
           <li>
             <span className="font-semibold text-fg">1.</span> Copia las URLs y pégalas en el generador de links de
             Mercado Libre.
@@ -131,14 +157,16 @@ export function BulkLinkPanel({
               className="mt-2 w-full rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-muted focus:border-accent focus:outline-none"
             />
           </li>
-          <li className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          {/* Pegada abajo: con 30 productos el panel es largo y el botón
+              quedaba fuera de la pantalla en un teléfono. */}
+          <li className="sticky bottom-0 -mx-4 flex flex-col gap-2 border-t border-border bg-surface/95 px-4 py-3 backdrop-blur sm:flex-row sm:items-center">
             <span>
               <span className="font-semibold text-fg">3.</span> Se verifica cada link y queda publicado.
             </span>
             <button
               onClick={submit}
               disabled={!pasted.trim() || isPending}
-              className="shrink-0 rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40 sm:ml-auto"
+              className="min-h-11 shrink-0 rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40 sm:ml-auto"
             >
               {isPending
                 ? 'Verificando links…'
@@ -153,6 +181,11 @@ export function BulkLinkPanel({
   );
 }
 
+/** Quedó guardado (publicado o en pausa): se saca de la lista. */
+function isSaved(outcome: BatchOutcome): boolean {
+  return !['sin_link', 'error', 'otra_cuenta', 'omitido_variante'].includes(outcome);
+}
+
 function describe(item: BatchItemResult, mode: 'republicar' | 'aprobar'): string {
   const done = mode === 'aprobar' ? 'aprobado y publicado' : 'publicado';
   switch (item.outcome) {
@@ -162,13 +195,18 @@ function describe(item: BatchItemResult, mode: 'republicar' | 'aprobar'): string
         : `${done}, pero no se pudo comprobar el link: confírmalo con "Abrir como comprador"`;
     case 'sin_ganador':
     case 'ganador_no_verde':
+      return `en pausa: ${reasonInfo(item.outcome).title.toLowerCase()}. Se publica solo cuando corresponda`;
     case 'link_otro_producto':
-      return `guardado, pero ${reasonInfo(item.outcome).title.toLowerCase()}: se publica solo cuando corresponda`;
+      return 'en pausa: el link lleva a otra ficha. Genéralo de nuevo desde la ficha de este producto';
     case 'pendiente':
     case 'error_transitorio':
       return 'guardado: Mercado Libre no respondió y se publica en la próxima revisión';
     case 'sin_link':
       return 'ninguno de los links pegados era de este producto';
+    case 'otra_cuenta':
+      return 'el link es de otra cuenta de afiliado y no se guardó: genéralo con la cuenta ComparaTech';
+    case 'omitido_variante':
+      return 'se omitió: otro color del mismo modelo ya va en esta tanda';
     case 'error':
       return `no se pudo guardar${item.detail ? ` (${item.detail})` : ''}`;
   }
@@ -177,11 +215,23 @@ function describe(item: BatchItemResult, mode: 'republicar' | 'aprobar'): string
 function BatchReport({ result, mode }: { result: BatchResult; mode: 'republicar' | 'aprobar' }) {
   if (!result.ok) return <p className="mt-3 text-xs text-red-400">{result.error}</p>;
 
+  const count = (outcomes: BatchOutcome[]) => result.items.filter((i) => outcomes.includes(i.outcome)).length;
+  const published = count(['activo']);
+  const paused = count(['sin_ganador', 'ganador_no_verde', 'link_otro_producto']);
+  const unconfirmed = count(['pendiente', 'error_transitorio']);
+
   return (
-    <div className="mt-4 flex flex-col gap-1.5 border-t border-border pt-3 text-xs">
+    <div className="mt-4 flex flex-col gap-1.5 break-words border-t border-border pt-3 text-xs">
+      {published + paused + unconfirmed > 0 && (
+        <p className="font-semibold text-fg">
+          ✓ {published} publicado{published === 1 ? '' : 's'}
+          {paused > 0 ? ` · ${paused} en pausa` : ''}
+          {unconfirmed > 0 ? ` · ${unconfirmed} por confirmar` : ''}
+        </p>
+      )}
       {result.items.map((item) => {
         const good = item.outcome === 'activo' && item.verified;
-        const bad = item.outcome === 'sin_link' || item.outcome === 'error';
+        const bad = item.outcome === 'sin_link' || item.outcome === 'error' || item.outcome === 'otra_cuenta';
         return (
           <p key={item.id} className={good ? 'text-accent' : bad ? 'text-red-400' : 'text-amber-400'}>
             {good ? '✓' : bad ? '✗' : '•'} <span className="text-fg">{item.name}</span>: {describe(item, mode)}
@@ -197,8 +247,8 @@ function BatchReport({ result, mode }: { result: BatchResult; mode: 'republicar'
       {result.unmatchedLinks.length > 0 && (
         <p className="text-amber-400">
           • {result.unmatchedLinks.length} link{result.unmatchedLinks.length === 1 ? '' : 's'} no se
-          {result.unmatchedLinks.length === 1 ? ' pudo' : ' pudieron'} asignar a ningún producto (repetido o
-          ilegible): {result.unmatchedLinks.join(', ')}
+          {result.unmatchedLinks.length === 1 ? ' pudo' : ' pudieron'} asignar a ningún producto (repetido,
+          ilegible o de otra cuenta de afiliado): {result.unmatchedLinks.join(', ')}
         </p>
       )}
     </div>

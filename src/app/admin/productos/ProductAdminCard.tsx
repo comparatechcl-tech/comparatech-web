@@ -2,24 +2,43 @@
 
 import { useState, useTransition } from 'react';
 import Image from 'next/image';
-import { Copy, Check, ExternalLink, EyeOff, Eye, Trash2, RefreshCw } from 'lucide-react';
+import { ExternalLink, EyeOff, Eye, Trash2, RefreshCw, Pencil, Pin, Loader2 } from 'lucide-react';
 import { Product, RrssStatus } from '@/lib/types';
 import { formatCLP, formatTimeAgo } from '@/lib/format';
 import { mlProductUrl } from '@/lib/ml-urls';
 import { buyUrl } from '@/lib/outbound';
 import { reasonInfo } from '@/lib/inactive-reasons';
+import mlImageLoader from '@/lib/ml-image-loader';
+import { CATEGORIES } from '@/lib/categories';
 import {
   checkAffiliateLink,
   recheckProducts,
   republishWithLink,
 } from '@/lib/actions/catalog-admin';
-import { deleteProduct, setProductHidden, setRrssStatus } from './actions';
+import { deleteProduct, setProductHidden, setRrssStatus, type SocialChannel } from './actions';
+import { SocialKit } from './SocialKit';
+import { EditProductDrawer } from './EditProductDrawer';
+
+/**
+ * Lo que el admin lee de cada producto. Sin description ni specs: son lo
+ * más pesado de la fila y la lista no los muestra (todo lo que llega a un
+ * componente de cliente viaja en el HTML).
+ */
+export type AdminProduct = Omit<Product, 'description' | 'specs'>;
 
 const RRSS_OPTIONS: { value: RrssStatus; label: string }[] = [
   { value: 'sin_usar', label: 'Sin usar' },
   { value: 'seleccionado', label: 'Seleccionado' },
   { value: 'publicado', label: 'Publicado' },
 ];
+
+const CHANNEL_LABELS: Record<string, string> = {
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+  whatsapp: 'WhatsApp',
+  telegram: 'Telegram',
+  facebook: 'Facebook',
+};
 
 const RESULT_MESSAGES: Record<string, string> = {
   activo: '✓ Guardado y publicado.',
@@ -37,69 +56,106 @@ type LinkCheck =
   | { status: 'indeterminado' }
   | { status: 'error'; message: string };
 
+/**
+ * Qué acción está en curso. Antes todas compartían un solo "pendiente" y
+ * cualquier clic mostraba "Publicando…" en el botón del link, aunque se
+ * estuviera ocultando el producto.
+ */
+type PendingAction = 'verificar' | 'publicar' | 'ocultar' | 'mostrar' | 'eliminar' | 'revisar' | 'rrss' | null;
+
 function discountPercent(p: Pick<Product, 'price' | 'original_price'>): number {
   if (!p.original_price || p.original_price <= p.price) return 0;
   return Math.round((1 - p.price / p.original_price) * 100);
 }
 
+function categoryName(slug: string): string {
+  return CATEGORIES.find((c) => c.slug === slug)?.name ?? slug;
+}
+
 export function ProductAdminCard({
-  product,
+  product: initial,
+  siteUrl,
   selected = false,
   onToggleSelect,
 }: {
-  product: Product;
+  product: AdminProduct;
+  /** URL pública del sitio para los textos. Sin ella, el dominio del admin (es el mismo). */
+  siteUrl?: string;
   selected?: boolean;
   onToggleSelect?: () => void;
 }) {
-  const [status, setStatus] = useState<RrssStatus>(product.rrss_status ?? 'sin_usar');
-  const [copied, setCopied] = useState(false);
+  // Copia local: lo editado en el panel se ve al tiro, sin recargar la lista.
+  const [product, setProduct] = useState(initial);
+  const [status, setStatus] = useState<RrssStatus>(initial.rrss_status ?? 'sin_usar');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [affiliateUrl, setAffiliateUrl] = useState(product.affiliate_url);
+  const [affiliateUrl, setAffiliateUrl] = useState(initial.affiliate_url);
   const [linkCheck, setLinkCheck] = useState<LinkCheck>({ status: 'idle' });
-  const [isHidden, setIsHidden] = useState(product.is_hidden ?? false);
+  const [isHidden, setIsHidden] = useState(initial.is_hidden ?? false);
+  const [isDeleted, setIsDeleted] = useState(Boolean(initial.deleted_at));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [editing, setEditing] = useState(false);
+  const [thumbLoaded, setThumbLoaded] = useState(false);
+  const [pending, setPending] = useState<PendingAction>(null);
+  const [, startTransition] = useTransition();
+  const busy = pending !== null;
 
   const discount = discountPercent(product);
   const reason = !product.is_active ? reasonInfo(product.inactive_reason) : null;
   const checkedAgo = formatTimeAgo(product.price_checked_at);
+  const publishedAgo = formatTimeAgo(product.rrss_published_at);
+
+  /** Corre una acción con su etiqueta de "en curso" y la libera al terminar. */
+  function run(action: Exclude<PendingAction, null>, task: () => Promise<void>) {
+    setPending(action);
+    startTransition(async () => {
+      try {
+        await task();
+      } catch {
+        setError('No se pudo completar la acción. Revisa tu conexión e intenta de nuevo.');
+      } finally {
+        setPending(null);
+      }
+    });
+  }
 
   function handleDelete() {
-    // Dos pasos a propósito: el borrado no tiene vuelta atrás y se lleva
-    // consigo el link de afiliado, que hay que generar a mano.
+    // Dos pasos: el producto sale del sitio al tiro. El link de afiliado
+    // queda guardado y se puede volver a publicar desde "Eliminados".
     if (!confirmingDelete) {
       setConfirmingDelete(true);
-      setTimeout(() => setConfirmingDelete(false), 5000);
       return;
     }
     setError(null);
-    startTransition(async () => {
+    run('eliminar', async () => {
       const result = await deleteProduct(product.id);
+      setConfirmingDelete(false);
       if (!result.ok) {
         setError(result.error);
-        setConfirmingDelete(false);
+        return;
       }
+      setIsHidden(true);
+      setIsDeleted(true);
     });
   }
 
   function handleToggleHidden() {
     const next = !isHidden;
-    const previous = isHidden;
-    setIsHidden(next);
     setError(null);
-    startTransition(async () => {
+    run(next ? 'ocultar' : 'mostrar', async () => {
       const result = await setProductHidden(product.id, next);
       if (!result.ok) {
-        setIsHidden(previous);
         setError(result.error);
+        return;
       }
+      setIsHidden(next);
+      if (!next) setIsDeleted(false);
     });
   }
 
   function handleVerifyLink() {
     setLinkCheck({ status: 'checking' });
-    startTransition(async () => {
+    run('verificar', async () => {
       const result = await checkAffiliateLink(affiliateUrl, product.ml_product_id);
       if (!result.ok) setLinkCheck({ status: 'error', message: result.error });
       else if (result.verdict === 'coincide') setLinkCheck({ status: 'ok' });
@@ -114,12 +170,13 @@ export function ProductAdminCard({
   function handleSaveLink() {
     setError(null);
     setNotice(null);
-    startTransition(async () => {
+    run('publicar', async () => {
       const result = await republishWithLink(product.id, affiliateUrl);
       if (!result.ok) {
         setError(result.error);
         return;
       }
+      setProduct((p) => ({ ...p, affiliate_url: affiliateUrl }));
       const message = RESULT_MESSAGES[result.result] ?? '✓ Guardado.';
       setNotice(
         result.verified
@@ -132,7 +189,7 @@ export function ProductAdminCard({
   function handleRecheck() {
     setError(null);
     setNotice(null);
-    startTransition(async () => {
+    run('revisar', async () => {
       const result = await recheckProducts([product.id]);
       if (!result.ok) {
         setError(result.error);
@@ -153,7 +210,7 @@ export function ProductAdminCard({
     const previous = status;
     setStatus(next);
     setError(null);
-    startTransition(async () => {
+    run('rrss', async () => {
       const result = await setRrssStatus(product.id, next);
       if (!result.ok) {
         setStatus(previous);
@@ -162,21 +219,19 @@ export function ProductAdminCard({
     });
   }
 
-  // El texto para redes se arma con el descuento adelante cuando lo hay: es
-  // el dato que hace que alguien se detenga a mirar el post.
-  function handleCopy() {
-    const link = buyUrl(product);
-    const headline =
-      discount > 0
-        ? `🔥 ${product.name}\n${formatCLP(product.price)} (antes ${formatCLP(
-            product.original_price ?? 0
-          )}) — ${discount}% de descuento, ahorras ${formatCLP((product.original_price ?? 0) - product.price)}`
-        : `${product.name} — ${formatCLP(product.price)}`;
-
-    navigator.clipboard.writeText(`${headline}\n${link}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  function handlePublished(channel: SocialChannel) {
+    setStatus('publicado');
+    setProduct((p) => ({ ...p, rrss_channel: channel, rrss_published_at: new Date().toISOString() }));
   }
+
+  const hideLabel =
+    pending === 'ocultar'
+      ? 'Ocultando…'
+      : pending === 'mostrar'
+        ? 'Publicando…'
+        : isHidden
+          ? 'Volver a publicar'
+          : 'Ocultar del sitio';
 
   return (
     <div
@@ -194,11 +249,11 @@ export function ProductAdminCard({
           </div>
           <button
             onClick={handleRecheck}
-            disabled={isPending}
+            disabled={busy}
             className="flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-medium text-amber-400 transition hover:bg-amber-500/10 disabled:opacity-50"
           >
-            <RefreshCw size={12} className={isPending ? 'animate-spin' : ''} />
-            Revisar ahora
+            <RefreshCw size={12} className={pending === 'revisar' ? 'animate-spin' : ''} />
+            {pending === 'revisar' ? 'Revisando…' : 'Revisar ahora'}
           </button>
         </div>
       )}
@@ -214,7 +269,21 @@ export function ProductAdminCard({
           />
         )}
         <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-white">
-          <Image src={product.image_url} alt={product.name} fill sizes="80px" className="object-contain" />
+          {!thumbLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center bg-surface2">
+              <Loader2 size={16} className="animate-spin text-muted" />
+            </div>
+          )}
+          <Image
+            loader={mlImageLoader}
+            src={product.image_url}
+            alt={product.name}
+            fill
+            sizes="80px"
+            className="object-contain"
+            onLoad={() => setThumbLoaded(true)}
+            onError={() => setThumbLoaded(true)}
+          />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -230,10 +299,32 @@ export function ProductAdminCard({
             </span>
           </div>
           <p className="mt-1 text-xs text-muted">
-            {product.category} · {new Date(product.created_at).toLocaleDateString('es-CL')}
+            {categoryName(product.category)} · {new Date(product.created_at).toLocaleDateString('es-CL')}
             {checkedAgo && <> · precio verificado {checkedAgo}</>}
-            {isHidden && <span className="ml-2 text-amber-400">Oculto del sitio</span>}
+            {isDeleted ? (
+              <span className="ml-2 text-red-400">Eliminado (link guardado)</span>
+            ) : (
+              isHidden && <span className="ml-2 text-amber-400">Oculto del sitio</span>
+            )}
           </p>
+          {(product.is_featured || (status === 'publicado' && publishedAgo)) && (
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              {product.is_featured && (
+                <span className="inline-flex items-center gap-1 text-accent">
+                  <Pin size={11} /> Fijado en portada
+                </span>
+              )}
+              {status === 'publicado' && publishedAgo && (
+                <span className="text-muted">
+                  Publicado{product.rrss_channel ? ` en ${CHANNEL_LABELS[product.rrss_channel] ?? product.rrss_channel}` : ''}{' '}
+                  {publishedAgo}
+                </span>
+              )}
+            </p>
+          )}
+          {product.admin_note && (
+            <p className="mt-1 rounded bg-surface2 px-2 py-1 text-xs text-muted">📝 {product.admin_note}</p>
+          )}
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             <a
               href={buyUrl(product)}
@@ -264,7 +355,7 @@ export function ProductAdminCard({
               <button
                 key={opt.value}
                 onClick={() => handleStatusChange(opt.value)}
-                disabled={isPending}
+                disabled={busy}
                 className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition disabled:opacity-50 ${
                   status === opt.value ? 'bg-accent text-ink' : 'text-muted hover:text-fg'
                 }`}
@@ -274,15 +365,15 @@ export function ProductAdminCard({
             ))}
           </div>
           <button
-            onClick={handleCopy}
-            className="flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted transition hover:text-fg"
+            onClick={() => setEditing(true)}
+            disabled={busy}
+            className="flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted transition hover:text-fg disabled:opacity-50"
           >
-            {copied ? <Check size={13} className="text-accent" /> : <Copy size={13} />}
-            {copied ? 'Copiado' : 'Copiar para RRSS'}
+            <Pencil size={13} /> Editar
           </button>
           <button
             onClick={handleToggleHidden}
-            disabled={isPending}
+            disabled={busy}
             className={`flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-50 ${
               isHidden
                 ? 'border-accent/40 text-accent hover:bg-accent/10'
@@ -290,22 +381,37 @@ export function ProductAdminCard({
             }`}
           >
             {isHidden ? <Eye size={13} /> : <EyeOff size={13} />}
-            {isHidden ? 'Volver a publicar' : 'Ocultar del sitio'}
+            {hideLabel}
           </button>
-          <button
-            onClick={handleDelete}
-            disabled={isPending}
-            className={`flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-50 ${
-              confirmingDelete
-                ? 'border-red-500 bg-red-500/10 font-medium text-red-400'
-                : 'border-transparent text-muted hover:border-border hover:text-red-400'
-            }`}
-          >
-            <Trash2 size={13} />
-            {confirmingDelete ? 'Confirmar: borrar para siempre' : 'Eliminar'}
-          </button>
+          {!isDeleted && (
+            <button
+              onClick={handleDelete}
+              disabled={busy}
+              className={`flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-50 ${
+                confirmingDelete
+                  ? 'border-red-500 bg-red-500/10 font-medium text-red-400'
+                  : 'border-transparent text-muted hover:border-border hover:text-red-400'
+              }`}
+            >
+              <Trash2 size={13} />
+              {pending === 'eliminar' ? 'Eliminando…' : confirmingDelete ? 'Confirmar: eliminar' : 'Eliminar'}
+            </button>
+          )}
+          {confirmingDelete && pending !== 'eliminar' && (
+            <div className="flex flex-col gap-1 text-center">
+              <p className="text-[11px] text-muted">Se ocultará del sitio y su link quedará guardado.</p>
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                className="text-[11px] text-muted hover:text-fg hover:underline"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      <SocialKit product={product} siteUrl={siteUrl} onPublished={handlePublished} />
 
       <div className="flex flex-col gap-1.5 border-t border-border pt-3">
         {/* Tres controles en fila dejaban el campo del link ilegible en un
@@ -323,17 +429,17 @@ export function ProductAdminCard({
           />
           <button
             onClick={handleVerifyLink}
-            disabled={!affiliateUrl.trim() || linkCheck.status === 'checking'}
+            disabled={!affiliateUrl.trim() || busy}
             className="flex-1 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:shrink-0"
           >
-            {linkCheck.status === 'checking' ? 'Verificando…' : 'Verificar'}
+            {pending === 'verificar' ? 'Verificando…' : 'Verificar'}
           </button>
           <button
             onClick={handleSaveLink}
-            disabled={!affiliateUrl.trim() || affiliateUrl === product.affiliate_url || isPending}
+            disabled={!affiliateUrl.trim() || affiliateUrl === product.affiliate_url || busy}
             className="flex-1 rounded-md bg-accent px-3 py-2 text-xs font-medium text-ink transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:shrink-0"
           >
-            {isPending ? 'Publicando…' : 'Guardar y publicar'}
+            {pending === 'publicar' ? 'Publicando…' : 'Guardar y publicar'}
           </button>
         </div>
         {linkCheck.status === 'ok' && (
@@ -358,6 +464,13 @@ export function ProductAdminCard({
         {notice && <p className="text-xs text-accent">{notice}</p>}
         {error && <p className="text-xs text-red-400">{error}</p>}
       </div>
+
+      <EditProductDrawer
+        product={product}
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSaved={(patch) => setProduct((p) => ({ ...p, ...patch }))}
+      />
     </div>
   );
 }

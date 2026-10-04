@@ -1,0 +1,38 @@
+name: CI
+
+# Revisa cada push y cada pull request antes de que Vercel lo publique:
+# que el código compile (tsc) y que los tests pasen (vitest). No usa
+# secretos ni toca la base: corre solo con el código del repositorio.
+
+on:
+  push:
+  pull_request:
+
+# Un push nuevo a la misma rama cancela la revisión anterior, que ya no sirve.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Revisar tipos
+        run: npx tsc --noEmit
+
+      - name: Tests
+        run: npx vitest run

@@ -1,3 +1,8 @@
+'use client';
+
+// Componente de cliente porque <Image loader={...}> recibe una función, y
+// una función no puede pasar de un componente de servidor a uno de cliente
+// (next/image lo es). Todo lo que importa la tarjeta es código puro.
 import Image from 'next/image';
 import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
@@ -7,10 +12,35 @@ import { PriceTag } from './PriceTag';
 import { AffiliateButton } from './AffiliateButton';
 import { buyUrl } from '@/lib/outbound';
 import { specBadges } from '@/lib/spec-badges';
+import mlImageLoader from '@/lib/ml-image-loader';
+import type { Placement } from '@/lib/clicks';
 
-export function ProductCard({ product }: { product: Product }) {
+/**
+ * Lo mínimo que la tarjeta lee de la oferta ganadora. Se declara acá y no
+ * se importa el tipo completo para que la tarjeta compile aunque el
+ * producto todavía no traiga ese dato (columna nueva, se llena con el cron).
+ */
+type CardOfferInfo = { free_shipping?: boolean | null; is_full?: boolean | null };
+
+/** Un solo chip, el que más pesa al decidir: envío gratis gana a Full. */
+function offerChip(offer: CardOfferInfo | null | undefined): string | null {
+  if (!offer) return null;
+  if (offer.free_shipping === true) return 'Envío gratis';
+  if (offer.is_full === true) return 'Full';
+  return null;
+}
+
+/**
+ * La tarjeta es de cliente, así que todo lo que recibe queda escrito en el
+ * HTML. La descripción (larga, y la tarjeta no la muestra) se deja fuera:
+ * ProductGrid la quita antes de pasar cada producto.
+ */
+export type CardProduct = Omit<Product, 'description'>;
+
+export function ProductCard({ product, placement }: { product: CardProduct; placement?: Placement }) {
   const categoryName = getCategoryInfo(product.category)?.name ?? product.category;
   const badges = specBadges(product.specs);
+  const chip = offerChip((product as CardProduct & { offer_info?: CardOfferInfo | null }).offer_info);
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-surface transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow">
@@ -22,6 +52,7 @@ export function ProductCard({ product }: { product: Product }) {
             </span>
           )}
           <Image
+            loader={mlImageLoader}
             src={product.image_url}
             alt={product.name}
             fill
@@ -50,11 +81,22 @@ export function ProductCard({ product }: { product: Product }) {
           )}
           <div className="mt-auto pt-2">
             <PriceTag price={product.price} originalPrice={product.original_price} />
+            {chip && (
+              <span className="mt-1.5 inline-flex rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                {chip}
+              </span>
+            )}
           </div>
         </div>
       </Link>
       <div className="px-4 pb-4">
-        <AffiliateButton href={buyUrl(product)} className="w-full text-xs" />
+        <AffiliateButton
+          href={buyUrl(product)}
+          productId={product.id}
+          productName={product.name}
+          placement={placement}
+          className="w-full text-xs"
+        />
       </div>
     </div>
   );

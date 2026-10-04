@@ -1,4 +1,4 @@
-import { inspectAffiliateLink, type AffiliateLinkInfo } from '@/lib/affiliate-link';
+import { checkAffiliateOwnership, inspectAffiliateLink, type AffiliateLinkInfo } from '@/lib/affiliate-link';
 import { mapWithConcurrency } from '@/lib/ml-catalog';
 
 export { MAX_BATCH } from '@/lib/batch-result';
@@ -20,10 +20,19 @@ export { MAX_BATCH } from '@/lib/batch-result';
 
 const LINK_RE = /https?:\/\/(?:meli\.la|(?:www\.)?mercadolibre\.com\/sec)\/[A-Za-z0-9]+/g;
 
-/** Links de afiliado dentro de un texto pegado, sin repetir y en orden. */
+/**
+ * Links de afiliado dentro de un texto pegado, sin repetir y en orden.
+ *
+ * Un http:// se pasa a https://, igual que en promote_candidate_to_product
+ * (migración 0012): el sitio solo publica links https, y sin esto un link
+ * http quedaba sin poder abrirse y se asignaba "por posición".
+ */
 export function extractAffiliateLinks(text: string): string[] {
-  return Array.from(new Set(text.match(LINK_RE) ?? []));
+  const found = (text.match(LINK_RE) ?? []).map((url) => url.replace(/^http:\/\//i, 'https://'));
+  return Array.from(new Set(found));
 }
+
+export const FOREIGN_LINK_REASON = 'Link de otra cuenta de afiliado';
 
 export interface BatchTarget {
   id: string;
@@ -42,12 +51,28 @@ export interface BatchMatch {
   assigned: BatchAssignment[];
   /** Links que destacan una ficha que no está en la tanda. */
   wrong: { url: string; featuredProductId: string }[];
-  /** Links que no se pudieron asignar (repetidos, o sin ficha y sin orden que calce). */
+  /**
+   * Links que no se pudieron asignar (repetidos, o sin ficha y sin orden que
+   * calce). Incluye los rechazados de `rejected`, para que quien solo mire
+   * esta lista igual los vea como no asignados.
+   */
   unmatched: string[];
+  /** Links que se dejaron fuera a propósito, con el motivo (p. ej. otra cuenta de afiliado). */
+  rejected: { url: string; reason: string }[];
   linksFound: number;
 }
 
-export async function matchLinksToTargets(text: string, targets: BatchTarget[]): Promise<BatchMatch> {
+/**
+ * `expected`: matt_word/matt_tool de la cuenta (lib/settings). Si viene, un
+ * link de otra cuenta de afiliado no se asigna a nada —ni por ficha ni por
+ * posición—: guardarlo le pagaría la comisión a otro. Sin él, el
+ * comportamiento es el de siempre.
+ */
+export async function matchLinksToTargets(
+  text: string,
+  targets: BatchTarget[],
+  expected?: { word: string | null; tool: string | null }
+): Promise<BatchMatch> {
   const links = extractAffiliateLinks(text);
   const inspected = await mapWithConcurrency(links, 5, async (url) => {
     const res = await inspectAffiliateLink(url);
@@ -59,10 +84,16 @@ export async function matchLinksToTargets(text: string, targets: BatchTarget[]):
   const assigned: BatchAssignment[] = [];
   const wrong: BatchMatch['wrong'] = [];
   const unmatched: string[] = [];
+  const rejected: BatchMatch['rejected'] = [];
   const unreadable: number[] = [];
 
   links.forEach((url, i) => {
     const info = inspected[i];
+    if (expected && info && checkAffiliateOwnership(info, expected)) {
+      rejected.push({ url, reason: FOREIGN_LINK_REASON });
+      unmatched.push(url);
+      return;
+    }
     const featured = info?.featuredProductId;
     if (!featured) {
       unreadable.push(i);
@@ -90,5 +121,5 @@ export async function matchLinksToTargets(text: string, targets: BatchTarget[]):
     }
   }
 
-  return { assigned, wrong, unmatched, linksFound: links.length };
+  return { assigned, wrong, unmatched, rejected, linksFound: links.length };
 }

@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/refresh-prices",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/social-telegram",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/backup",
+      "schedule": "0 15 * * 1"
     }
   ]
 }

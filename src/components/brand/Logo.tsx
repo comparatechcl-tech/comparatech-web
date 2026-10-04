@@ -1,11 +1,18 @@
+import { useId } from 'react';
+
 /**
  * Isotipo minimalista: anillo abierto (lente / "C" de ComparaTech) con mango
  * de lupa, y dos flechas opuestas adentro representando "comparar". Sin
  * ilustraciones complejas — funciona igual de bien a 16px (favicon) que a
  * 96px (hero).
+ *
+ * El id del degradado sale de useId: el logo aparece en el header y en el
+ * footer de la misma página, y con un id fijo quedaban dos elementos con el
+ * mismo id en el HTML. Se limpian los caracteres que React usa en sus ids
+ * («», :) para que url(#...) los lea igual en todos los navegadores.
  */
 export function Logo({ className = '', size = 32 }: { className?: string; size?: number }) {
-  const id = 'ct-logo-gradient';
+  const id = `ct-logo-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   return (
     <svg
       viewBox="0 0 32 32"
