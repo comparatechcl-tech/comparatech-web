@@ -8,6 +8,20 @@ import { Footer } from '@/components/layout/Footer';
 import { SITE_URL } from '@/lib/site';
 import { getSiteCategories } from '@/lib/queries/site-categories';
 import { UtmCapture } from '@/components/analytics/UtmCapture';
+import { SOCIAL_LINKS } from '@/components/brand/SocialLinks';
+
+/**
+ * Le dice a Google que estas cuentas son las oficiales de ComparaTech, para
+ * que aparezcan asociadas a la marca en los resultados de búsqueda.
+ */
+const ORGANIZATION_JSON_LD = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'ComparaTech',
+  url: SITE_URL,
+  logo: `${SITE_URL}/brand/perfil-1080.png`,
+  sameAs: SOCIAL_LINKS.map((s) => s.href),
+}).replace(/</g, '\\u003c');
 
 const inter = Inter({
   subsets: ['latin'],
@@ -38,6 +52,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="es-CL" className={inter.variable} suppressHydrationWarning>
       <body className="flex min-h-screen flex-col font-body">
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: ORGANIZATION_JSON_LD }} />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           <div
             aria-hidden
