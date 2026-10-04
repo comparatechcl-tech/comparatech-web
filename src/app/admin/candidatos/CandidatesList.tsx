@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { ProductCandidate } from '@/lib/types';
 import { CandidateCard } from './CandidateCard';
 import { rejectCandidates } from './actions';
+import { BulkLinkPanel } from '../BulkLinkPanel';
 
 export function CandidatesList({
   candidates,
@@ -18,6 +19,18 @@ export function CandidatesList({
   const [isPending, startTransition] = useTransition();
 
   const visible = candidates.filter((c) => !hidden.has(c.id));
+  const selectedItems = visible
+    .filter((c) => selected.has(c.id))
+    .map((c) => ({ id: c.id, name: c.name, mlProductId: c.ml_product_id }));
+
+  function removeFromList(ids: string[]) {
+    setHidden((prev) => new Set([...prev, ...ids]));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  }
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -41,8 +54,7 @@ export function CandidatesList({
         setError(result.error);
         return;
       }
-      setHidden((prev) => new Set([...prev, ...ids]));
-      setSelected(new Set());
+      removeFromList(ids);
     });
   }
 
@@ -60,7 +72,9 @@ export function CandidatesList({
             onChange={toggleAll}
             className="h-4 w-4 accent-accent"
           />
-          {selected.size > 0 ? `${selected.size} seleccionado${selected.size === 1 ? '' : 's'}` : 'Seleccionar todos'}
+          {selected.size > 0
+            ? `${selected.size} seleccionado${selected.size === 1 ? '' : 's'}`
+            : 'Seleccionar todos (para aprobar o rechazar en bloque)'}
         </label>
         <button
           onClick={handleBulkReject}
@@ -71,6 +85,10 @@ export function CandidatesList({
         </button>
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
+
+      {selectedItems.length > 0 && (
+        <BulkLinkPanel items={selectedItems} mode="aprobar" directLinks={directLinks} onDone={removeFromList} />
+      )}
 
       {visible.map((c) => (
         <CandidateCard

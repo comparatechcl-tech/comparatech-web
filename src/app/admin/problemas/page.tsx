@@ -4,6 +4,7 @@ import { REASON_LABELS } from '@/lib/inactive-reasons';
 import { readAffiliateSettings } from '@/lib/settings';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { ProductAdminCard } from '../productos/ProductAdminCard';
+import { BulkLinkPanel } from '../BulkLinkPanel';
 import { RecheckAllButton } from './RecheckAllButton';
 
 export const dynamic = 'force-dynamic';
@@ -55,12 +56,19 @@ export default async function ProblemasPage() {
             Necesitan un link nuevo ({needsLink.length})
           </h2>
           <p className="mt-1 text-sm text-muted">{REASON_LABELS.link_otro_producto.detail}</p>
-          <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-muted">
-            <li>Toca <strong className="text-fg">abrir la ficha en ML</strong> en el producto.</li>
-            <li>Genera el link de afiliado desde esa ficha.</li>
-            <li>Pégalo y toca <strong className="text-fg">Guardar y publicar</strong>: se verifica y queda publicado al momento.</li>
-          </ol>
-          <div className="mt-5 flex flex-col gap-4">
+          <div className="mt-4">
+            <BulkLinkPanel
+              mode="republicar"
+              items={needsLink.flatMap((p) =>
+                p.ml_product_id ? [{ id: p.id, name: p.name, mlProductId: p.ml_product_id }] : []
+              )}
+            />
+          </div>
+          <p className="mt-4 text-xs text-muted">
+            También puedes hacerlo de a uno: <strong className="text-fg">abrir la ficha en ML</strong>, generar el link
+            ahí, pegarlo en el producto y tocar <strong className="text-fg">Guardar y publicar</strong>.
+          </p>
+          <div className="mt-4 flex flex-col gap-4">
             {needsLink.map((p) => (
               <ProductAdminCard key={p.id} product={p} />
             ))}

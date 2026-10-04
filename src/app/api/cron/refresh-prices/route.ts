@@ -5,6 +5,7 @@ import { enrichFromMl, getMlToken } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
 import { mapWithConcurrency } from '@/lib/ml-catalog';
 import { resolveLinkTarget } from '@/lib/link-check';
+import { readAffiliateSettings } from '@/lib/settings';
 import {
   PRICED_COLUMNS,
   applyPricing,
@@ -127,9 +128,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'No se pudo obtener token de ML' }, { status: 502 });
   }
 
+  const { directLinks } = await readAffiliateSettings(admin);
   const outcomes = await priceProducts(rows, token, {
     concurrency: 6,
     outOfTime,
+    directLinks,
     verifyLink: (p) => resolveLinkTarget(p.affiliate_url, p.ml_product_id, token),
   });
   const writeErrors = await applyPricing(admin, outcomes);

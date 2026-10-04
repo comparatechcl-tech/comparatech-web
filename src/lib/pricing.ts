@@ -76,7 +76,8 @@ function decide(
   product: PricedProduct,
   winners: WinnersResult,
   sellers: Map<number, MlSeller>,
-  now: string
+  now: string,
+  checkLink: boolean
 ): PricingOutcome {
   const base = { id: product.id, priceChanged: false, reactivated: false, deactivated: false };
 
@@ -107,6 +108,7 @@ function decide(
     if (!isGreenSeller(seller)) {
       reason = 'ganador_no_verde';
     } else if (
+      checkLink &&
       product.link_target_product_id &&
       product.link_target_product_id !== product.ml_product_id
     ) {
@@ -155,9 +157,16 @@ export async function priceProducts(
      * con un link que nunca se verificó (ver más abajo).
      */
     verifyLink?: (product: PricedProduct) => Promise<string | null>;
+    /**
+     * Con los links directos encendidos (ver lib/outbound) el botón de
+     * compra se arma desde la ficha y el link guardado no se usa: que lleve
+     * a otro producto deja de importar y no se verifica.
+     */
+    directLinks?: boolean;
   } = {}
 ): Promise<PricingOutcome[]> {
   const concurrency = options.concurrency ?? 6;
+  const checkLink = !options.directLinks;
 
   const fetched = await mapWithConcurrency(products, concurrency, async (product) => {
     const winners: WinnersResult = options.outOfTime?.()
@@ -178,7 +187,7 @@ export async function priceProducts(
   // abre otro color u otro modelo no vuelve a publicarse.
   const targets = new Map<string, string>();
   const verifyLink = options.verifyLink;
-  if (verifyLink) {
+  if (verifyLink && checkLink) {
     const returning = fetched.filter(
       ({ product, winners }) =>
         !product.is_active &&
@@ -197,9 +206,9 @@ export async function priceProducts(
   const now = new Date().toISOString();
   return fetched.map(({ product, winners }) => {
     const target = targets.get(product.id);
-    if (!target) return decide(product, winners, sellers, now);
+    if (!target) return decide(product, winners, sellers, now, checkLink);
 
-    const outcome = decide({ ...product, link_target_product_id: target }, winners, sellers, now);
+    const outcome = decide({ ...product, link_target_product_id: target }, winners, sellers, now, checkLink);
     outcome.patch.link_target_product_id = target;
     outcome.patch.link_checked_at = now;
     return outcome;

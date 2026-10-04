@@ -23,7 +23,9 @@ import {
   type PricedProduct,
   type PricingResult,
 } from '@/lib/pricing';
-import { rememberAffiliateParams, writeAffiliateSettings } from '@/lib/settings';
+import { readAffiliateSettings, rememberAffiliateParams, writeAffiliateSettings } from '@/lib/settings';
+import { MAX_BATCH, matchLinksToTargets } from '@/lib/link-batch';
+import type { BatchResult } from '@/lib/batch-result';
 
 type Fail = { ok: false; error: string };
 
@@ -83,7 +85,9 @@ export async function recheckProducts(ids?: string[]): Promise<RecheckResult> {
   const token = await getMlToken();
   if (!token) return { ok: false, error: 'No se pudo conectar con Mercado Libre. Intenta de nuevo en un rato.' };
 
+  const { directLinks } = await readAffiliateSettings(admin);
   const outcomes = await priceProducts(products, token, {
+    directLinks,
     verifyLink: (p) => resolveLinkTarget(p.affiliate_url, p.ml_product_id, token),
   });
   await applyPricing(admin, outcomes);
@@ -193,6 +197,7 @@ export async function saveAffiliateConfig(input: {
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
 
+  const before = await readAffiliateSettings(admin);
   const saved = await writeAffiliateSettings(admin, {
     word: word || null,
     tool: tool || null,
@@ -200,6 +205,114 @@ export async function saveAffiliateConfig(input: {
   });
   if (!saved.ok) return saved;
 
+  // Encender o apagar los links directos cambia si importa a dónde lleva el
+  // link guardado: los productos afectados se ajustan ahora y no en el
+  // próximo refresco.
+  if (before.directLinks !== input.directLinks) {
+    await repriceLinkMismatches(admin, input.directLinks);
+  }
+
   refreshSite();
   return { ok: true };
+}
+
+/** Productos cuyo link guardado lleva a otra ficha que la publicada. */
+async function repriceLinkMismatches(
+  admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
+  directLinks: boolean
+): Promise<void> {
+  const { data } = await admin
+    .from('products')
+    .select(PRICED_COLUMNS)
+    .not('link_target_product_id', 'is', null)
+    .eq('is_hidden', false);
+  const mismatched = ((data ?? []) as unknown as PricedProduct[]).filter(
+    (p) => p.link_target_product_id !== p.ml_product_id
+  );
+  if (mismatched.length === 0) return;
+
+  const token = await getMlToken();
+  if (!token) return;
+  await applyPricing(admin, await priceProducts(mismatched, token, { directLinks }));
+}
+
+/**
+ * Guarda de una vez los links generados en bloque (ver lib/link-batch) y
+ * deja los productos publicados. `productIds` va en el mismo orden en que se
+ * entregaron las URLs al generador.
+ */
+export async function republishBatch(productIds: string[], pasted: string): Promise<BatchResult> {
+  if (productIds.length === 0) return { ok: false, error: 'No hay productos para republicar' };
+  if (productIds.length > MAX_BATCH) return { ok: false, error: `Máximo ${MAX_BATCH} productos por tanda` };
+
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
+
+  const { data, error } = await admin
+    .from('products')
+    .select(`${PRICED_COLUMNS}, name`)
+    .in('id', productIds);
+  if (error) return { ok: false, error: error.message };
+
+  type Row = PricedProduct & { name: string };
+  const rows = new Map(((data ?? []) as unknown as Row[]).map((p) => [p.id, p]));
+  const products = productIds.map((id) => rows.get(id)).filter((p): p is Row => Boolean(p));
+
+  const match = await matchLinksToTargets(
+    pasted,
+    products.map((p) => ({ id: p.id, mlProductId: p.ml_product_id }))
+  );
+  if (match.linksFound === 0) {
+    return { ok: false, error: 'No encontré links de Mercado Libre (meli.la) en lo que pegaste.' };
+  }
+
+  const now = new Date().toISOString();
+  const saved: PricedProduct[] = [];
+  const verifiedById = new Map<string, boolean>();
+  const failedById = new Map<string, string>();
+
+  for (const a of match.assigned) {
+    const product = rows.get(a.targetId);
+    if (!product) continue;
+    const linkFields = {
+      affiliate_url: a.url,
+      ml_item_id: a.info?.itemId ?? null,
+      link_target_product_id: a.verified ? product.ml_product_id : null,
+      link_checked_at: a.verified ? now : null,
+    };
+    const { error: saveError } = await admin.from('products').update(linkFields).eq('id', product.id);
+    if (saveError) {
+      failedById.set(product.id, saveError.message);
+      continue;
+    }
+    saved.push({ ...product, ...linkFields });
+    verifiedById.set(product.id, a.verified);
+  }
+
+  const withParams = match.assigned.find((a) => a.info?.mattWord && a.info?.mattTool);
+  if (withParams) await rememberAffiliateParams(admin, withParams.info!.mattWord, withParams.info!.mattTool);
+
+  const token = saved.length > 0 ? await getMlToken() : null;
+  const outcomes = token ? await priceProducts(saved, token) : [];
+  if (outcomes.length > 0) await applyPricing(admin, outcomes);
+  if (saved.length > 0) refreshSite();
+  const outcomeById = new Map(outcomes.map((o) => [o.id, o.result]));
+
+  return {
+    ok: true,
+    items: products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      outcome: failedById.has(p.id)
+        ? 'error'
+        : verifiedById.has(p.id)
+          ? (outcomeById.get(p.id) ?? 'pendiente')
+          : 'sin_link',
+      verified: verifiedById.get(p.id) ?? false,
+      detail: failedById.get(p.id),
+    })),
+    wrongLinks: match.wrong,
+    unmatchedLinks: match.unmatched,
+    linksFound: match.linksFound,
+  };
 }
