@@ -106,7 +106,9 @@ export type HookKind = 'oferta' | 'top' | 'precio';
  */
 const HOOKS: Record<HookKind, string[]> = {
   oferta: [
-    '🔥 Rebajado hoy en Mercado Libre',
+    // Sin "hoy": se lee como una oferta del día, y sin historial de precios
+    // no se puede afirmar.
+    '🔥 Con descuento en Mercado Libre',
     '⚡ Descuento sobre su precio de lista',
     '👀 Ojo con este descuento',
     '💸 Precio rebajado',
