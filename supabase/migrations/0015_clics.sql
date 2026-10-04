@@ -26,6 +26,14 @@ create index if not exists outbound_clicks_created_idx on outbound_clicks (creat
 create index if not exists outbound_clicks_product_idx on outbound_clicks (product_id, created_at desc);
 alter table outbound_clicks enable row level security; -- sin policies
 
+-- Llave diaria del cliente (hash de IP + user-agent + fecha + secreto del
+-- servidor, 16 caracteres; ver src/lib/click-client-key.ts). No se puede
+-- volver a la IP y cambia cada dia. Sirve para el tope de clics por cliente
+-- en /api/e: sin el, un solo script agotaba el cupo global del dia y se
+-- perdian los clics reales. Sin esta columna /api/e usa solo el tope global.
+alter table outbound_clicks add column if not exists client_key text;
+create index if not exists outbound_clicks_client_idx on outbound_clicks (client_key, created_at desc);
+
 -- 2. Lo que informa la Central de Afiliados de ML, cargado a mano una vez
 --    por semana desde /admin/metricas. Sirve para comparar los clics
 --    propios con los de ML y calcular la ganancia por clic.

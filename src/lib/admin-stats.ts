@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { isMeliLaUrl } from '@/lib/outbound';
 import { chileDateKey, chileDayStart, shiftDateKey, startOfChileDay } from '@/lib/clicks';
+import { collapseToModels, readActiveCatalog, reviewableCandidates } from '@/lib/candidate-queue';
 
 /**
  * Números del panel "Resumen" del admin (/admin) y del contador de la
@@ -305,20 +306,39 @@ export interface CandidateStats {
   pending: { category: string | null; prospected_at: string | null }[];
 }
 
-/** Candidatos por revisar y cuántos entraron hoy (hora de Chile). */
+/**
+ * Candidatos por revisar y cuántos entraron hoy (hora de Chile). Cuenta
+ * modelos con la misma regla que la cola (lib/candidate-queue): antes
+ * contaba cada color y el panel decía 209 donde la cola decía 195.
+ */
 export async function readCandidateStats(admin: SupabaseClient | null, now: Date): Promise<Stat<CandidateStats>> {
   if (!admin) return fail(NO_ADMIN);
   try {
-    const { rows, error } = await fetchAllRows<{ category: string | null; prospected_at: string | null }>(
-      (from, to) =>
-        admin
-          .from('product_candidates')
-          .select('category, prospected_at')
-          .eq('status', 'pending_review')
-          .order('id', { ascending: true })
-          .range(from, to) as unknown as PromiseLike<{ data: unknown; error: DbError }>
+    type Row = {
+      id: string;
+      ml_product_id: string;
+      ml_family_id: string | null;
+      price: number;
+      category: string | null;
+      prospected_at: string | null;
+    };
+    const [pending, catalog] = await Promise.all([
+      fetchAllRows<Row>(
+        (from, to) =>
+          admin
+            .from('product_candidates')
+            .select('id, ml_product_id, ml_family_id, price, category, prospected_at')
+            .eq('status', 'pending_review')
+            .order('id', { ascending: true })
+            .range(from, to) as unknown as PromiseLike<{ data: unknown; error: DbError }>
+      ),
+      readActiveCatalog(admin),
+    ]);
+    if (pending.error) return fail(pending.error);
+    // Sin el catálogo se cuenta igual, solo sin descartar lo ya publicado.
+    const rows = collapseToModels(
+      catalog.error ? pending.rows : reviewableCandidates(pending.rows, catalog.rows)
     );
-    if (error) return fail(error);
     const todayStart = startOfChileDay(now).getTime();
     const nuevosHoy = rows.filter((r) => r.prospected_at && new Date(r.prospected_at).getTime() >= todayStart).length;
     return ok({ porRevisar: rows.length, nuevosHoy, pending: rows });

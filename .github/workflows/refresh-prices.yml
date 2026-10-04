@@ -41,13 +41,23 @@ jobs:
             echo "::warning::Falta el secreto CRON_SECRET en Settings → Secrets and variables → Actions"
             exit 0
           fi
-          # --retry cubre caídas pasajeras (502/503/504 o timeout): sin esto,
-          # un token de ML que no responde una vez dispara un correo de fallo.
+          # Se reintenta solo ante caídas de red o de pasarela (000 = DNS,
+          # conexión o timeout de curl; 502 = sin token de ML; 503/504 =
+          # Vercel). Un 500 NO se reintenta: es el endpoint diciendo que la
+          # corrida salió mal (p. ej. ML limitando con 429), y repetir el
+          # refresco entero solo alarga el bloqueo. Antes curl --retry
+          # contaba el 500 como pasajero y lanzaba dos refrescos más.
           # Sin -f a propósito: así se guarda y muestra la respuesta aunque
           # sea un 500, que trae el resumen con el motivo.
-          code=$(curl -sS -o out.json -w '%{http_code}' --max-time 90 --retry 2 --retry-delay 30 \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "$SITE_URL/api/cron/refresh-prices") || code=000
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o out.json -w '%{http_code}' --max-time 90 \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$SITE_URL/api/cron/refresh-prices") || code=000
+            case "$code" in
+              000|502|503|504) [ "$attempt" -lt 3 ] && sleep 30 && continue ;;
+            esac
+            break
+          done
           cat out.json 2>/dev/null || true
           echo
           # El endpoint responde 500 con ok:false si hubo escrituras fallidas

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MAX_CLICKS_PER_CLIENT_PER_DAY, clickClientKey } from '@/lib/click-client-key';
 import {
   MAX_CLICKS_PER_DAY,
   chileDateKey,
@@ -175,6 +176,9 @@ describe('parseWholeNumber', () => {
 const db = vi.hoisted(() => ({
   todayCount: 0 as number,
   countError: null as { code?: string; message: string } | null,
+  /** Conteo del día para la llave del cliente (.eq('client_key', …)). */
+  clientCount: 0 as number,
+  clientError: null as { code?: string; message: string } | null,
   inserts: [] as unknown[],
   available: true,
 }));
@@ -186,6 +190,9 @@ vi.mock('@/lib/supabase/server', () => ({
       from: () => ({
         select: () => ({
           gte: async () => ({ count: db.todayCount, error: db.countError }),
+          eq: () => ({
+            gte: async () => ({ count: db.clientCount, error: db.clientError }),
+          }),
         }),
         insert: async (row: unknown) => {
           db.inserts.push(row);
@@ -213,6 +220,8 @@ describe('POST /api/e', () => {
   beforeEach(() => {
     db.todayCount = 0;
     db.countError = null;
+    db.clientCount = 0;
+    db.clientError = null;
     db.inserts = [];
     db.available = true;
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -271,5 +280,66 @@ describe('POST /api/e', () => {
     db.available = false;
     const res = await post(body);
     expect(res.status).toBe(204);
+  });
+
+  describe('tope por cliente', () => {
+    beforeEach(() => {
+      vi.stubEnv('CLICK_SALT', 'sal-de-prueba');
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('guarda la llave diaria del cliente, que no contiene la IP', async () => {
+      await post(body, { 'x-forwarded-for': '200.1.2.3' });
+      expect(db.inserts).toHaveLength(1);
+      const row = db.inserts[0] as Record<string, unknown>;
+      expect(row.client_key).toMatch(/^[0-9a-f]{16}$/);
+      expect(JSON.stringify(row)).not.toContain('200.1.2.3');
+    });
+
+    it('con el tope del cliente alcanzado no inserta, aunque quede cupo global', async () => {
+      db.clientCount = MAX_CLICKS_PER_CLIENT_PER_DAY;
+      await post(body, { 'x-forwarded-for': '200.1.2.3' });
+      expect(db.inserts).toHaveLength(0);
+    });
+
+    it('sin la columna client_key sigue con el tope global y no la manda', async () => {
+      db.clientError = { message: 'column outbound_clicks.client_key does not exist' };
+      await post(body, { 'x-forwarded-for': '200.1.2.3' });
+      expect(db.inserts).toEqual([
+        { product_id: ID, placement: 'home-ofertas', link_mode: 'meli_la', src: 'telegram', is_mobile: true },
+      ]);
+
+      db.inserts = [];
+      db.todayCount = MAX_CLICKS_PER_DAY;
+      await post(body, { 'x-forwarded-for': '200.1.2.3' });
+      expect(db.inserts).toHaveLength(0);
+    });
+  });
+});
+
+describe('clickClientKey', () => {
+  const headers = (ip: string, ua = 'Mozilla/5.0') =>
+    new Headers({ 'x-forwarded-for': `${ip}, 10.0.0.1`, 'user-agent': ua });
+  const day = new Date('2026-10-04T15:00:00Z');
+
+  it('es estable en el día, distinta por cliente y no contiene la IP', () => {
+    const a = clickClientKey(headers('200.1.2.3'), day, 's3cret');
+    expect(a).toMatch(/^[0-9a-f]{16}$/);
+    expect(clickClientKey(headers('200.1.2.3'), new Date('2026-10-04T20:00:00Z'), 's3cret')).toBe(a);
+    expect(clickClientKey(headers('200.1.2.4'), day, 's3cret')).not.toBe(a);
+    expect(clickClientKey(headers('200.1.2.3', 'Otro UA'), day, 's3cret')).not.toBe(a);
+    expect(a).not.toContain('200');
+  });
+
+  it('cambia al día siguiente (hora de Chile) y con otro secreto', () => {
+    const a = clickClientKey(headers('200.1.2.3'), day, 's3cret');
+    expect(clickClientKey(headers('200.1.2.3'), new Date('2026-10-05T15:00:00Z'), 's3cret')).not.toBe(a);
+    expect(clickClientKey(headers('200.1.2.3'), day, 'otro')).not.toBe(a);
+  });
+
+  it('sin secreto no arma llave (un hash sin sal de una IP se puede revertir)', () => {
+    expect(clickClientKey(headers('200.1.2.3'), day, '')).toBeNull();
   });
 });

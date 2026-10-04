@@ -66,10 +66,10 @@ export default function NosotrosPage() {
           Somos afiliados del Programa de Afiliados y Creadores de Mercado
           Libre. Cuando compras un producto a través de uno de nuestros
           links, podemos recibir una comisión — sin costo adicional para ti.
-          Esto no cambia el precio que pagas ni influye en qué producto
-          recomendamos: solo trabajamos con vendedores de reputación verde y
-          no publicamos afirmaciones sobre productos que no podamos
-          verificar.
+          Esto no cambia el precio que pagas. La comisión es uno de los
+          factores con los que elegimos qué productos revisar, pero solo
+          trabajamos con vendedores de reputación verde y no publicamos
+          afirmaciones sobre productos que no podamos verificar.
         </p>
       </div>
     </div>

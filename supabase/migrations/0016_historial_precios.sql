@@ -35,25 +35,18 @@ drop policy if exists "Lectura publica del historial" on price_history;
 create policy "Lectura publica del historial" on price_history for select
   using (exists (select 1 from products p where p.id = product_id and not p.is_hidden));
 
--- Semilla: el precio de hoy de cada producto...
+-- Semilla: solo el precio de hoy de cada producto, visto en price_checked_at.
+-- A proposito NO se siembra el precio del candidato al prospectarse: puesto
+-- al lado del de hoy, la ficha y /ofertas lo leian como una baja ocurrida el
+-- dia de la migracion y como "precio mas bajo desde que lo seguimos", sin
+-- nada registrado entre medio. Asi cada fila del historial es un precio que
+-- de verdad se vio en su observed_at, y las bajas aparecen solo despues de
+-- seguimiento real (las registra applyPricing).
 insert into price_history (product_id, ml_product_id, price, original_price, seller_id, winner_item_id, observed_at)
 select p.id, p.ml_product_id, p.price, p.original_price, p.seller_id, p.winner_item_id, coalesce(p.price_checked_at, now())
 from products p
 where p.ml_product_id is not null
   and not exists (select 1 from price_history h where h.product_id = p.id);
-
--- ...y el precio que tenia cuando se prospecto, que es el dato mas antiguo
--- disponible.
-insert into price_history (product_id, ml_product_id, price, original_price, seller_id, observed_at)
-select p.id, c.ml_product_id, c.price, c.original_price, c.seller_id, c.prospected_at
-from product_candidates c
-join products p on p.ml_product_id = c.ml_product_id
-where c.status = 'approved'
-  and c.price > 0
-  and c.prospected_at is not null
-  and not exists (
-    select 1 from price_history h where h.product_id = p.id and h.observed_at = c.prospected_at
-  );
 
 -- 2. Senales de la oferta ganadora y categoria.
 --

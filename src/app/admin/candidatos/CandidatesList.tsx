@@ -137,7 +137,13 @@ export function CandidatesList({
   function handleBulkReject(reason: RejectReason | null) {
     setError(null);
     setConfirming(false);
-    const ids = selectedItems.map((i) => i.id);
+    // Cada tarjeta es un modelo: se rechazan también sus otros colores, o el
+    // siguiente más barato volvía como tarjeta nueva en la próxima tanda.
+    // selectedItems no se toca: el panel de links lo usa para copiar URLs y
+    // como ids de approveBatch.
+    const ids = visible
+      .filter((c) => selected.has(c.id))
+      .flatMap((c) => [c.id, ...c.siblings.map((s) => s.id)]);
     startTransition(async () => {
       const failure = await reject(ids, reason);
       if (failure) setError(failure);
@@ -291,7 +297,8 @@ export function CandidatesList({
             onToggleSelect={() => toggle(c.id)}
             directLinks={directLinks}
             now={now}
-            onReject={(id) => reject([id], null)}
+            // El modelo entero, con sus otros colores (ver handleBulkReject).
+            onReject={() => reject([c.id, ...c.siblings.map((s) => s.id)], null)}
             onDone={handleCardDone}
           />
         ))

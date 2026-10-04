@@ -397,6 +397,36 @@ describe('acciones de candidatos', async () => {
     expect(rpcCalls()).toHaveLength(0);
   });
 
+  it('sin AFFILIATE_TOOL compara con el matt_tool guardado en site_settings', async () => {
+    // Así está producción: sin variables, con la cuenta guardada en la base.
+    delete process.env.AFFILIATE_WORD;
+    delete process.env.AFFILIATE_TOOL;
+    const base = db.handler;
+    db.handler = (op) =>
+      op.table === 'site_settings'
+        ? { data: { value: { word: 'comparatech', tool: '12345', directLinks: true } }, error: null }
+        : base(op);
+    vi.mocked(inspectAffiliateLink).mockResolvedValue({
+      ok: true,
+      info: { itemId: null, featuredProductId: 'MLC111', mattWord: 'otra_cuenta', mattTool: '999' },
+    });
+    const res = await actions.approveCandidate('cand-1', 'https://meli.la/abc123');
+    expect(!res.ok && res.error).toMatch(/matt_tool=999/);
+    expect(rpcCalls()).toHaveLength(0);
+  });
+
+  it('un meli.la propio con otro matt_word pero el matt_tool de la cuenta se publica', async () => {
+    vi.mocked(inspectAffiliateLink).mockResolvedValue({
+      ok: true,
+      info: { itemId: null, featuredProductId: 'MLC111', mattWord: 'seplvedaroxana', mattTool: '12345' },
+    });
+    const base = db.handler;
+    db.handler = (op) => (op.method === 'rpc' ? { data: 'prod-1', error: null } : base(op));
+    const res = await actions.approveCandidate('cand-1', 'https://meli.la/abc123');
+    expect(res.ok).toBe(true);
+    expect(rpcCalls()).toHaveLength(1);
+  });
+
   it('un meli.la de la cuenta publica y devuelve el resultado', async () => {
     vi.mocked(inspectAffiliateLink).mockResolvedValue({
       ok: true,
@@ -465,12 +495,15 @@ describe('acciones de candidatos', async () => {
     const restored = await actions.restoreCandidates(['cand-1']);
     expect(restored).toEqual({ ok: true, ids: ['cand-1'] });
     const restoreOp = db.ops.find((o) => o.method === 'update')!;
+    // reviewed_at con la hora de la recuperación: si quedara en null, el
+    // vencimiento de 30 días lo volvería a archivar esa noche.
     expect(restoreOp.patch).toEqual({
       status: 'pending_review',
-      reviewed_at: null,
+      reviewed_at: expect.any(String),
       reject_reason: null,
       reviewed_by: null,
     });
+    expect(Date.now() - Date.parse(String(restoreOp.patch!.reviewed_at))).toBeLessThan(60_000);
     expect(restoreOp.filters).toContainEqual(['in', 'status', ['rejected', 'expired']]);
     const logged = vi.mocked(logAdminEvent).mock.calls.map((c) => c[1].action);
     expect(logged).toEqual(['rechazar', 'recuperar']);

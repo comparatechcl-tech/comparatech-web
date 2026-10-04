@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { readAffiliateSettings } from '@/lib/settings';
 import { readAttributionStatus } from '@/lib/admin-settings';
 import { readActionNeededCount } from '@/lib/admin-stats';
+import { countPendingModels } from '@/lib/candidate-queue';
 import { AdminTabs } from './AdminTabs';
 
 export const dynamic = 'force-dynamic';
@@ -25,14 +26,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   // Los contadores en las pestañas dicen de un vistazo si hay algo que hacer,
   // sin tener que esperar al correo de la mañana. Problemas cuenta solo lo
-  // que pide acción: los que están en pausa vuelven solos.
+  // que pide acción: los que están en pausa vuelven solos. Candidatos cuenta
+  // modelos, igual que la cola (lib/candidate-queue): antes contaba cada
+  // color y el número no calzaba con el de la cola.
   const [pending, problems, settings, attribution] = await Promise.all([
-    admin
-      ? admin
-          .from('product_candidates')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'pending_review')
-      : Promise.resolve({ count: 0, error: null }),
+    countPendingModels(admin),
     readActionNeededCount(admin),
     readAffiliateSettings(admin),
     readAttributionStatus(admin),
@@ -48,7 +46,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       {/* Sobre la cabecera del sitio (z-40): al bajar, las pestañas quedan
           arriba y tapan la cabecera, que en el admin no hace falta. */}
       <div className="sticky top-0 z-50 border-b border-border bg-surface">
-        <AdminTabs pending={pending.error ? 0 : (pending.count ?? 0)} problems={problems ?? 0} />
+        <AdminTabs pending={pending} problems={problems ?? 0} />
       </div>
       {unverifiedDirect && (
         <div className="border-b border-red-500/30 bg-red-500/10">

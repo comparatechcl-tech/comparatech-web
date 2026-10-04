@@ -19,10 +19,10 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { getMlToken } from '@/lib/ml-enrichment';
 import { requireAdmin } from '@/lib/admin-auth';
 import { logAdminEvent } from '@/lib/admin-audit';
-import { readAttributionStatus } from '@/lib/admin-settings';
+import { directLinksUsable, readAttributionStatus } from '@/lib/admin-settings';
 import { sendEmail } from '@/lib/email';
 import { escapeHtml } from '@/lib/daily-digest';
-import { isAllowedAffiliateUrl } from '@/lib/outbound';
+import { isAllowedAffiliateUrl, isMeliLaUrl } from '@/lib/outbound';
 import { checkAffiliateOwnership, inspectAffiliateLink } from '@/lib/affiliate-link';
 import { linkVerdict, resolveLinkTarget, type LinkVerdict } from '@/lib/link-check';
 import {
@@ -34,7 +34,7 @@ import {
   type PricingResult,
 } from '@/lib/pricing';
 import {
-  expectedAffiliateParams,
+  expectedAffiliateOwner,
   readAffiliateSettings,
   rememberAffiliateParams,
   writeAffiliateSettings,
@@ -65,6 +65,21 @@ function affiliateUrlError(url: string): string | null {
   return 'Ese link no es de Mercado Libre';
 }
 
+const DIRECT_NOT_CONFIRMED =
+  'Pega el link meli.la: la atribución de los links directos aún no está comprobada.';
+
+/**
+ * Misma regla que al aprobar un candidato: mientras no se compruebe que ML
+ * paga comisión por un link directo, solo se acepta un meli.la. Sin esto se
+ * podía guardar una /p/MLC… copiada del navegador, sin matt_word ni
+ * matt_tool, que no deja comisión si los links directos se apagan. Va antes
+ * de abrir el link, para no abrir uno que igual se va a rechazar.
+ */
+async function directLinkError(admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>, url: string) {
+  if (isMeliLaUrl(url)) return null;
+  return (await directLinksUsable(admin)) ? null : DIRECT_NOT_CONFIRMED;
+}
+
 export type LinkCheck = { ok: true; verdict: LinkVerdict; featuredProductId: string | null } | Fail;
 
 /** Botón "Verificar": dice si el link lleva a esta ficha, sin guardar nada. */
@@ -76,12 +91,17 @@ export async function checkAffiliateLink(url: string, mlProductId: string | null
   if (urlError) return { ok: false, error: urlError };
   if (!mlProductId) return { ok: false, error: 'Este producto no tiene ficha de Mercado Libre asociada' };
 
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
+  const directError = await directLinkError(admin, trimmed);
+  if (directError) return { ok: false, error: directError };
+
   // Queda memoizado: si después se aprueba o guarda este mismo link, no se
   // vuelve a abrir (cada apertura cuenta como un clic de afiliado).
   const inspected = await inspectAffiliateLink(trimmed);
   if (!inspected.ok) return { ok: false, error: inspected.error };
 
-  const foreign = checkAffiliateOwnership(inspected.info, expectedAffiliateParams());
+  const foreign = checkAffiliateOwnership(inspected.info, await expectedAffiliateOwner(admin));
   if (foreign) return { ok: false, error: foreign };
 
   return {
@@ -185,10 +205,13 @@ export async function republishWithLink(productId: string, url: string): Promise
   if (!data) return { ok: false, error: 'Ese producto ya no existe' };
   const { name, ...product } = data as unknown as PricedProduct & { name: string };
 
+  const directError = await directLinkError(admin, trimmed);
+  if (directError) return { ok: false, error: directError };
+
   const inspected = await inspectAffiliateLink(trimmed);
   if (!inspected.ok) return { ok: false, error: `No se pudo abrir el link: ${inspected.error}` };
 
-  const foreign = checkAffiliateOwnership(inspected.info, expectedAffiliateParams());
+  const foreign = checkAffiliateOwnership(inspected.info, await expectedAffiliateOwner(admin));
   if (foreign) return { ok: false, error: foreign };
 
   const token = await getMlToken();
@@ -412,7 +435,7 @@ export async function republishBatch(productIds: string[], pasted: string): Prom
   const rows = new Map(((data ?? []) as unknown as Row[]).map((p) => [p.id, p]));
   const products = productIds.map((id) => rows.get(id)).filter((p): p is Row => Boolean(p));
 
-  const expected = expectedAffiliateParams();
+  const expected = await expectedAffiliateOwner(admin);
   const match = await matchLinksToTargets(
     pasted,
     products.map((p) => ({ id: p.id, mlProductId: p.ml_product_id })),

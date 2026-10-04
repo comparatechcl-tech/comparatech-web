@@ -72,8 +72,22 @@ revoke execute on function public.promote_candidate_to_product(uuid, text, text)
 grant execute on function public.promote_candidate_to_product(uuid, text, text) to service_role;
 
 -- Las funciones que se creen de aqui en adelante tampoco quedan abiertas a
--- todos por defecto: hay que darle permiso a quien corresponda a proposito.
-alter default privileges in schema public revoke execute on functions from public, anon, authenticated;
+-- todos por defecto.
+-- Postgres da EXECUTE a PUBLIC en toda funcion nueva como default GLOBAL; un
+-- "in schema" no lo puede quitar (la version anterior de esta linea no hacia
+-- nada para PUBLIC). Se quita globalmente (para el rol que corre las
+-- migraciones, normalmente postgres) y ademas se deshace el grant por esquema
+-- que Supabase da a anon/authenticated. OJO: toda funcion nueva que deba
+-- ejecutar anon (RPC publica o helper usado en una policy RLS) necesita un
+-- grant explicito. Igual, despues de cada funcion SECURITY DEFINER nueva,
+-- repetir:
+--   revoke execute on function ... from public, anon, authenticated;
+--   grant execute on function ... to service_role;
+-- Para comprobar: select defaclnamespace, defaclobjtype, defaclacl from pg_default_acl;
+-- y, con una funcion de prueba, has_function_privilege('anon', 'public.<fn>()', 'execute')
+-- debe dar false.
+alter default privileges revoke execute on functions from public;
+alter default privileges in schema public revoke execute on functions from anon, authenticated;
 
 -- 2. Lectura publica solo de productos no ocultos. is_hidden es la decision
 --    de bajar un producto desde el admin; antes la respetaba solo el codigo

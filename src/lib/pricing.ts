@@ -290,6 +290,19 @@ export async function priceProducts(
      * tenían ningún problema.
      */
     directLinks?: boolean;
+    /**
+     * Si se buscan las categorías raíz en ML (por omisión, sí). El cron lo
+     * apaga cuando falta la migración 0016: sin las columnas no hay dónde
+     * guardar la raíz y cada corrida repetía las mismas consultas a ML.
+     */
+    resolveRoots?: boolean;
+    /**
+     * Corte propio de las consultas de enriquecimiento (raíces), más
+     * temprano que outOfTime: una consulta que empieza tarde puede tardar
+     * hasta ~17 s y empujar las escrituras más allá del plazo del cron. Las
+     * consultas de ganadores mantienen todo su presupuesto.
+     */
+    stopEnrichment?: () => boolean;
   } = {}
 ): Promise<PricingOutcome[]> {
   const concurrency = options.concurrency ?? 6;
@@ -336,15 +349,17 @@ export async function priceProducts(
   // guarda las respuestas en memoria, así que en la práctica son pocas
   // llamadas por corrida aunque el catálogo tenga cientos de productos.
   const pendingCategories = new Set<string>();
-  for (const { product, winners } of fetched) {
-    const categoryId = winners.status === 'ok' ? winners.offers[0].category_id : null;
-    if (categoryId && (categoryId !== product.ml_category_id || !product.ml_root_category)) {
-      pendingCategories.add(categoryId);
+  if (options.resolveRoots !== false) {
+    for (const { product, winners } of fetched) {
+      const categoryId = winners.status === 'ok' ? winners.offers[0].category_id : null;
+      if (categoryId && (categoryId !== product.ml_category_id || !product.ml_root_category)) {
+        pendingCategories.add(categoryId);
+      }
     }
   }
   const roots = new Map<string, string | null>();
   await mapWithConcurrency([...pendingCategories], 4, async (categoryId) => {
-    if (options.outOfTime?.()) return;
+    if (options.outOfTime?.() || options.stopEnrichment?.()) return;
     roots.set(categoryId, await getRootCategory(categoryId, token));
   });
 
@@ -445,4 +460,13 @@ export function summarizePricing(outcomes: PricingOutcome[]) {
 /** ¿Cambió algo que el visitante del sitio vería? */
 export function hasVisibleChanges(outcomes: PricingOutcome[]): boolean {
   return outcomes.some((o) => o.priceChanged || o.reactivated || o.deactivated);
+}
+
+/**
+ * Lo que no puede esperar a la próxima corrida cuando queda poco tiempo
+ * para escribir: productos que salen del sitio (sin ganador o sin vendedor
+ * verde), que vuelven, o cuyo precio cambió. Suelen ser pocas filas.
+ */
+export function priorityOutcomes(outcomes: PricingOutcome[]): PricingOutcome[] {
+  return outcomes.filter((o) => o.priceChanged || o.reactivated || o.deactivated);
 }

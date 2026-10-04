@@ -14,7 +14,9 @@ import { AffiliateButton } from './AffiliateButton';
  * convence al final de la tabla tenía que volver a subir para comprar. La
  * barra aparece cuando el botón principal ya quedó arriba de la pantalla, y
  * se esconde de nuevo si vuelve a verse alguno de los botones de la página
- * (para no mostrar dos botones iguales a la vez).
+ * (para no mostrar dos botones iguales a la vez) o el pie de página: fija
+ * sobre el pie tapaba sus últimas líneas, entre ellas el aviso de que los
+ * precios pueden variar, y no había cómo desplazarlas a la vista.
  *
  * Recibe solo datos sueltos y públicos: todo lo que se pasa a un componente
  * de cliente queda escrito en el HTML.
@@ -53,6 +55,9 @@ export function StickyBuyBar({
       .map((id) => document.getElementById(id))
       .filter((el): el is HTMLElement => el !== null);
 
+    // El pie no es un botón: solo cuenta como señal para esconder la barra.
+    const footer = document.querySelector('footer');
+
     // Estado de cada botón observado: si se ve y si quedó arriba de la pantalla.
     const state = new Map<Element, { visible: boolean; above: boolean }>();
 
@@ -64,12 +69,14 @@ export function StickyBuyBar({
         });
       }
       const primaryState = state.get(primary);
-      const anyCtaVisible = [...state.values()].some((s) => s.visible);
-      setVisible(!!primaryState?.above && !anyCtaVisible);
+      const anyCtaVisible = [primary, ...others].some((el) => state.get(el)?.visible);
+      const footerVisible = footer ? !!state.get(footer)?.visible : false;
+      setVisible(!!primaryState?.above && !anyCtaVisible && !footerVisible);
     });
 
     observer.observe(primary);
     others.forEach((el) => observer.observe(el));
+    if (footer) observer.observe(footer);
     return () => observer.disconnect();
   }, [primaryCtaId, otherIdsKey]);
 

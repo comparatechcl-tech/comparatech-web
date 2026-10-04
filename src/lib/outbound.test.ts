@@ -80,11 +80,18 @@ describe('checkAffiliateOwnership', () => {
     expect(checkAffiliateOwnership({ mattWord: 'otra', mattTool: '1' }, { word: null, tool: null })).toBeNull();
   });
 
-  it('rechaza un matt_word o matt_tool de otra cuenta', () => {
-    expect(checkAffiliateOwnership({ mattWord: 'otra', mattTool: '12345678' }, expected)).toBe(
-      'Este link es de otra cuenta de afiliado (matt_word=otra). Genéralo con la cuenta ComparaTech.'
+  it('acepta otro matt_word si el matt_tool es el de la cuenta', () => {
+    // Los meli.la propios resuelven a matt_word=seplvedaroxana aunque la
+    // configuración diga comparatech: el word no identifica a la cuenta.
+    expect(checkAffiliateOwnership({ mattWord: 'seplvedaroxana', mattTool: '12345678' }, expected)).toBeNull();
+    expect(checkAffiliateOwnership({ mattWord: 'otra', mattTool: null }, expected)).toBeNull();
+  });
+
+  it('rechaza un matt_tool de otra cuenta', () => {
+    expect(checkAffiliateOwnership({ mattWord: 'comparatech', mattTool: '999' }, expected)).toBe(
+      'Este link es de otra cuenta de afiliado (matt_tool=999). Genéralo con la cuenta ComparaTech.'
     );
-    expect(checkAffiliateOwnership({ mattWord: 'comparatech', mattTool: '999' }, expected)).toContain(
+    expect(checkAffiliateOwnership({ mattWord: null, mattTool: '999' }, { word: null, tool: '12345678' })).toContain(
       'matt_tool=999'
     );
   });

@@ -32,7 +32,9 @@ export default function PrivacidadPage() {
             <strong className="text-fg">Clics hacia Mercado Libre.</strong> Cuando tocas &quot;Ver en Mercado
             Libre&quot; guardamos qué producto fue, desde qué parte del sitio (portada, ofertas, la ficha, etc.), el
             tipo de link, si llegaste desde alguna red social o campaña (por ejemplo, Telegram) y si la pantalla era
-            de celular. Nada más: ni tu IP, ni tu navegador, ni nada que te identifique.
+            de celular. No guardamos tu IP ni tu navegador. Para frenar a quien infle los clics con un programa,
+            guardamos además un código que se calcula a partir de esos datos, cambia cada día y no permite volver a
+            ellos. Los clics se borran a los 180 días.
           </li>
           <li>
             <strong className="text-fg">Visitas agregadas.</strong> Usamos Vercel Analytics, que cuenta páginas

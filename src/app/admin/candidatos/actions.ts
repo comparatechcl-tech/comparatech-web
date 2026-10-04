@@ -20,7 +20,7 @@ import { directLinksUsable } from '@/lib/admin-settings';
 import { checkAffiliateOwnership, inspectAffiliateLink } from '@/lib/affiliate-link';
 import { linkVerdict } from '@/lib/link-check';
 import { PRICED_COLUMNS, applyPricing, priceProducts, type PricedProduct, type PricingResult } from '@/lib/pricing';
-import { expectedAffiliateParams, readAffiliateSettings, rememberAffiliateParams } from '@/lib/settings';
+import { expectedAffiliateOwner, readAffiliateSettings, rememberAffiliateParams } from '@/lib/settings';
 import { directAffiliateUrl, isAllowedAffiliateUrl, isMeliLaUrl } from '@/lib/outbound';
 import { stripDiacritics } from '@/lib/text';
 import { MAX_BATCH, extractAffiliateLinks, matchLinksToTargets } from '@/lib/link-batch';
@@ -217,7 +217,7 @@ export async function approveCandidate(candidateId: string, affiliateUrl: string
     // (cada apertura cuenta como un clic de afiliado).
     const inspected = await inspectAffiliateLink(url);
     if (inspected.ok) {
-      const foreign = checkAffiliateOwnership(inspected.info, expectedAffiliateParams());
+      const foreign = checkAffiliateOwnership(inspected.info, await expectedAffiliateOwner(admin));
       if (foreign) return { ok: false, error: foreign };
 
       const verdict = await linkVerdict(inspected.info, candidate.ml_product_id, token);
@@ -325,7 +325,7 @@ export async function approveBatch(candidateIds: string[], pasted: string): Prom
   );
 
   const usable = await directLinksUsable(admin);
-  const expected = expectedAffiliateParams();
+  const expected = await expectedAffiliateOwner(admin);
 
   // Qué link le toca a cada candidato.
   const links = new Map<string, { url: string; itemId: string | null; verified: boolean }>();
@@ -510,6 +510,11 @@ export async function rejectCandidate(candidateId: string, reason?: string | nul
  * Devuelve a la cola candidatos rechazados o vencidos ("Deshacer" y la
  * vista de rechazados). Solo toca esos estados: un aprobado ya es producto
  * y no puede volver a la cola.
+ *
+ * reviewed_at queda con la hora de la recuperación (y reviewed_by en null,
+ * así no cuenta como revisado hoy): el vencimiento de pendientes exige que
+ * prospected_at Y reviewed_at tengan más de 30 días. Con reviewed_at en null,
+ * un candidato antiguo recuperado se volvía a vencer esa misma noche.
  */
 export async function restoreCandidates(candidateIds: string[]): Promise<ReviewResult> {
   const actor = await requireAdmin();
@@ -521,7 +526,7 @@ export async function restoreCandidates(candidateIds: string[]): Promise<ReviewR
   if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
 
   const { data, error } = await withOptionalColumns<{ id: string }[]>(
-    { status: 'pending_review', reviewed_at: null, reject_reason: null, reviewed_by: null },
+    { status: 'pending_review', reviewed_at: new Date().toISOString(), reject_reason: null, reviewed_by: null },
     (patch) =>
       admin
         .from('product_candidates')

@@ -24,7 +24,7 @@ import { resolveDescription } from '@/lib/product-description';
 import { shortProductName, truncateAtWord } from '@/lib/text';
 import { formatCLP, formatDiscountPct } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
-import type { InactiveReason } from '@/lib/inactive-reasons';
+import { reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
 import type { Product } from '@/lib/types';
 
 export async function generateStaticParams() {
@@ -192,8 +192,11 @@ export default async function ProductoPage({
               </p>
             </div>
             <p className="mt-3 text-xs text-muted">
-              Último precio que vimos: {formatCLP(product.price)}. Apenas vuelva a haber un vendedor
-              confiable, la ficha se actualiza sola.
+              Último precio que vimos: {formatCLP(product.price)}.
+              {/* Solo si de verdad vuelve sola: un link a otro producto
+                  necesita que alguien genere uno nuevo. */}
+              {reasonInfo(product.inactive_reason).auto &&
+                ' Apenas vuelva a haber un vendedor confiable, la ficha se actualiza sola.'}
             </p>
             <p className="mt-4 text-sm leading-relaxed text-muted">{resolveDescription(product)}</p>
           </div>
@@ -203,10 +206,12 @@ export default async function ProductoPage({
 
         <VariantLinks variants={variantLinks} />
 
-        <div className="mt-10">
-          <h2 className="mb-3 font-heading text-lg font-semibold">Especificaciones</h2>
-          <ProductSpecsTable product={product} />
-        </div>
+        {Object.keys(product.specs ?? {}).length > 0 && (
+          <div className="mt-10">
+            <h2 className="mb-3 font-heading text-lg font-semibold">Especificaciones</h2>
+            <ProductSpecsTable product={product} hideSeller />
+          </div>
+        )}
       </div>
     );
   }
@@ -288,8 +293,6 @@ export default async function ProductoPage({
         primaryCtaId={PRIMARY_CTA_ID}
         otherCtaIds={[SPECS_CTA_ID]}
       />
-      {/* Espacio para que la barra fija no tape el final de la página. */}
-      <div aria-hidden className="h-20 sm:hidden" />
     </div>
   );
 }

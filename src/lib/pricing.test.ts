@@ -7,7 +7,27 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 vi.mock('@/lib/settings', () => ({
   readAffiliateSettings: async () => ({ word: null, tool: null, directLinks: false }),
 }));
-import { applyPricing, decide, offerInfoFrom, type PricedProduct, type PricingOutcome } from '@/lib/pricing';
+// Nunca se consulta ML de verdad: cada test dice qué devuelve cada endpoint.
+const ml = vi.hoisted(() => ({
+  getWinners: vi.fn(),
+  getSellers: vi.fn(),
+  getRootCategory: vi.fn(),
+}));
+vi.mock('@/lib/ml-catalog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ml-catalog')>()),
+  getWinners: ml.getWinners,
+  getSellers: ml.getSellers,
+  getRootCategory: ml.getRootCategory,
+}));
+import {
+  applyPricing,
+  decide,
+  offerInfoFrom,
+  priceProducts,
+  priorityOutcomes,
+  type PricedProduct,
+  type PricingOutcome,
+} from '@/lib/pricing';
 import type { MlOffer, MlSeller, WinnersResult } from '@/lib/ml-catalog';
 
 const NOW = '2026-10-04T12:00:00.000Z';
@@ -333,5 +353,56 @@ describe('applyPricing', () => {
     const failed = await applyPricing(admin, [changedOutcome('p1')]);
     expect(failed).toBe(1);
     expect(inserts).toHaveLength(0);
+  });
+});
+
+describe('priceProducts: raíces de categoría', () => {
+  function setup() {
+    ml.getWinners.mockReset().mockResolvedValue(ok([offer({ category_id: 'MLC1055' })]));
+    ml.getSellers.mockReset().mockResolvedValue(sellers(GREEN));
+    ml.getRootCategory.mockReset().mockResolvedValue('MLC1051');
+  }
+
+  it('busca la raíz de una categoría que no se conoce', async () => {
+    setup();
+    const [o] = await priceProducts([product()], 'token', { directLinks: true });
+    expect(ml.getRootCategory).toHaveBeenCalledTimes(1);
+    expect(o.patch).toMatchObject({ ml_category_id: 'MLC1055', ml_root_category: 'MLC1051' });
+  });
+
+  it('sin la migración 0016 (resolveRoots: false) no consulta raíces', async () => {
+    setup();
+    await priceProducts([product()], 'token', { directLinks: true, resolveRoots: false });
+    expect(ml.getRootCategory).not.toHaveBeenCalled();
+  });
+
+  it('no consulta raíces pasado el corte de enriquecimiento, pero sí ganadores', async () => {
+    setup();
+    const [o] = await priceProducts([product()], 'token', { directLinks: true, stopEnrichment: () => true });
+    expect(ml.getWinners).toHaveBeenCalledTimes(1);
+    expect(ml.getRootCategory).not.toHaveBeenCalled();
+    expect(o.result).toBe('activo');
+  });
+
+  it('con las categorías ya guardadas no vuelve a consultar', async () => {
+    setup();
+    await priceProducts([product({ ml_category_id: 'MLC1055', ml_root_category: 'MLC1051' })], 'token', {
+      directLinks: true,
+    });
+    expect(ml.getRootCategory).not.toHaveBeenCalled();
+  });
+});
+
+describe('priorityOutcomes', () => {
+  const base = { patch: { price_checked_at: NOW }, priceChanged: false, reactivated: false, deactivated: false };
+  it('se queda con bajas, vueltas y cambios de precio', () => {
+    const outcomes: PricingOutcome[] = [
+      { ...base, id: 'igual', result: 'activo' },
+      { ...base, id: 'baja', result: 'sin_ganador', deactivated: true },
+      { ...base, id: 'vuelve', result: 'activo', reactivated: true },
+      { ...base, id: 'precio', result: 'activo', priceChanged: true },
+      { ...base, id: 'error', result: 'error_transitorio', patch: {} },
+    ];
+    expect(priorityOutcomes(outcomes).map((o) => o.id)).toEqual(['baja', 'vuelve', 'precio']);
   });
 });

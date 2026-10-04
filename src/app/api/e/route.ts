@@ -8,6 +8,7 @@ import {
   parseClickBody,
   startOfChileDay,
 } from '@/lib/clicks';
+import { MAX_CLICKS_PER_CLIENT_PER_DAY, clickClientKey } from '@/lib/click-client-key';
 
 /**
  * Registro de un clic hacia Mercado Libre (lo manda AffiliateButton con
@@ -17,7 +18,8 @@ import {
  *
  * Qué NO se guarda: IP, user-agent, cookies ni la URL completa. Solo el
  * producto, desde dónde salió el clic, el tipo de link, el origen de la
- * visita y si era celular (ver /privacidad).
+ * visita, si era celular y una llave diaria irreversible del cliente para el
+ * tope por cliente (lib/click-client-key, ver /privacidad).
  */
 
 export const runtime = 'nodejs';
@@ -82,10 +84,33 @@ export async function POST(req: NextRequest) {
     const admin = getSupabaseAdmin();
     if (!admin) return noContent();
 
+    const now = new Date();
+    const dayStart = startOfChileDay(now).toISOString();
+
+    // Tope por cliente antes del global: sin esto, un solo script con un
+    // user-agent de navegador (y sin Sec-Fetch-Site) llenaba el cupo del día
+    // y se perdían los clics reales hasta medianoche. Si la columna
+    // client_key no existe todavía (o el conteo falla por cualquier cosa:
+    // un conteo head:true no trae código de error), se sigue solo con el
+    // tope global, como antes.
+    const clientKey = clickClientKey(req.headers, now);
+    let withClientKey = false;
+    if (clientKey) {
+      const { count: mine, error: mineError } = await admin
+        .from('outbound_clicks')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_key', clientKey)
+        .gte('created_at', dayStart);
+      if (!mineError) {
+        if ((mine ?? 0) >= MAX_CLICKS_PER_CLIENT_PER_DAY) return noContent();
+        withClientKey = true;
+      }
+    }
+
     const { count, error: countError } = await admin
       .from('outbound_clicks')
       .select('id', { count: 'exact', head: true })
-      .gte('created_at', startOfChileDay(new Date()).toISOString());
+      .gte('created_at', dayStart);
     // Sin la tabla (migración 0015 sin aplicar) no hay nada que hacer.
     if (countError) {
       if (!isMissingSchemaError(countError)) console.error('[api/e] conteo diario:', countError.message);
@@ -99,6 +124,7 @@ export async function POST(req: NextRequest) {
       link_mode: click.linkMode,
       src: click.src,
       is_mobile: click.mobile,
+      ...(withClientKey ? { client_key: clientKey } : {}),
     });
     // 23503: el producto ya no existe (id válido pero borrado). No es un
     // problema del sitio, así que no ensucia los logs.

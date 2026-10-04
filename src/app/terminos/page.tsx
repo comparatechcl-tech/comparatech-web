@@ -37,7 +37,9 @@ export default function TerminosPage() {
         <p>
           ComparaTech es afiliado del Programa de Afiliados y Creadores de Mercado Libre. Los botones &quot;Ver en
           Mercado Libre&quot; son links de afiliado: si compras después de tocarlos, podemos recibir una comisión,
-          sin costo adicional para ti. La comisión no cambia el precio que pagas ni define qué productos mostramos.
+          sin costo adicional para ti. La comisión no cambia el precio que pagas. Para decidir qué productos revisar y
+          publicar consideramos, entre otras cosas, el precio, la reputación del vendedor y la comisión que paga
+          Mercado Libre.
         </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Contenido</h2>

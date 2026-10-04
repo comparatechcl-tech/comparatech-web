@@ -44,6 +44,28 @@ export function expectedAffiliateParams(): { word: string | null; tool: string |
   };
 }
 
+/**
+ * Contra qué comparar un link pegado en el admin para decir si es de otra
+ * cuenta (checkAffiliateOwnership). La cuenta se identifica por matt_tool:
+ * AFFILIATE_TOOL si está fijado y, si no, el guardado en site_settings
+ * (readAffiliateSettings ya da prioridad al entorno). Sin este respaldo, en
+ * producción —donde las variables no están— el chequeo no rechazaba nada.
+ *
+ * El word va siempre null: los meli.la de la cuenta resuelven a un matt_word
+ * distinto del configurado y compararlo bloquearía los links buenos.
+ *
+ * El respaldo en la base solo ataja links ajenos pegados por error: quien
+ * tenga la clave del admin puede cambiar antes el valor guardado.
+ */
+export async function expectedAffiliateOwner(
+  admin: SupabaseClient | null
+): Promise<{ word: string | null; tool: string | null }> {
+  const env = expectedAffiliateParams();
+  if (env.tool) return { word: null, tool: env.tool };
+  const stored = await readAffiliateSettings(admin);
+  return { word: null, tool: stored.tool };
+}
+
 function parseAffiliate(value: unknown): AffiliateSettings {
   const v = (value ?? {}) as Partial<AffiliateSettings>;
   const env = expectedAffiliateParams();
@@ -120,7 +142,8 @@ export async function rememberAffiliateParams(
 ): Promise<void> {
   if (!word || !tool) return;
   const env = expectedAffiliateParams();
-  if (env.word && word !== env.word) return;
+  // Solo matt_tool identifica a la cuenta: el matt_word de un meli.la propio
+  // puede no coincidir con AFFILIATE_WORD y eso no lo hace ajeno.
   if (env.tool && tool !== env.tool) return;
 
   const current = await readAffiliateSettings(admin);

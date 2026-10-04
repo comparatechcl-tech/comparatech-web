@@ -12,6 +12,7 @@ import { buildDigestHtml, buildDigestSubject, buildDigestText } from '@/lib/dail
 import { parseRecipients, sendEmail } from '@/lib/email';
 import {
   buildPublishedCatalog,
+  canRetryCandidate,
   collapseCandidateFamilies,
   minCommissionFromEnv,
   partitionCandidates,
@@ -94,15 +95,6 @@ const RETRY_AFTER_DAYS: Record<string, number> = {
   // para no gastar llamadas en lo mismo todos los días.
   comision_baja: 14,
 };
-
-/**
- * Rechazos que dependían del momento y no del producto: con 45 días de por
- * medio el precio o el vendedor pueden ser otros, así que vuelven a
- * prospectarse. Los demás motivos (no es tecnología, accesorio, duplicado…)
- * son para siempre.
- */
-const RETRYABLE_REJECT_REASONS = new Set(['precio_alto_hoy', 'precio_o_vendedor_raro']);
-const REJECT_RETRY_DAYS = 45;
 
 /** Un pendiente que nadie aprobó en 30 días ya no se va a aprobar: se archiva. */
 const EXPIRE_PENDING_DAYS = 30;
@@ -189,7 +181,7 @@ async function loadExcludedSeen(admin: SupabaseAdmin, ids: string[]): Promise<Se
 interface KnownCandidates {
   /** Ya pasaron (o están) en revisión: no se vuelven a analizar. */
   blocked: Set<string>;
-  /** Rechazados por un motivo pasajero hace más de 45 días: se reconsideran. */
+  /** Rechazados por un motivo pasajero o vencidos hace más de 45 días: se reconsideran. */
   retryable: Set<string>;
   /** Existe reject_reason (migración 0014). */
   has0014: boolean;
@@ -212,14 +204,8 @@ async function loadKnownCandidates(admin: SupabaseAdmin, ids: string[]): Promise
   const blocked = new Set<string>();
   const retryable = new Set<string>();
   for (const row of result.rows) {
-    const reviewedAt = row.reviewed_at ? new Date(row.reviewed_at).getTime() : NaN;
-    const canRetry =
-      row.status === 'rejected' &&
-      !!row.reject_reason &&
-      RETRYABLE_REJECT_REASONS.has(row.reject_reason) &&
-      Number.isFinite(reviewedAt) &&
-      now - reviewedAt > REJECT_RETRY_DAYS * DAY_MS;
-    if (canRetry) retryable.add(row.ml_product_id);
+    // Rechazos pasajeros y vencidos, pasados 45 días (lib/prospect-filter).
+    if (canRetryCandidate(row, now)) retryable.add(row.ml_product_id);
     else blocked.add(row.ml_product_id);
   }
   return { blocked, retryable, has0014 };
@@ -235,14 +221,24 @@ function withoutOptionalColumns<T extends object>(row: T): Record<string, unknow
  * Archiva los pendientes que llevan más de 30 días sin que nadie los mire.
  * Sin la migración 0014 el estado 'expired' no existe (falla la constraint)
  * y no se hace nada.
+ *
+ * Se marca reviewed_at con la hora del vencimiento (reviewed_by queda null,
+ * así no cuenta como revisado por alguien): sin esa fecha el vencido no
+ * aparecía en /admin/candidatos/rechazados, no se podía recuperar y la
+ * prospección no lo volvía a traer nunca.
+ *
+ * Un candidato recuperado desde rechazados conserva su prospected_at viejo
+ * pero trae reviewed_at con la hora de la recuperación: solo vence si los
+ * dos relojes pasaron los 30 días, o se volvería a archivar esa misma noche.
  */
 async function expireStalePending(admin: SupabaseAdmin): Promise<{ expired: number } | { skipped: string }> {
   const cutoff = new Date(Date.now() - EXPIRE_PENDING_DAYS * DAY_MS).toISOString();
   const { count, error } = await admin
     .from('product_candidates')
-    .update({ status: 'expired' }, { count: 'exact' })
+    .update({ status: 'expired', reviewed_at: new Date().toISOString() }, { count: 'exact' })
     .eq('status', 'pending_review')
-    .lt('prospected_at', cutoff);
+    .lt('prospected_at', cutoff)
+    .or(`reviewed_at.is.null,reviewed_at.lt."${cutoff}"`);
   if (error) {
     // 23514: viola la constraint de estados (falta la migración 0014).
     if (error.code === '23514' || isMissingSchemaError(error)) return { skipped: 'falta la migración 0014' };

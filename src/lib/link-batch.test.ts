@@ -79,11 +79,19 @@ describe('matchLinksToTargets', () => {
   it('un link de otra cuenta tampoco se asigna por posición', async () => {
     setLinks({
       'https://meli.la/P1': info(null),
-      'https://meli.la/P2': info(null, { mattWord: 'otracuenta', mattTool: '12345678' }),
+      'https://meli.la/P2': info(null, { mattWord: 'otracuenta', mattTool: '999' }),
     });
     const match = await matchLinksToTargets('https://meli.la/P1 https://meli.la/P2', TARGETS, EXPECTED);
     expect(match.assigned.map((a) => [a.targetId, a.verified])).toEqual([['a', false]]);
     expect(match.unmatched).toEqual(['https://meli.la/P2']);
+  });
+
+  it('un matt_word distinto con el matt_tool de la cuenta se asigna igual', async () => {
+    // Así resuelven hoy los meli.la propios (matt_word=seplvedaroxana).
+    setLinks({ 'https://meli.la/OWN2': info('MLC2', { mattWord: 'seplvedaroxana', mattTool: '12345678' }) });
+    const match = await matchLinksToTargets('https://meli.la/OWN2', TARGETS, { word: null, tool: '12345678' });
+    expect(match.assigned.map((a) => a.targetId)).toEqual(['b']);
+    expect(match.rejected).toEqual([]);
   });
 
   it('sin `expected` se comporta como antes y asigna el link ajeno', async () => {

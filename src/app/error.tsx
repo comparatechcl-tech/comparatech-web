@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
+import { startTransition, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { RotateCw } from 'lucide-react';
 
 /**
@@ -17,6 +18,8 @@ export default function ErrorPage({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const router = useRouter();
+
   useEffect(() => {
     // Queda en los logs de Vercel con el digest que también ve el servidor.
     console.error(error);
@@ -33,7 +36,15 @@ export default function ErrorPage({
       <div className="mt-6 flex flex-wrap justify-center gap-3">
         <button
           type="button"
-          onClick={reset}
+          onClick={() =>
+            // reset() solo vuelve a pintar lo que ya llegó al navegador; el
+            // error vino del servidor, así que hay que volver a pedirle la
+            // página (igual que en app/admin/error.tsx).
+            startTransition(() => {
+              router.refresh();
+              reset();
+            })
+          }
           className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-ink transition hover:brightness-110"
         >
           <RotateCw size={15} aria-hidden />

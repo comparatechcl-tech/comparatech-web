@@ -12,9 +12,11 @@
  * llevaba al Negro, y con un Redmi Watch cuyo link abría una Huawei Band), el
  * comprador termina mirando algo distinto a lo que vio en el sitio.
  *
- * De paso se leen `matt_word` y `matt_tool`, los parámetros que identifican a
- * la cuenta afiliada. Son iguales en todos sus links y permiten armar links
- * directos a la ficha (ver lib/outbound).
+ * De paso se leen `matt_word` y `matt_tool`. `matt_tool` identifica a la
+ * cuenta afiliada y es igual en todos sus links; `matt_word` es la etiqueta
+ * con que ML resuelve el link (hoy los meli.la de la cuenta resuelven a un
+ * matt_word distinto del configurado), así que NO sirve para decir de quién es
+ * un link. Ambos se usan para armar links directos a la ficha (ver lib/outbound).
  */
 
 import { isAllowedAffiliateUrl } from '@/lib/outbound';
@@ -206,20 +208,20 @@ async function fetchAndInspect(start: string, timeoutMs: number): Promise<Inspec
 }
 
 /**
- * ¿El link es de la cuenta de ComparaTech? Compara los parámetros que se
- * leyeron del link con los esperados (lib/settings: expectedAffiliateParams).
+ * ¿El link es de la cuenta de ComparaTech? Compara el matt_tool que se leyó
+ * del link con el esperado (lib/settings: expectedAffiliateOwner).
  *
- * Solo rechaza con evidencia: si el link no trae matt_word, o no hay un
+ * Solo mira matt_tool: los meli.la legítimos de la cuenta resuelven a un
+ * matt_word distinto del configurado (seplvedaroxana vs comparatech), y
+ * compararlo bloquearía todos los links buenos.
+ *
+ * Solo rechaza con evidencia: si el link no trae matt_tool, o no hay un
  * valor esperado con qué comparar, no se puede decir que sea ajeno.
  */
 export function checkAffiliateOwnership(
   info: { mattWord: string | null; mattTool: string | null },
   expected: { word: string | null; tool: string | null }
 ): string | null {
-  const word = info.mattWord?.trim();
-  if (word && expected.word && word !== expected.word) {
-    return `Este link es de otra cuenta de afiliado (matt_word=${word}). Genéralo con la cuenta ComparaTech.`;
-  }
   const tool = info.mattTool?.trim();
   if (tool && expected.tool && tool !== expected.tool) {
     return `Este link es de otra cuenta de afiliado (matt_tool=${tool}). Genéralo con la cuenta ComparaTech.`;

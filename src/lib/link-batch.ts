@@ -63,8 +63,8 @@ export interface BatchMatch {
 }
 
 /**
- * `expected`: matt_word/matt_tool de la cuenta (lib/settings). Si viene, un
- * link de otra cuenta de afiliado no se asigna a nada —ni por ficha ni por
+ * `expected`: matt_tool de la cuenta (lib/settings: expectedAffiliateOwner).
+ * Si viene, un link de otra cuenta de afiliado no se asigna a nada —ni por ficha ni por
  * posición—: guardarlo le pagaría la comisión a otro. Sin él, el
  * comportamiento es el de siempre.
  */

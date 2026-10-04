@@ -116,7 +116,11 @@ export function Header({ categories }: { categories: CategoryInfo[] }) {
           </span>
         </Link>
 
-        <div className="hidden items-center gap-6 md:flex">
+        {/* Desde lg y no md: entre 768 y 1023 px las categorías no caben en
+            una fila y la página se desplazaba de lado. El campo de búsqueda
+            va recién desde xl; antes, un ícono que lleva a /buscar (que
+            tiene su propio buscador) ocupa lo mismo que el viejo link. */}
+        <div className="hidden min-w-0 items-center gap-6 lg:flex">
           <nav className="flex items-center gap-5">
             {links.map((l) => {
               const active = pathname === l.href;
@@ -135,11 +139,18 @@ export function Header({ categories }: { categories: CategoryInfo[] }) {
               );
             })}
           </nav>
-          <SearchForm className="w-36 lg:w-52" />
+          <SearchForm className="hidden xl:block xl:w-52" />
+          <Link
+            href="/buscar"
+            aria-label="Buscar"
+            className={`transition xl:hidden ${pathname === '/buscar' ? 'text-accent' : 'text-muted hover:text-fg'}`}
+          >
+            <Search size={18} />
+          </Link>
           <ThemeToggle />
         </div>
 
-        <div className="flex items-center gap-3 md:hidden">
+        <div className="flex items-center gap-3 lg:hidden">
           <button
             type="button"
             className="text-muted transition hover:text-fg"
@@ -170,7 +181,7 @@ export function Header({ categories }: { categories: CategoryInfo[] }) {
         </div>
       </div>
 
-      <div id={MOBILE_SEARCH_ID} hidden={!searchOpen} className="border-t border-border px-4 py-3 md:hidden">
+      <div id={MOBILE_SEARCH_ID} hidden={!searchOpen} className="border-t border-border px-4 py-3 lg:hidden">
         <SearchForm inputRef={mobileSearchRef} onSubmit={() => setSearchOpen(false)} />
       </div>
 
@@ -180,7 +191,7 @@ export function Header({ categories }: { categories: CategoryInfo[] }) {
         id={MOBILE_MENU_ID}
         hidden={!open}
         aria-label="Menú principal"
-        className="flex-col gap-1 border-t border-border px-4 py-3 [&:not([hidden])]:flex md:!hidden"
+        className="flex-col gap-1 border-t border-border px-4 py-3 [&:not([hidden])]:flex lg:!hidden"
       >
         {links.map((l) => {
           const active = pathname === l.href;

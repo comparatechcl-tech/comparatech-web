@@ -1,8 +1,14 @@
 import { Product } from '@/lib/types';
 import { reputationLabel } from '@/lib/format';
 
-export function ProductSpecsTable({ product }: { product: Product }) {
-  const entries = Object.entries(product.specs);
+/**
+ * `hideSeller`: en la ficha de un producto en pausa no se muestra el
+ * vendedor guardado. Ahí el aviso dice que no hay un vendedor confiable, y
+ * una fila "Reputación verde" al lado se contradecía con él.
+ */
+export function ProductSpecsTable({ product, hideSeller = false }: { product: Product; hideSeller?: boolean }) {
+  const entries = Object.entries(product.specs ?? {});
+  if (hideSeller && entries.length === 0) return null;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-border">
@@ -14,13 +20,15 @@ export function ProductSpecsTable({ product }: { product: Product }) {
               <td className="px-4 py-2.5 text-right font-medium text-fg">{value}</td>
             </tr>
           ))}
-          <tr className="bg-surface2">
-            <td className="px-4 py-2.5 text-muted">Vendedor</td>
-            <td className="px-4 py-2.5 text-right font-medium text-fg">
-              {reputationLabel(product.seller_reputation)} ·{' '}
-              {product.seller_sales_count.toLocaleString('es-CL')} ventas
-            </td>
-          </tr>
+          {!hideSeller && (
+            <tr className="bg-surface2">
+              <td className="px-4 py-2.5 text-muted">Vendedor</td>
+              <td className="px-4 py-2.5 text-right font-medium text-fg">
+                {reputationLabel(product.seller_reputation)} ·{' '}
+                {product.seller_sales_count.toLocaleString('es-CL')} ventas
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>

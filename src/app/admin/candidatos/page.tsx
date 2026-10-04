@@ -15,6 +15,7 @@ import {
   startOfTodayChile,
   type CandidateRow,
 } from '@/lib/candidate-sort';
+import { readActiveCatalog, reviewableCandidates } from '@/lib/candidate-queue';
 import { CandidatesList } from './CandidatesList';
 import { CandidateFilters } from './CandidateFilters';
 
@@ -81,8 +82,14 @@ async function readPublishedByCategory(admin: SupabaseClient | null): Promise<Ma
 async function countReviewedToday(admin: SupabaseClient | null, now: Date): Promise<number> {
   if (!admin) return 0;
   const since = startOfTodayChile(now).toISOString();
+  // Un candidato recuperado vuelve a pending_review con reviewed_at = hora de
+  // la recuperación: no es trabajo hecho, así que no se cuenta.
   const base = () =>
-    admin.from('product_candidates').select('id', { count: 'exact', head: true }).gte('reviewed_at', since);
+    admin
+      .from('product_candidates')
+      .select('id', { count: 'exact', head: true })
+      .gte('reviewed_at', since)
+      .neq('status', 'pending_review');
 
   const byPerson = await base().not('reviewed_by', 'is', null);
   if (!byPerson.error && byPerson.count !== null) return byPerson.count;
@@ -103,21 +110,28 @@ export default async function CandidatosPage({
   const admin = getSupabaseAdmin();
   const now = new Date();
 
-  const [pending, published, todayReviewed, directLinks] = await Promise.all([
+  const [pending, published, todayReviewed, directLinks, catalog] = await Promise.all([
     readPending(admin),
     readPublishedByCategory(admin),
     countReviewedToday(admin, now),
     directLinksUsable(admin),
+    admin ? readActiveCatalog(admin) : Promise.resolve({ rows: [], error: null }),
   ]);
 
-  const view = buildCandidateView(pending.rows, query, now);
-  const facets = facetCounts(pending.rows, query.filters, now, categoryName);
+  // Sin los otros colores de un modelo que ya se publicó (salvo que sean
+  // bastante más baratos): antes, al aprobar un color, los demás seguían en
+  // la cola y volvían como tarjeta nueva. Si el catálogo no se pudo leer,
+  // se muestra todo.
+  const rows = catalog.error ? pending.rows : reviewableCandidates(pending.rows, catalog.rows);
+
+  const view = buildCandidateView(rows, query, now);
+  const facets = facetCounts(rows, query.filters, now, categoryName);
   const filtered =
     Boolean(query.filters.cat || query.filters.precio || query.filters.desc || query.filters.ingreso || query.filters.q);
 
   // Cobertura: dónde faltan productos publicados y cuánto hay por revisar.
   const pendingByCategory = new Map<string, number>();
-  for (const g of groupByFamily(pending.rows)) {
+  for (const g of groupByFamily(rows)) {
     pendingByCategory.set(g.category, (pendingByCategory.get(g.category) ?? 0) + 1);
   }
   const coverage = [...pendingByCategory.entries()].sort((a, b) => b[1] - a[1]);

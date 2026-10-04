@@ -63,7 +63,7 @@ La lista completa, con la explicación de cada una, está en
 | `ADMIN_USERS` | Claves del admin, una por persona: `nombre:clave,nombre2:clave2`. |
 | `CRON_SECRET` | Secreto de los crons, 16 caracteres o más (idealmente 32). |
 | `ML_CLIENT_ID` / `ML_CLIENT_SECRET` | App de Mercado Libre para leer precios y fichas. |
-| `AFFILIATE_WORD` / `AFFILIATE_TOOL` | Fijan la cuenta de afiliado; el admin rechaza links de otra cuenta. |
+| `AFFILIATE_TOOL` / `AFFILIATE_WORD` | `AFFILIATE_TOOL` (matt_tool) identifica la cuenta de afiliado: el admin rechaza links con otro matt_tool (sin la variable, compara con el guardado en /admin/configuracion). `AFFILIATE_WORD` solo fija el matt_word de los links directos y no se usa para decidir de quién es un link. |
 | `RESEND_API_KEY` / `DIGEST_TO` / `DIGEST_FROM` | Correo diario y respaldo semanal. `DIGEST_TO` acepta varias casillas separadas por coma. |
 | `NEXT_PUBLIC_SITE_URL` | Dominio público (sitemap, Open Graph). Vacía = el dominio de Vercel. |
 

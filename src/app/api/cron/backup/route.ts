@@ -7,6 +7,7 @@ import { parseRecipients, sendEmail, toBase64, toCsv } from '@/lib/email';
 import { isMeliLaUrl } from '@/lib/outbound';
 import { chileDateKey } from '@/lib/clicks';
 import { escapeHtml } from '@/lib/daily-digest';
+import { isMissingSchemaError } from '@/lib/supabase/errors';
 
 /**
  * Respaldo semanal de los links de afiliado, por correo.
@@ -58,6 +59,25 @@ const PRODUCT_COLUMNS: (keyof ProductBackupRow & string)[] = [
   'price',
 ];
 const CANDIDATE_COLUMNS: (keyof CandidateBackupRow & string)[] = ['id', 'ml_product_id', 'name', 'price', 'status'];
+
+/** Los clics más viejos que esto se borran (ver /privacidad). */
+const CLICK_RETENTION_DAYS = 180;
+
+/**
+ * Borra los clics de más de 180 días. /api/e acepta hasta 20.000 por día:
+ * sin una limpieza, la tabla iría llenando de a poco los 500 MB del plan
+ * gratis de Supabase. Va en este cron porque corre una vez por semana.
+ * Que falle no tumba el respaldo.
+ */
+async function pruneOldClicks(admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>): Promise<number | string> {
+  const cutoff = new Date(Date.now() - CLICK_RETENTION_DAYS * 86_400_000).toISOString();
+  const { count, error } = await admin
+    .from('outbound_clicks')
+    .delete({ count: 'exact' })
+    .lt('created_at', cutoff);
+  if (error) return isMissingSchemaError(error) ? 'falta la migración 0015' : error.message;
+  return count ?? 0;
+}
 
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
@@ -151,6 +171,7 @@ ${lines.map((l) => (l ? `<p style="margin:0 0 8px;">${escapeHtml(l)}</p>` : ''))
     });
 
     const summary = {
+      clics_borrados: await pruneOldClicks(admin),
       productos: total,
       con_meli_la: withMeliLa,
       sin_link: withoutLink,

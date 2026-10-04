@@ -46,7 +46,9 @@ async function readRejected(
           .from('product_candidates')
           .select(columns)
           .in('status', ['rejected', 'expired'])
-          // Los vencidos pueden no tener reviewed_at: para esos vale la fecha de ingreso.
+          // Los vencidos llevan en reviewed_at la hora en que vencieron. Los
+          // que vencieron antes de ese cambio no tienen fecha: para esos vale
+          // la de ingreso.
           .or(`reviewed_at.gte."${since}",and(reviewed_at.is.null,prospected_at.gte."${since}")`)
           .order('reviewed_at', { ascending: false, nullsFirst: false })
           .order('id', { ascending: true })

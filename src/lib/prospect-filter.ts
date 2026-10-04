@@ -156,3 +156,32 @@ export function minCommissionFromEnv(raw: string | undefined = process.env.MIN_C
 export function passesCommissionFloor(price: number, root: string | null, min: number): boolean {
   return estimateCommission(price, root) >= min;
 }
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Rechazos que dependían del momento y no del producto: con 45 días de por
+ * medio el precio o el vendedor pueden ser otros, así que vuelven a
+ * prospectarse. Los demás motivos (no es tecnología, accesorio, duplicado…)
+ * son para siempre.
+ */
+export const RETRYABLE_REJECT_REASONS = new Set(['precio_alto_hoy', 'precio_o_vendedor_raro']);
+export const REJECT_RETRY_DAYS = 45;
+
+/**
+ * ¿Un candidato que ya estuvo en revisión puede volver a la cola?
+ *
+ * Los vencidos (pendientes que nadie miró en 30 días) también vuelven tras
+ * el mismo plazo: nadie dijo que no, solo no alcanzó a revisarse, y si el
+ * producto sigue destacado en ML vale la pena verlo de nuevo. Antes un
+ * vencido quedaba bloqueado para siempre.
+ */
+export function canRetryCandidate(
+  row: { status: string; reviewed_at: string | null; reject_reason?: string | null },
+  now: number = Date.now()
+): boolean {
+  const reviewedAt = row.reviewed_at ? new Date(row.reviewed_at).getTime() : NaN;
+  if (!Number.isFinite(reviewedAt) || now - reviewedAt <= REJECT_RETRY_DAYS * DAY_MS) return false;
+  if (row.status === 'expired') return true;
+  return row.status === 'rejected' && !!row.reject_reason && RETRYABLE_REJECT_REASONS.has(row.reject_reason);
+}

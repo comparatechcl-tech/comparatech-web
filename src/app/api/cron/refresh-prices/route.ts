@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath, revalidateTag } from 'next/cache';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
+import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { pingHealthcheck, startCronRun } from '@/lib/cron-runs';
 import { fetchAllRows } from '@/lib/admin-stats';
 import { syncTelegramPosts } from '@/lib/social/telegram';
@@ -15,6 +16,7 @@ import {
   applyPricing,
   hasVisibleChanges,
   priceProducts,
+  priorityOutcomes,
   summarizePricing,
   type PricedProduct,
 } from '@/lib/pricing';
@@ -54,6 +56,25 @@ const TIME_BUDGET_MS = 40_000;
  * 60 s en medio de ellas y la corrida queda a medias sin aviso.
  */
 const WRITE_DEADLINE_MS = 52_000;
+
+/**
+ * Pasado WRITE_DEADLINE_MS ya no se escribe todo, pero hasta aquí sí lo
+ * urgente (ver priorityOutcomes): antes se botaba la corrida entera y un
+ * producto sin vendedor confiable seguía con el botón de compra activo
+ * mientras ML anduviera lento. Después de esto no se escribe nada.
+ */
+const HARD_STOP_MS = 56_000;
+
+/**
+ * Las raíces de categoría no se empiezan a buscar después de esto: una
+ * consulta que arranca tarde puede tardar ~17 s (8 s + reintento) y dejaría
+ * las escrituras fuera de plazo. Las de ganadores siguen hasta TIME_BUDGET_MS.
+ */
+const ENRICHMENT_CUTOFF_MS = WRITE_DEADLINE_MS - 18_000;
+
+/** Columnas de la migración 0016: si se leen, decide() compara contra lo guardado. */
+const COLUMNS_0016 = 'offer_info, ml_category_id, ml_root_category';
+const REFRESH_COLUMNS = `${PRICED_COLUMNS}, name, brand, specs, description, ml_family_id, ml_domain_id, category`;
 
 /** Sobre esta proporción de errores transitorios, la corrida cuenta como fallida. */
 const MAX_TRANSIENT_RATIO = 0.5;
@@ -172,16 +193,28 @@ export async function GET(req: NextRequest) {
 
   try {
     // De a páginas: PostgREST corta en 1.000 filas y el catálogo crece.
-    const { rows: data, error } = await fetchAllRows<PricedProduct & RepairRow>(
-      (from, to) =>
-        admin
-          .from('products')
-          .select(`${PRICED_COLUMNS}, name, brand, specs, description, ml_family_id, ml_domain_id, category`)
-          .not('ml_product_id', 'is', null)
-          .eq('is_hidden', false)
-          .order('id', { ascending: true })
-          .range(from, to) as unknown as PromiseLike<{ data: unknown; error: { code?: string; message: string } | null }>
-    );
+    const readProducts = (columns: string) =>
+      fetchAllRows<PricedProduct & RepairRow>(
+        (from, to) =>
+          admin
+            .from('products')
+            .select(columns)
+            .not('ml_product_id', 'is', null)
+            .eq('is_hidden', false)
+            .order('id', { ascending: true })
+            .range(from, to) as unknown as PromiseLike<{ data: unknown; error: { code?: string; message: string } | null }>
+      );
+
+    // Se leen offer_info y las categorías guardadas para que decide() solo
+    // escriba y consulte raíces cuando algo cambió. Sin la migración 0016 se
+    // leen sin ellas y no se buscan raíces: no habría dónde guardarlas, y
+    // cada corrida repetía una consulta a ML por categoría.
+    let has0016 = true;
+    let { rows: data, error } = await readProducts(`${REFRESH_COLUMNS}, ${COLUMNS_0016}`);
+    if (error && isMissingSchemaError(error)) {
+      has0016 = false;
+      ({ rows: data, error } = await readProducts(REFRESH_COLUMNS));
+    }
 
     if (error) return finish(false, { error: error.message }, 500, error.message);
     const rows = data;
@@ -196,19 +229,26 @@ export async function GET(req: NextRequest) {
       outOfTime,
       directLinks,
       verifyLink: (p) => resolveLinkTarget(p.affiliate_url, p.ml_product_id, token),
+      resolveRoots: has0016,
+      stopEnrichment: () => Date.now() - startedAt > ENRICHMENT_CUTOFF_MS,
     });
     const summary = summarizePricing(outcomes);
 
     // Escribir tarde es peor que no escribir: Vercel corta a los 60 s y la
-    // corrida quedaría a medias sin respuesta. Lo no escrito se reintenta en
-    // la próxima corrida (cada 30 minutos).
-    const writesSkipped = Date.now() - startedAt > WRITE_DEADLINE_MS;
-    const writeErrors = writesSkipped ? 0 : await applyPricing(admin, outcomes);
+    // corrida quedaría a medias sin respuesta. Pasado el plazo se escribe
+    // solo lo urgente (bajas, vueltas y precios, pocas filas); pasado el
+    // corte duro, nada. Lo no escrito se reintenta en la próxima corrida
+    // (cada 30 minutos).
+    const elapsed = Date.now() - startedAt;
+    const late = elapsed > WRITE_DEADLINE_MS;
+    const writesSkipped = elapsed > HARD_STOP_MS;
+    const toWrite = !late ? outcomes : writesSkipped ? [] : priorityOutcomes(outcomes);
+    const writeErrors = toWrite.length > 0 ? await applyPricing(admin, toWrite) : 0;
 
     // Los posts de Telegram muestran el precio publicado: se corrigen apenas
     // cambió, si queda tiempo. Que falle no tumba el refresco.
     let telegram: { edited: number; skipped?: string } | { error: string } = { edited: 0, skipped: 'sin tiempo' };
-    if (!writesSkipped && !outOfTime()) {
+    if (!late && !outOfTime()) {
       try {
         telegram = await syncTelegramPosts(admin);
       } catch (err) {
@@ -216,15 +256,17 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const repaired = !writesSkipped && !outOfTime() ? await repairMissingData(admin, rows, token, outOfTime) : 0;
+    const repaired = !late && !outOfTime() ? await repairMissingData(admin, rows, token, outOfTime) : 0;
 
-    const visible = !writesSkipped && (hasVisibleChanges(outcomes) || repaired > 0);
+    // toWrite ya es lo que se escribió: vacío si se pasó del corte duro.
+    const visible = hasVisibleChanges(toWrite) || repaired > 0;
     if (visible) {
       revalidatePath('/', 'layout');
       revalidateTag('catalog');
     }
 
-    const ok = !writesSkipped && isHealthy(summary, writeErrors);
+    // Una escritura parcial sigue contando como corrida degradada.
+    const ok = !late && isHealthy(summary, writeErrors);
     return finish(
       ok,
       {
@@ -232,6 +274,8 @@ export async function GET(req: NextRequest) {
         datos_reparados: repaired,
         errores_de_escritura: writeErrors,
         escrituras_omitidas_por_tiempo: writesSkipped,
+        escrituras_parciales_por_tiempo: late && !writesSkipped ? toWrite.length : 0,
+        columnas_0016: has0016,
         telegram,
         sitio_actualizado: visible,
         // 429/5xx/red por endpoint de ML: muestra si ML nos está limitando.
@@ -242,7 +286,9 @@ export async function GET(req: NextRequest) {
         ? undefined
         : writesSkipped
           ? 'sin tiempo para escribir'
-          : writeErrors > 0
+          : late
+            ? `sin tiempo: solo se escribieron ${toWrite.length} cambios urgentes`
+            : writeErrors > 0
             ? `${writeErrors} escrituras fallidas`
             : `${summary.errores_transitorios} de ${summary.revisados} con error transitorio`
     );
