@@ -1,19 +1,19 @@
 name: Refrescar precios
 
-# El plan gratuito de Vercel solo permite crons diarios, y en Mercado Libre
-# un precio de hace 24 horas ya puede estar mal. Este workflow llama al mismo
-# endpoint que el cron de Vercel, pero cada 30 minutos.
+# Respaldo del refresco de precios. El que corre cada 30 minutos es el de
+# Supabase (pg_cron, ver supabase/migrations/0011): este workflow se pensó
+# para eso, pero GitHub atrasa o salta las ejecuciones programadas cuando
+# tiene carga y en la práctica corría cada 3 a 6 horas. Queda como red de
+# seguridad y para lanzarlo a mano (Actions → Refrescar precios → Run).
 #
 # Requiere el secreto CRON_SECRET (Settings → Secrets and variables →
 # Actions), con el mismo valor que la variable de Vercel. La URL se puede
 # cambiar con la variable SITE_URL cuando el sitio tenga dominio propio.
-#
-# GitHub puede atrasar unos minutos las ejecuciones programadas en horas de
-# mucha demanda; para esto da igual.
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    # Minutos poco concurridos: en punto y a la media son los que más atrasa.
+    - cron: '11,41 * * * *'
   workflow_dispatch:
 
 # Si una corrida se atrasa, que no se monte con la siguiente.

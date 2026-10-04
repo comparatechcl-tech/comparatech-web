@@ -18,10 +18,10 @@ import {
 /**
  * Refresco de precios y disponibilidad.
  *
- * Corre una vez al día desde Vercel Cron y, además, cada 30 minutos desde
- * GitHub Actions (ver .github/workflows): el plan gratuito de Vercel solo
- * permite crons diarios, y con un precio que cambia varias veces al día eso
- * no alcanzaba.
+ * Corre cada 30 minutos desde Supabase (pg_cron, ver la migración 0011),
+ * además de una vez al día desde Vercel Cron y de respaldo desde GitHub
+ * Actions: el plan gratuito de Vercel solo permite crons diarios, y el
+ * programador de GitHub resultó impuntual (corría cada 3 a 6 horas).
  *
  * El precio publicado es el del ganador de la caja de compra — lo que ve el
  * comprador en la ficha (ver lib/pricing). Cuando algo cambia, se invalida
