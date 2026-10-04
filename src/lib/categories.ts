@@ -41,9 +41,14 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   'MLC-HEADPHONES': 'audio',
   'MLC-SPEAKERS': 'audio',
   'MLC-HOME_THEATERS': 'audio',
+  'MLC-MICROPHONES': 'audio',
+  'MLC-SMART_SPEAKERS': 'audio',
+  'MLC-AM_FM_SW_RADIOS': 'audio',
 
   // Celulares
   'MLC-CELLPHONES': 'celulares',
+  'MLC-TELEPHONES': 'celulares',
+  'MLC-VEHICLE_CELLPHONE_AND_GPS_MOUNTS': 'celulares',
 
   // Computación
   'MLC-NOTEBOOKS': 'computacion',
@@ -63,6 +68,18 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   'MLC-VIDEO_CAPTURE_DEVICES': 'computacion',
   'MLC-STABILIZERS_AND_UPS': 'computacion',
   'MLC-USB_HUBS': 'computacion',
+  'MLC-DATA_CABLES_AND_ADAPTERS': 'computacion',
+  'MLC-PRINTERS': 'computacion',
+  'MLC-PRINTER_INKS': 'computacion',
+  'MLC-WEBCAMS': 'computacion',
+  'MLC-RAM_MEMORY_MODULES': 'computacion',
+  'MLC-PC_THERMAL_COMPOUND_PASTES': 'computacion',
+  'MLC-DESKTOP_COMPUTER_COOLERS_AND_FANS': 'computacion',
+  'MLC-HARD_DRIVES_AND_SSDS_ENCLOSURES': 'computacion',
+  'MLC-NETWORK_CABLES': 'computacion',
+  'MLC-NETWORK_SWITCHES': 'computacion',
+  'MLC-NETWORK_CARDS': 'computacion',
+  'MLC-BAR_CODE_SCANNERS': 'computacion',
 
   // Electrónica
   'MLC-SMARTWATCHES': 'electronica',
@@ -73,21 +90,54 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   'MLC-PROJECTORS': 'electronica',
   'MLC-DRONES': 'electronica',
   'MLC-VIDEO_CAMERAS': 'electronica',
+  'MLC-DIGITAL_CAMERAS': 'electronica',
+  'MLC-SURVEILLANCE_CAMERAS': 'electronica',
+  'MLC-E_READERS': 'electronica',
+  'MLC-OBJECT_FINDERS': 'electronica',
+  'MLC-SMARTWATCH_AND_WATCH_BANDS': 'electronica',
+  'MLC-SMARTWATCH_CHARGERS': 'electronica',
+  'MLC-AUDIO_AND_VIDEO_CABLES_AND_ADAPTERS': 'electronica',
+  'MLC-TV_AND_MONITOR_STANDS_AND_WALL_HANGERS': 'electronica',
+  'MLC-TV_ANTENNAS': 'electronica',
+  'MLC-TV_REMOTE_CONTROLS': 'electronica',
+  'MLC-WALKIE_TALKIES': 'electronica',
+  'MLC-CELL_BATTERIES': 'electronica',
+  'MLC-BATTERY_AND_CELL_BATTERIES_CHARGERS': 'electronica',
+  'MLC-CONTINUOUS_LIGHTING': 'electronica',
+  'MLC-CAMERA_TRIPODS': 'electronica',
+  'MLC-DOORBELLS': 'electronica',
 
   // Gaming
   'MLC-GAME_CONSOLES': 'gaming',
   'MLC-GAMEPADS_AND_JOYSTICKS': 'gaming',
+  'MLC-VIDEO_GAMES': 'gaming',
 
-  // Hogar
+  // Hogar: lo que acompaña a la tecnología en la casa. Lo decorativo, la
+  // ropa de cama o el aseo quedan fuera a propósito: no es de lo que trata
+  // el sitio.
   'MLC-OFFICE_CHAIRS': 'hogar',
   'MLC-HOME_OFFICE_DESKS': 'hogar',
+  'MLC-TV_STORAGE_UNITS': 'hogar',
+  'MLC-LIGHT_BULBS': 'hogar',
+  'MLC-LED_STRIPS': 'hogar',
+  'MLC-EMERGENCY_LIGHTS': 'hogar',
 
   // Electrodomésticos
   'MLC-MICROWAVES': 'electrodomesticos',
   'MLC-REFRIGERATORS': 'electrodomesticos',
+  'MLC-FREEZERS': 'electrodomesticos',
   'MLC-WASHING_MACHINES': 'electrodomesticos',
   'MLC-VACUUM_AND_STEAM_CLEANERS': 'electrodomesticos',
   'MLC-ELECTRIC_JUGS': 'electrodomesticos',
+  'MLC-OVENS': 'electrodomesticos',
+  'MLC-COOKTOPS': 'electrodomesticos',
+  'MLC-RANGES': 'electrodomesticos',
+  'MLC-KITCHEN_RANGE_HOODS': 'electrodomesticos',
+  'MLC-WATER_DISPENSERS': 'electrodomesticos',
+  'MLC-WATER_HEATERS': 'electrodomesticos',
+  'MLC-FANS': 'electrodomesticos',
+  'MLC-ELECTRIC_HOME_HEATERS': 'electrodomesticos',
+  'MLC-HAIR_CLIPPERS_ELECTRIC_SHAVERS_AND_HAIR_TRIMMERS': 'electrodomesticos',
 };
 
 /** Categoría del sitio para un dominio de ML, o null si no está mapeado. */

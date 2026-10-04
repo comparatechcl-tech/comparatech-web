@@ -61,9 +61,12 @@ const TIME_BUDGET_MS = 45_000;
  */
 const DEFAULT_MAX_NEW_PRODUCTS = 300;
 
-const CONCURRENCY = 6;
+const CONCURRENCY = 8;
 
 const DAY_MS = 86_400_000;
+
+/** En cuántos días se recorre completo el segundo nivel de subcategorías. */
+const LEVEL2_ROTATION = 3;
 
 /**
  * Cuándo vuelve a mirarse algo descartado. Los dominios fuera del mapa no
@@ -228,10 +231,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'No se pudo obtener token de ML' }, { status: 502 });
   }
 
-  // 1. Todas las subcategorías de las ramas que sigue el proyecto.
-  const subcategories = (
+  // 1. Subcategorías de las ramas que sigue el proyecto, en dos niveles. El
+  //    segundo nivel casi triplica los destacados (en un censo de octubre de
+  //    2026: 870 en el primero y 1.754 más en el segundo), pero son unas 600
+  //    categorías: se reparten en LEVEL2_ROTATION días para que cada corrida
+  //    entre en el tiempo de la función.
+  const level1 = (
     await mapWithConcurrency(ROOT_CATEGORIES, CONCURRENCY, (root) => getSubcategories(root, token))
   ).flat();
+  const level1Ids = new Set(level1);
+  const level2All = (
+    await mapWithConcurrency(level1, CONCURRENCY, (id) => getSubcategories(id, token))
+  )
+    .flat()
+    .filter((id) => !level1Ids.has(id));
+  const turn = Math.floor(Date.now() / DAY_MS) % LEVEL2_ROTATION;
+  const level2 = level2All.filter((_, i) => i % LEVEL2_ROTATION === turn);
+  const subcategories = [...level1, ...level2];
 
   // 2. Sus destacados.
   const highlighted = [
@@ -423,6 +439,7 @@ export async function GET(req: NextRequest) {
       seller: c.seller_nickname,
     })),
     subcategories: subcategories.length,
+    subcategories_level2: `${level2.length} de ${level2All.length} (turno ${turn + 1}/${LEVEL2_ROTATION})`,
     highlighted: highlighted.length,
     already_known: highlighted.length - unseen.length,
     inspected: toInspect.length,

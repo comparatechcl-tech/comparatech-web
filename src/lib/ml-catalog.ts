@@ -13,8 +13,8 @@ import { fetchWithTimeout } from '@/lib/ml-enrichment';
 const API = 'https://api.mercadolibre.com';
 
 /**
- * Categorías raíz que se recorren, según el alcance del proyecto: las tres
- * de tecnología (10% de comisión) y las dos de hogar (20%).
+ * Categorías raíz que se recorren. Qué tipos de producto se aceptan dentro
+ * de ellas lo define el mapa de dominios de lib/categories.
  */
 export const ROOT_CATEGORIES = [
   'MLC1051', // Celulares y Telefonía
