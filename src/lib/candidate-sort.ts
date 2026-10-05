@@ -169,7 +169,7 @@ export function discountPct(row: Pick<CandidateRow, 'price' | 'original_price'>)
 }
 
 /**
- * Comisión de una venta directa. Sin raíz conocida se asume 4% (la tasa de
+ * Comisión de una venta directa. Sin raíz conocida se asume 7% (la tasa de
  * tecnología, la más baja): mejor subestimar que prometer de más.
  */
 export function candidateCommission(row: Pick<CandidateRow, 'price' | 'ml_root_category'>): {

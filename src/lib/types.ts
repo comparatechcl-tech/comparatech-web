@@ -71,7 +71,7 @@ export interface Product {
   offer_info?: OfferInfo | null;
   /** Categoría hoja de ML del ganador ("MLC3697"). */
   ml_category_id?: string | null;
-  /** Categoría raíz de ML: define si la comisión es 4% u 8% (lib/commission). */
+  /** Categoría raíz de ML: define la tasa de comisión (lib/commission). */
   ml_root_category?: string | null;
   rrss_published_at?: string | null;
   rrss_channel?: string | null;

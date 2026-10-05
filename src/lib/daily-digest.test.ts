@@ -130,8 +130,8 @@ describe('buildDigestHtml', () => {
       })
     );
     expect(html).toContain('Top 10 para aprobar hoy');
-    // 8% de Hogar y Muebles sobre $80.000.
-    expect(html).toContain('Comisión est. $6.400');
+    // 11% de Hogar y Muebles sobre $80.000.
+    expect(html).toContain('Comisión est. $8.800');
     expect(html).toContain('-20%');
   });
 
@@ -349,15 +349,15 @@ describe('gatherDigestInput', () => {
 
 describe('passesCommissionFloor', () => {
   it('compara la comisión estimada con el piso', () => {
-    // Tecnología 4%: $17.500 → $700 justo en el piso.
-    expect(passesCommissionFloor(17_500, 'MLC1000', 700)).toBe(true);
-    expect(passesCommissionFloor(17_000, 'MLC1000', 700)).toBe(false);
-    // Hogar 8%: el mismo precio deja el doble.
-    expect(passesCommissionFloor(9_000, 'MLC1574', 700)).toBe(true);
+    // Tecnología 7%: $10.000 → $700 justo en el piso.
+    expect(passesCommissionFloor(10_000, 'MLC1000', 700)).toBe(true);
+    expect(passesCommissionFloor(9_900, 'MLC1000', 700)).toBe(false);
+    // Hogar 11%: pasa con un precio más bajo.
+    expect(passesCommissionFloor(6_500, 'MLC1574', 700)).toBe(true);
   });
 
   it('sin raíz conocida usa la tasa más baja', () => {
-    expect(passesCommissionFloor(10_000, null, 700)).toBe(false);
+    expect(passesCommissionFloor(9_000, null, 700)).toBe(false);
     expect(passesCommissionFloor(20_000, null, 700)).toBe(true);
   });
 

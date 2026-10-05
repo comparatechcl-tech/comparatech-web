@@ -9,3 +9,6 @@ tsconfig.tsbuildinfo
 
 # Paquetes de contenido para redes generados localmente (imagenes y videos)
 /contenido/
+
+# Archivos de apoyo locales (por ejemplo, las migraciones juntas para pegar en Supabase)
+/_local/

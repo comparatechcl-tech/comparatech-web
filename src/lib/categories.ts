@@ -116,8 +116,8 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   // ropa de cama o el aseo quedan fuera a propósito: no es de lo que trata
   // el sitio.
   //
-  // Hogar y Muebles (MLC1574) paga 8% de comisión, el doble que Tecnología
-  // (ver lib/commission): a igual precio, cada venta deja el doble. Evidencia
+  // Hogar y Muebles (MLC1574) paga 11% de comisión y Tecnología 7% (ver
+  // lib/commission): a igual precio, cada venta deja bastante más. Evidencia
   // de la raíz, verificada con GET /categories/{id} (octubre 2026), a partir
   // de la categoría que devuelve domain_discovery para cada dominio:
   //   OFFICE_CHAIRS      MLC440271 Sillas de Oficina → MLC1574 > Muebles para el Hogar
@@ -135,7 +135,7 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   // Lámparas de escritorio, incluidas las LED y las barras de luz para
   // monitor. MLC163820 Lámparas de Mesa → MLC1574 > Iluminación para el
   // Hogar > Lámparas. Ojo: el mismo dominio también cubre MLC175553
-  // "Lamparas Portátiles", que cuelga de Computación (MLC1648, 4%); la
+  // "Lamparas Portátiles", que cuelga de Computación (MLC1648, 7%); la
   // comisión de cada candidato se calcula con la raíz real de su ganador,
   // así que esos se estiman a la tasa que corresponde.
   'MLC-TABLE_AND_DESK_LAMPS': 'hogar',

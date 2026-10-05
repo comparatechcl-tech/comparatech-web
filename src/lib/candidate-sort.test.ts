@@ -62,15 +62,15 @@ describe('discountPct y candidateCommission', () => {
     expect(discountPct({ price: 100_000, original_price: null })).toBe(0);
   });
 
-  it('sin raíz asume 4%', () => {
+  it('sin raíz asume la tasa de tecnología', () => {
     expect(candidateCommission({ price: 72_500, ml_root_category: null })).toEqual({
-      amount: 2900,
-      rate: 0.04,
+      amount: 5075,
+      rate: 0.07,
       assumed: true,
     });
     expect(candidateCommission({ price: 50_000, ml_root_category: 'MLC1574' })).toEqual({
-      amount: 4000,
-      rate: 0.08,
+      amount: 5500,
+      rate: 0.11,
       assumed: false,
     });
   });
@@ -123,8 +123,8 @@ describe('sortCandidates', () => {
   it("'valor' pone primero la mayor comisión estimada", () => {
     const barato = row({ price: 20_000 });
     const caro = row({ price: 400_000 });
-    const hogar = row({ price: 150_000, ml_root_category: 'MLC1574' }); // 8% = 12.000
-    const tecno = row({ price: 250_000, ml_root_category: 'MLC1000' }); // 4% = 10.000
+    const hogar = row({ price: 200_000, ml_root_category: 'MLC1574' }); // 11% = 22.000
+    const tecno = row({ price: 250_000, ml_root_category: 'MLC1000' }); // 7% = 17.500
     const sorted = sortCandidates([barato, tecno, hogar, caro], 'valor');
     expect(sorted.map((r) => r.id)).toEqual([caro.id, hogar.id, tecno.id, barato.id]);
   });
