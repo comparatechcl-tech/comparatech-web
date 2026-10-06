@@ -285,13 +285,16 @@ async function refreshPendingCandidates(
     price: number;
     original_price: number | null;
     seller_id: number | null;
+    ml_root_category?: string | null;
   };
   const base = 'id, ml_product_id, ml_item_id, price, original_price, seller_id';
 
+  // checked_at y ml_root_category son de la misma migración (0018): si
+  // falta una, falta la otra.
   let hasCheckedAt = true;
-  let read = await admin
+  let read: { data: unknown; error: { code?: string; message: string } | null } = await admin
     .from('product_candidates')
-    .select(base)
+    .select(`${base}, ml_root_category`)
     .eq('status', 'pending_review')
     .order('checked_at', { ascending: true, nullsFirst: true })
     .limit(MAX_PENDING_REFRESH);
@@ -325,6 +328,24 @@ async function refreshPendingCandidates(
     token
   );
 
+  // Paso 3: la categoría raíz de los que no la tienen (entraron antes de que
+  // se guardara, o ML no la respondió ese día). Sin ella la cola estima la
+  // comisión con la tasa más baja y ordena mal: un candidato de Hogar (11%)
+  // aparece como si pagara 7%. Son pocas categorías distintas y quedan en
+  // memoria.
+  const roots = new Map<string, string | null>();
+  if (hasCheckedAt) {
+    const missing = new Set<string>();
+    for (const { candidate, winners } of checked) {
+      const categoryId = winners.status === 'ok' ? winners.offers[0].category_id : null;
+      if (categoryId && !candidate.ml_root_category) missing.add(categoryId);
+    }
+    await mapWithConcurrency([...missing], CONCURRENCY, async (categoryId) => {
+      if (outOfTime()) return;
+      roots.set(categoryId, await getRootCategory(categoryId, token));
+    });
+  }
+
   const now = new Date().toISOString();
   const unchanged: string[] = [];
 
@@ -349,10 +370,19 @@ async function refreshPendingCandidates(
       typeof winner.original_price === 'number' && winner.original_price > winner.price
         ? winner.original_price
         : null;
+    const root = !candidate.ml_root_category && winner.category_id ? roots.get(winner.category_id) : null;
+    const signals = root
+      ? {
+          ml_root_category: root,
+          is_full: winner.shipping?.logistic_type === 'fulfillment',
+          official_store: winner.official_store_id != null,
+        }
+      : null;
     const changed =
       winner.price !== candidate.price ||
       listPrice !== candidate.original_price ||
-      winner.item_id !== candidate.ml_item_id;
+      winner.item_id !== candidate.ml_item_id ||
+      signals !== null;
     if (!changed) {
       unchanged.push(candidate.id);
       continue;
@@ -374,6 +404,7 @@ async function refreshPendingCandidates(
         seller_id: winner.seller_id,
         seller_nickname: seller?.nickname ?? null,
         seller_sales_count: seller?.salesCount ?? 0,
+        ...(signals ?? {}),
         ...(hasCheckedAt ? { checked_at: now } : {}),
       })
       .eq('id', candidate.id);
