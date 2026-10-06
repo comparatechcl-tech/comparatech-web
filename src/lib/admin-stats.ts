@@ -174,21 +174,41 @@ export function needsNewLink(row: Pick<ProductStatRow, 'is_active' | 'inactive_r
 }
 
 /**
+ * ¿El botón de compra de este producto sale del link guardado?
+ *
+ * Con los links directos en uso (encendidos y con la comisión comprobada,
+ * ver directLinksInUse en lib/admin-settings) el botón se arma desde la
+ * ficha, y el link guardado solo se usa si el producto no tiene ficha
+ * asociada. Sin esta distinción, cada producto aprobado con link directo
+ * aparecía como problema por "no tener meli.la de respaldo".
+ */
+export function usesStoredLink(row: Pick<ProductStatRow, 'ml_product_id'>, directLinks = false): boolean {
+  return !directLinks || !row.ml_product_id;
+}
+
+/**
  * Productos que piden que alguien haga algo: link que lleva a otro
  * producto, link repetido o sin meli.la de respaldo. Los que están en pausa
  * porque ML no tiene vendedor NO cuentan: vuelven solos, y contarlos hacía
  * que la pestaña marcara 20 cuando solo 2 necesitaban algo.
  *
+ * Con los links directos en uso (`directLinks`) solo se miran los productos
+ * cuyo botón sigue saliendo del link guardado: en el resto, un link guardado
+ * malo no le llega a ningún comprador.
+ *
  * Se cuenta cada producto una vez aunque tenga más de un problema.
  */
-export function actionNeededIds(rows: ProductStatRow[]): Set<string> {
+export function actionNeededIds(rows: ProductStatRow[], directLinks = false): Set<string> {
   const visible = rows.filter((r) => !r.is_hidden);
   const ids = new Set<string>();
   for (const row of visible) {
+    if (!usesStoredLink(row, directLinks)) continue;
     if (needsNewLink(row) || lacksBackupLink(row)) ids.add(row.id);
   }
   for (const group of findDuplicateLinkGroups(visible)) {
-    for (const p of group.products) ids.add(p.id);
+    for (const p of group.products) {
+      if (usesStoredLink(p, directLinks)) ids.add(p.id);
+    }
   }
   return ids;
 }
@@ -202,19 +222,30 @@ export interface ActionBreakdown {
   sinRespaldo: number;
 }
 
-export function actionBreakdown(rows: ProductStatRow[]): ActionBreakdown {
+export function actionBreakdown(rows: ProductStatRow[], directLinks = false): ActionBreakdown {
   const visible = rows.filter((r) => !r.is_hidden);
+  const stored = visible.filter((r) => usesStoredLink(r, directLinks));
   return {
-    total: actionNeededIds(visible).size,
-    linkNuevo: visible.filter(needsNewLink).length,
-    repetidos: findDuplicateLinkGroups(visible).reduce((n, g) => n + g.products.length, 0),
-    sinRespaldo: visible.filter(lacksBackupLink).length,
+    total: actionNeededIds(visible, directLinks).size,
+    linkNuevo: stored.filter(needsNewLink).length,
+    repetidos: findDuplicateLinkGroups(visible).reduce(
+      (n, g) => n + g.products.filter((p) => usesStoredLink(p, directLinks)).length,
+      0
+    ),
+    sinRespaldo: stored.filter(lacksBackupLink).length,
   };
 }
 
-/** Activos cuyo link todavía no se abrió para comprobar a qué ficha lleva. */
-export function countUncheckedLinks(rows: Pick<ProductStatRow, 'is_active' | 'link_checked_at'>[]): number {
-  return rows.filter((r) => r.is_active && !r.link_checked_at).length;
+/**
+ * Activos cuyo link todavía no se abrió para comprobar a qué ficha lleva.
+ * Con los links directos en uso solo cuentan los que siguen saliendo del
+ * link guardado.
+ */
+export function countUncheckedLinks(
+  rows: Pick<ProductStatRow, 'is_active' | 'link_checked_at' | 'ml_product_id'>[],
+  directLinks = false
+): number {
+  return rows.filter((r) => r.is_active && !r.link_checked_at && usesStoredLink(r, directLinks)).length;
 }
 
 /** El instante más reciente de una lista de fechas ISO, o null. */
@@ -552,7 +583,12 @@ function derive<T, R>(source: Stat<T>, fn: (data: T) => R): Stat<R> {
   return ok(fn(source.data));
 }
 
-export async function readAdminSummary(admin: SupabaseClient | null, now: Date = new Date()): Promise<AdminSummary> {
+export async function readAdminSummary(
+  admin: SupabaseClient | null,
+  now: Date = new Date(),
+  /** `directLinks`: el botón de compra se arma desde la ficha (directLinksInUse). */
+  { directLinks = false }: { directLinks?: boolean } = {}
+): Promise<AdminSummary> {
   const [products, candidates, lastApproval, runs, clics] = await Promise.all([
     readProductStatRows(admin),
     readCandidateStats(admin, now),
@@ -576,8 +612,8 @@ export async function readAdminSummary(admin: SupabaseClient | null, now: Date =
     porRevisar: derive(candidates, (c) => c.porRevisar),
     nuevosHoy: derive(candidates, (c) => c.nuevosHoy),
     diasSinPublicar: lastApproval,
-    requierenAccion: derive(products, actionBreakdown),
-    linksSinVerificar: derive(products, countUncheckedLinks),
+    requierenAccion: derive(products, (rows) => actionBreakdown(rows, directLinks)),
+    linksSinVerificar: derive(products, (rows) => countUncheckedLinks(rows, directLinks)),
     coberturaPorCategoria,
     ultimoPrecioMin: derive(products, (rows) => minutesSince(latestIso(rows.map((r) => r.price_checked_at)), now)),
     ultimaProspeccion,
@@ -600,7 +636,10 @@ export async function readAdminSummary(admin: SupabaseClient | null, now: Date =
  * El número de la pestaña Problemas. null si la base falló: la pestaña
  * prefiere no mostrar nada antes que un 0 que diga "todo bien".
  */
-export async function readActionNeededCount(admin: SupabaseClient | null): Promise<number | null> {
+export async function readActionNeededCount(
+  admin: SupabaseClient | null,
+  directLinks = false
+): Promise<number | null> {
   const products = await readProductStatRows(
     admin,
     'id, affiliate_url, is_active, is_hidden, inactive_reason, ml_product_id, link_target_product_id'
@@ -609,5 +648,5 @@ export async function readActionNeededCount(admin: SupabaseClient | null): Promi
     if (products.error && products.error !== NO_ADMIN) console.error(`[admin-stats] ${products.error}`);
     return null;
   }
-  return actionNeededIds(products.data).size;
+  return actionNeededIds(products.data, directLinks).size;
 }

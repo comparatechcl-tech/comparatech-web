@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
-import { readAffiliateSettings } from '@/lib/settings';
+import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
 
 /**
  * Configuración privada del admin (tabla admin_private_settings, migración
@@ -95,6 +95,20 @@ export async function writeAttributionTest(
   });
   if (error) return { ok: false, missing: isMissingSchemaError(error), error: error.message };
   return { ok: true };
+}
+
+/**
+ * ¿El botón de compra se arma hoy desde la ficha, con la comisión
+ * comprobada? Encendidos, con la prueba de atribución confirmada y con
+ * matt_word y matt_tool para armarlos. En ese caso el link guardado de cada
+ * producto no se usa: que esté repetido, que no sea un meli.la o que lleve a
+ * otra ficha deja de ser un problema (ver lib/admin-stats).
+ */
+export function directLinksInUse(
+  settings: Pick<AffiliateSettings, 'word' | 'tool' | 'directLinks'>,
+  attribution: Pick<AttributionStatus, 'status'>
+): boolean {
+  return settings.directLinks && attribution.status === 'confirmada' && Boolean(settings.word && settings.tool);
 }
 
 /**

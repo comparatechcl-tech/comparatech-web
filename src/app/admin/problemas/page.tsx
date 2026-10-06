@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { Product } from '@/lib/types';
 import { REASON_LABELS, reasonInfo } from '@/lib/inactive-reasons';
 import { readAffiliateSettings } from '@/lib/settings';
+import { directLinksInUse, readAttributionStatus } from '@/lib/admin-settings';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import mlImageLoader from '@/lib/ml-image-loader';
 import {
@@ -13,6 +14,7 @@ import {
   needsNewLink,
   pointsToOtherProduct,
   readProductStatRows,
+  usesStoredLink,
 } from '@/lib/admin-stats';
 import { ProductAdminCard } from '../productos/ProductAdminCard';
 import { BulkLinkPanel } from '../BulkLinkPanel';
@@ -38,22 +40,31 @@ export default async function ProblemasPage() {
   const admin = getSupabaseAdmin();
   const now = new Date();
 
-  const [read, settings] = await Promise.all([
+  const [read, settings, attribution] = await Promise.all([
     readProductStatRows<Product>(admin, '*'),
     readAffiliateSettings(admin),
+    readAttributionStatus(admin),
   ]);
   const products = read.data ?? [];
   for (const p of products) p.outbound_url = resolveOutboundUrl(p, settings);
 
-  const needsLink = products.filter(needsNewLink);
-  const duplicates = findDuplicateLinkGroups(products);
-  const noBackup = products.filter(lacksBackupLink);
-  const otherTarget = products.filter((p) => p.is_active && pointsToOtherProduct(p));
+  // Con los links directos en uso el botón de compra se arma desde la ficha:
+  // los problemas del link guardado solo importan en los productos que
+  // todavía salen de él (los que no tienen ficha asociada).
+  const directInUse = directLinksInUse(settings, attribution);
+  const stored = products.filter((p) => usesStoredLink(p, directInUse));
+
+  const needsLink = stored.filter(needsNewLink);
+  const duplicates = findDuplicateLinkGroups(products)
+    .map((g) => ({ ...g, products: g.products.filter((p) => usesStoredLink(p, directInUse)) }))
+    .filter((g) => g.products.length > 0);
+  const noBackup = stored.filter(lacksBackupLink);
+  const otherTarget = stored.filter((p) => p.is_active && pointsToOtherProduct(p));
   const paused = products
-    .filter((p) => !p.is_active && !needsNewLink(p))
+    .filter((p) => !p.is_active && !needsLink.includes(p))
     // Los más antiguos primero: son los candidatos a ocultar.
     .sort((a, b) => (a.inactive_since ?? '').localeCompare(b.inactive_since ?? ''));
-  const actionCount = actionNeededIds(products).size;
+  const actionCount = actionNeededIds(products, directInUse).size;
   const inactiveCount = products.filter((p) => !p.is_active).length;
 
   return (
@@ -76,6 +87,15 @@ export default async function ProblemasPage() {
         <div role="alert" className="mt-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           Error al leer la base de datos: {read.error}. Los números pueden estar incompletos.
         </div>
+      )}
+
+      {directInUse && !read.error && (
+        <p className="mt-6 rounded-xl border border-border bg-surface px-4 py-3 text-xs text-muted">
+          <strong className="text-fg">Links directos activos y comprobados.</strong> El botón de compra de cada
+          producto se arma desde su ficha de Mercado Libre, así que un link guardado repetido, sin meli.la o que lleve
+          a otra ficha ya no afecta a ningún comprador y no se cuenta como problema. Si algún día apagas los links
+          directos en Configuración, esos avisos vuelven a aparecer acá.
+        </p>
       )}
 
       {!read.error && (

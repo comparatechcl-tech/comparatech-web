@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { readAffiliateSettings } from '@/lib/settings';
-import { readAttributionStatus } from '@/lib/admin-settings';
+import { directLinksInUse, readAttributionStatus } from '@/lib/admin-settings';
 import { getCategoryInfo } from '@/lib/categories';
 import { readAdminSummary, type CategoryCoverage, type DigestStatus, type Stat } from '@/lib/admin-stats';
 
@@ -81,11 +81,11 @@ export default async function ResumenPage() {
   const admin = getSupabaseAdmin();
   const now = new Date();
 
-  const [summary, settings, attribution] = await Promise.all([
-    readAdminSummary(admin, now),
-    readAffiliateSettings(admin),
-    readAttributionStatus(admin),
-  ]);
+  // La configuración va primero: con los links directos en uso, un link
+  // guardado repetido o sin meli.la deja de contar como problema.
+  const [settings, attribution] = await Promise.all([readAffiliateSettings(admin), readAttributionStatus(admin)]);
+  const directInUse = directLinksInUse(settings, attribution);
+  const summary = await readAdminSummary(admin, now, { directLinks: directInUse });
 
   const dias = summary.diasSinPublicar.data;
   // readAffiliateSettings no avisa si falla: devuelve "apagados". Con la base
@@ -175,12 +175,21 @@ export default async function ResumenPage() {
             }
             href="/admin/configuracion"
           />
-          <HealthRow
-            tone={summary.linksSinVerificar.data ? 'warn' : 'neutral'}
-            label="Links sin verificar"
-            value={num(summary.linksSinVerificar.data)}
-            hint="Activos cuyo link nunca se abrió para comprobar a qué ficha lleva."
-          />
+          {directInUse && summary.linksSinVerificar.data === 0 ? (
+            <HealthRow
+              tone="ok"
+              label="Links sin verificar"
+              value="no aplica"
+              hint="Con los links directos, el botón de compra se arma desde la ficha de cada producto."
+            />
+          ) : (
+            <HealthRow
+              tone={summary.linksSinVerificar.data ? 'warn' : 'neutral'}
+              label="Links sin verificar"
+              value={num(summary.linksSinVerificar.data)}
+              hint="Activos cuyo link nunca se abrió para comprobar a qué ficha lleva."
+            />
+          )}
         </ul>
       </section>
 

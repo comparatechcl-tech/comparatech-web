@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { readAffiliateSettings } from '@/lib/settings';
-import { readAttributionStatus } from '@/lib/admin-settings';
+import { directLinksInUse, readAttributionStatus } from '@/lib/admin-settings';
 import { readActionNeededCount } from '@/lib/admin-stats';
 import { countPendingModels } from '@/lib/candidate-queue';
 import { AdminTabs } from './AdminTabs';
@@ -29,11 +29,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // que pide acción: los que están en pausa vuelven solos. Candidatos cuenta
   // modelos, igual que la cola (lib/candidate-queue): antes contaba cada
   // color y el número no calzaba con el de la cola.
-  const [pending, problems, settings, attribution] = await Promise.all([
-    countPendingModels(admin),
-    readActionNeededCount(admin),
-    readAffiliateSettings(admin),
-    readAttributionStatus(admin),
+  //
+  // Qué cuenta como problema depende del modo de links: con los directos en
+  // uso, un link guardado malo no le llega a ningún comprador. Por eso la
+  // configuración se lee antes que los productos.
+  const pendingCount = countPendingModels(admin);
+  const [settings, attribution] = await Promise.all([readAffiliateSettings(admin), readAttributionStatus(admin)]);
+  const [pending, problems] = await Promise.all([
+    pendingCount,
+    readActionNeededCount(admin, directLinksInUse(settings, attribution)),
   ]);
 
   // Links directos encendidos sin una compra de prueba que confirme que ML

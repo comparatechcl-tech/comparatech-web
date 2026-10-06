@@ -17,6 +17,7 @@ import {
   prospectFromRuns,
   readActionNeededCount,
   readAdminSummary,
+  usesStoredLink,
   type CronRunRow,
   type ProductStatRow,
 } from '@/lib/admin-stats';
@@ -155,6 +156,48 @@ describe('cálculos sobre productos', () => {
   });
 });
 
+describe('con los links directos en uso', () => {
+  // Lo que deja una tanda aprobada con link directo: sin meli.la guardado.
+  const direct = (id: string) => product({ id, affiliate_url: `https://www.mercadolibre.cl/p/MLC${id}?matt_word=x&matt_tool=1` });
+
+  it('el botón sale de la ficha, salvo en los productos sin ficha asociada', () => {
+    expect(usesStoredLink({ ml_product_id: 'MLC1' }, true)).toBe(false);
+    expect(usesStoredLink({ ml_product_id: null }, true)).toBe(true);
+    expect(usesStoredLink({ ml_product_id: 'MLC1' }, false)).toBe(true);
+    expect(usesStoredLink({ ml_product_id: 'MLC1' })).toBe(true);
+  });
+
+  it('un link guardado repetido, sin meli.la o a otra ficha no pide acción', () => {
+    const rows = [
+      direct('1'),
+      direct('2'),
+      product({ id: '3', affiliate_url: 'https://meli.la/same' }),
+      product({ id: '4', affiliate_url: 'https://meli.la/same' }),
+      product({ id: '5', is_active: false, inactive_reason: 'link_otro_producto' }),
+      product({ id: '6', link_checked_at: null }),
+    ];
+    // Sin links directos, todo eso sí es un problema.
+    expect(actionNeededIds(rows).size).toBe(5);
+    expect(countUncheckedLinks(rows)).toBe(1);
+
+    expect(actionNeededIds(rows, true).size).toBe(0);
+    expect(actionBreakdown(rows, true)).toEqual({ total: 0, linkNuevo: 0, repetidos: 0, sinRespaldo: 0 });
+    expect(countUncheckedLinks(rows, true)).toBe(0);
+  });
+
+  it('un producto sin ficha sigue dependiendo de su link guardado', () => {
+    const rows = [
+      direct('1'),
+      // Sin ficha no se puede armar el link directo: se usa el guardado.
+      product({ id: 'a', ml_product_id: null, affiliate_url: 'https://www.mercadolibre.cl/algo' }),
+      product({ id: 'b', ml_product_id: null, affiliate_url: 'https://meli.la/dup' }),
+      product({ id: 'c', affiliate_url: 'https://meli.la/dup' }),
+    ];
+    expect([...actionNeededIds(rows, true)].sort()).toEqual(['a', 'b']);
+    expect(actionBreakdown(rows, true)).toEqual({ total: 2, linkNuevo: 0, repetidos: 1, sinRespaldo: 1 });
+  });
+});
+
 describe('fechas', () => {
   it('latestIso toma el instante más reciente e ignora vacíos', () => {
     expect(latestIso([null, '2026-10-01T00:00:00Z', 'basura', '2026-10-03T00:00:00Z', undefined])).toBe(
@@ -290,6 +333,14 @@ describe('readAdminSummary', () => {
     expect(s.clics).toMatchObject({ missing: true, data: null, error: null });
   });
 
+  it('con los links directos en uso no cuenta los links guardados', async () => {
+    const s = await readAdminSummary(healthy(), NOW, { directLinks: true });
+    expect(s.requierenAccion.data).toEqual({ total: 0, linkNuevo: 0, repetidos: 0, sinRespaldo: 0 });
+    expect(s.linksSinVerificar.data).toBe(0);
+    // Lo demás no cambia.
+    expect(s.publicados.data).toBe(2);
+  });
+
   it('con la bitácora usa la corrida y el correo anotados', async () => {
     const admin = fakeAdmin({
       cron_runs: () => ({
@@ -353,6 +404,20 @@ describe('readActionNeededCount', () => {
       }),
     });
     expect(await readActionNeededCount(admin)).toBe(3);
+  });
+
+  it('con los links directos en uso, los links guardados no cuentan', async () => {
+    const admin = fakeAdmin({
+      products: () => ({
+        data: [
+          product({ id: '1', affiliate_url: 'https://www.mercadolibre.cl/p/MLC1?matt_word=x&matt_tool=1' }),
+          product({ id: '3', affiliate_url: 'https://meli.la/same' }),
+          product({ id: '4', affiliate_url: 'https://meli.la/same' }),
+        ],
+      }),
+    });
+    expect(await readActionNeededCount(admin)).toBe(3);
+    expect(await readActionNeededCount(admin, true)).toBe(0);
   });
 
   it('null si la base falla, para no mostrar un 0 engañoso', async () => {
