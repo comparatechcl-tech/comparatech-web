@@ -266,6 +266,17 @@ export function decide(
   };
 }
 
+/**
+ * Consultas a ML a la vez en el refresco programado, según el tamaño del
+ * catálogo. Con 6, revisar 254 productos tarda unos 16 s (medido en la
+ * bitácora de los crons, sin un solo error de ML): sobre los 600 productos
+ * ya no cabrían en los 40 s de la corrida. Se sube de a poco, con tope en
+ * 12, en vez de pedirle más a ML antes de que haga falta.
+ */
+export function pricingConcurrency(products: number): number {
+  return Math.min(12, Math.max(6, Math.ceil(products / 50)));
+}
+
 /** Consulta a ML el ganador de cada producto y decide qué hay que actualizar. */
 export async function priceProducts(
   products: PricedProduct[],

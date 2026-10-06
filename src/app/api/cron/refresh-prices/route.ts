@@ -16,6 +16,7 @@ import {
   applyPricing,
   hasVisibleChanges,
   priceProducts,
+  pricingConcurrency,
   priorityOutcomes,
   summarizePricing,
   type PricedProduct,
@@ -237,7 +238,7 @@ export async function GET(req: NextRequest) {
 
     const { directLinks } = await readAffiliateSettings(admin);
     const outcomes = await priceProducts(rows, token, {
-      concurrency: 6,
+      concurrency: pricingConcurrency(rows.length),
       outOfTime,
       directLinks,
       verifyLink: (p) => resolveLinkTarget(p.affiliate_url, p.ml_product_id, token),

@@ -24,6 +24,7 @@ import {
   decide,
   offerInfoFrom,
   priceProducts,
+  pricingConcurrency,
   priorityOutcomes,
   type PricedProduct,
   type PricingOutcome,
@@ -404,5 +405,15 @@ describe('priorityOutcomes', () => {
       { ...base, id: 'error', result: 'error_transitorio', patch: {} },
     ];
     expect(priorityOutcomes(outcomes).map((o) => o.id)).toEqual(['baja', 'vuelve', 'precio']);
+  });
+});
+
+describe('pricingConcurrency', () => {
+  it('parte en 6 y sube con el catálogo, con tope en 12', () => {
+    expect(pricingConcurrency(0)).toBe(6);
+    expect(pricingConcurrency(254)).toBe(6);
+    expect(pricingConcurrency(500)).toBe(10);
+    expect(pricingConcurrency(600)).toBe(12);
+    expect(pricingConcurrency(5000)).toBe(12);
   });
 });
