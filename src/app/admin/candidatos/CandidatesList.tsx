@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
-import { MAX_BATCH, isPausedOutcome, isSavedOutcome, type BatchItemResult } from '@/lib/batch-result';
+import {
+  MAX_BATCH,
+  isPausedOutcome,
+  isSavedOutcome,
+  type BatchItemResult,
+  type BatchResult,
+} from '@/lib/batch-result';
 import { PAGE_SIZE, REJECT_REASONS, type CandidateGroup, type RejectReason } from '@/lib/candidate-sort';
 import { reasonInfo } from '@/lib/inactive-reasons';
 import { CandidateCard, type CardDone } from './CandidateCard';
@@ -49,15 +55,29 @@ interface ApprovalSummary {
   unconfirmed: number;
   paused: BatchItemResult[];
   failed: BatchItemResult[];
-  /** Los que no se alcanzaron a enviar (se detuvo o se cortó la conexión). */
+  /** Los que no se alcanzaron a enviar (se detuvo, o una tanda anterior falló). */
   notSent: number;
+  /**
+   * La tanda que iba en camino cuando se perdió la respuesta (se cortó la
+   * conexión, el teléfono se durmió): el servidor pudo haberla publicado
+   * entera, a medias o nada. No se afirma ni "se publicó" ni "sigue en la
+   * cola" hasta releer la lista.
+   */
+  unknownIds: string[];
+  /** El servidor rechazó la tanda entera (por ejemplo, se apagaron los links directos). */
+  failure: string | null;
+  /** `now` de la página al armar el resumen: cuando cambia, la lista ya se releyó. */
+  renderedAt: number;
 }
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-function summarize(items: BatchItemResult[], requested: number, sent: number): ApprovalSummary {
+function summarize(
+  items: BatchItemResult[],
+  rest: Pick<ApprovalSummary, 'notSent' | 'unknownIds' | 'failure' | 'renderedAt'>
+): ApprovalSummary {
   const saved = items.filter((i) => isSavedOutcome(i.outcome));
   const paused = saved.filter((i) => isPausedOutcome(i.outcome));
   return {
@@ -66,7 +86,7 @@ function summarize(items: BatchItemResult[], requested: number, sent: number): A
     paused,
     // Otro color de un modelo que sí se publicó no es una falla: sale solo de la cola.
     failed: items.filter((i) => !isSavedOutcome(i.outcome) && i.outcome !== 'omitido_variante'),
-    notSent: Math.max(0, requested - sent),
+    ...rest,
   };
 }
 
@@ -126,9 +146,18 @@ export function CandidatesList({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [summary, setSummary] = useState<ApprovalSummary | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
+  // Rechazos que todavía no responden: mientras haya uno, no se aprueba en bloque.
+  const [rejecting, setRejecting] = useState(0);
   const [isPending, startTransition] = useTransition();
   const [isRefreshing, startRefresh] = useTransition();
   const stopRef = useRef(false);
+  const runningRef = useRef(false);
+  const mountedRef = useRef(true);
+  // La hora de la última lectura de la página, para lo que termina después de un await.
+  const nowRef = useRef(now);
+  useEffect(() => {
+    nowRef.current = now;
+  }, [now]);
 
   // Al releer la página el conteo de hoy ya incluye los rechazos: el local
   // vuelve a cero para no contarlos dos veces.
@@ -141,13 +170,15 @@ export function CandidatesList({
     return () => clearTimeout(timer);
   }, [toast]);
 
-  // Si se sale de la página a mitad de "Aprobar todo", no se mandan más tandas.
-  useEffect(
-    () => () => {
+  // Si se sale de la página a mitad de "Aprobar todo", no se mandan más
+  // tandas ni se relee una página que ya no es esta.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       stopRef.current = true;
-    },
-    []
-  );
+    };
+  }, []);
 
   const visible = candidates.filter((c) => !hidden.has(c.id));
   const selectedItems = visible
@@ -157,6 +188,9 @@ export function CandidatesList({
   const reviewedNow = todayReviewed + uncountedRejects;
   const allSelected = visible.length > 0 && visible.every((c) => selected.has(c.id));
   const busy = progress !== null;
+  // Mientras algo está en camino (un rechazo, una relectura de la página) la
+  // lista puede cambiar bajo el dedo: no se publica en bloque hasta que asiente.
+  const locked = busy || isRefreshing || isPending || rejecting > 0;
   // Todo el filtro, sin lo que ya se rechazó o aprobó en esta visita.
   const allIds = filterIds.filter((id) => !hidden.has(id));
   const moreThanShown = filterTotal > filterIds.length;
@@ -191,6 +225,7 @@ export function CandidatesList({
 
   /** Rechaza, quita las tarjetas y deja el aviso con "Deshacer". Devuelve el error, o null. */
   async function reject(ids: string[], reason: RejectReason | null): Promise<string | null> {
+    setRejecting((n) => n + 1);
     try {
       const result = await rejectCandidates(ids, reason);
       if (!result.ok) return result.error;
@@ -203,6 +238,8 @@ export function CandidatesList({
       return null;
     } catch {
       return 'No se pudo rechazar. Revisa la conexión e intenta de nuevo.';
+    } finally {
+      setRejecting((n) => Math.max(0, n - 1));
     }
   }
 
@@ -247,10 +284,11 @@ export function CandidatesList({
         setTally((t) => ({ ...t, rejected: Math.max(0, t.rejected - result.ids.length) }));
         setUncountedRejects((n) => Math.max(0, n - result.ids.length));
         setToast(null);
-        // Si la página se releyó después del rechazo, las tarjetas recuperadas
-        // ya no vienen en la lista: se vuelve a leer para que aparezcan.
-        const onPage = new Set(candidates.flatMap((c) => [c.id, ...c.siblings.map((s) => s.id)]));
-        if (ids.some((id) => !onPage.has(id))) router.refresh();
+        // Si la página se releyó después del rechazo (pasa al aprobar otra
+        // tarjeta entre medio), las recuperadas ya no vienen en la lista: se
+        // lee de nuevo para que aparezcan. Deshacer es poco frecuente y vale
+        // más mostrarlas siempre que ahorrarse la lectura.
+        startRefresh(() => router.refresh());
       } catch {
         setToast((t) => (t ? { ...t, key: Date.now(), error: 'No se pudo deshacer. Intenta de nuevo.' } : t));
       }
@@ -306,8 +344,11 @@ export function CandidatesList({
    * alcanza a publicar y a revisar en ML dentro de su tiempo). Al terminar
    * relee la página: la tanda siguiente aparece sola.
    */
-  async function approveDirect(ids: string[], scrollTop: boolean) {
-    if (ids.length === 0 || busy) return;
+  async function approveDirect(ids: string[]) {
+    // Con una referencia y no con el estado: dos toques seguidos llegan antes
+    // de que el estado cambie y lanzarían dos corridas a la vez.
+    if (ids.length === 0 || runningRef.current) return;
+    runningRef.current = true;
     setError(null);
     setNotice(null);
     setSummary(null);
@@ -318,41 +359,56 @@ export function CandidatesList({
     const results: BatchItemResult[] = [];
     let sent = 0;
     let failure: string | null = null;
-    try {
-      for (let i = 0; i < ids.length && !stopRef.current; i += MAX_BATCH) {
-        const chunk = ids.slice(i, i + MAX_BATCH);
-        const res = await approveBatch(chunk, '');
-        if (!res.ok) {
-          failure = res.error;
-          break;
-        }
-        sent += chunk.length;
-        results.push(...res.items);
-        handleBatchDone(
-          res.items.filter((item) => isSavedOutcome(item.outcome)).map((item) => item.id),
-          res.items
-        );
-        // Los que ya no estaban pendientes (se revisaron en otra pestaña) no
-        // vuelven en la respuesta: igual se quitan de la lista.
-        const answered = new Set(res.items.map((item) => item.id));
-        removeFromList(chunk.filter((id) => !answered.has(id)));
-        setProgress({ done: sent, total: ids.length });
+    let unknownIds: string[] = [];
+    for (let i = 0; i < ids.length && !stopRef.current; i += MAX_BATCH) {
+      const chunk = ids.slice(i, i + MAX_BATCH);
+      let res: BatchResult;
+      try {
+        res = await approveBatch(chunk, '');
+      } catch {
+        // Se perdió la respuesta, no necesariamente el trabajo: el servidor
+        // pudo publicar la tanda igual. No se cuenta como enviada ni como
+        // pendiente; el resumen lo aclara cuando se relea la lista.
+        unknownIds = chunk;
+        break;
       }
-    } catch {
-      failure =
-        'Se cortó la conexión a mitad de camino. Lo que alcanzó a aprobarse quedó publicado: revisa la lista y sigue con el resto.';
+      if (!res.ok) {
+        failure = res.error;
+        break;
+      }
+      sent += chunk.length;
+      results.push(...res.items);
+      handleBatchDone(
+        res.items.filter((item) => isSavedOutcome(item.outcome)).map((item) => item.id),
+        res.items
+      );
+      // Los que ya no estaban pendientes (se revisaron en otra pestaña) no
+      // vuelven en la respuesta: igual se quitan de la lista.
+      const answered = new Set(res.items.map((item) => item.id));
+      removeFromList(chunk.filter((id) => !answered.has(id)));
+      setProgress({ done: sent, total: ids.length });
     }
 
+    runningRef.current = false;
+    // Si ya se salió de la página no hay nada que mostrar, y releer acá
+    // recargaría la página en la que esté ahora.
+    if (!mountedRef.current) return;
+
     setProgress(null);
-    if (results.length > 0 || sent < ids.length) setSummary(summarize(results, ids.length, sent));
-    if (failure) setError(failure);
-    if (scrollTop) window.scrollTo({ top: 0 });
+    const notSent = Math.max(0, ids.length - sent - unknownIds.length);
+    if (results.length > 0 || notSent > 0 || unknownIds.length > 0 || failure) {
+      setSummary(summarize(results, { notSent, unknownIds, failure, renderedAt: nowRef.current }));
+    }
+    // El resumen queda arriba y la lista que viene es otra: se parte desde el comienzo.
+    window.scrollTo({ top: 0 });
     startRefresh(() => router.refresh());
   }
 
   function nextBatch() {
+    // `hidden` no se limpia: las tarjetas ya revisadas siguen en la lista
+    // hasta que llega la lectura nueva, y volverían a aparecer por un momento
+    // con el botón de aprobar la página a mano.
     setTally(EMPTY_TALLY);
-    setHidden(new Set());
     setNotice(null);
     setSummary(null);
     setSheetOpen(false);
@@ -362,7 +418,17 @@ export function CandidatesList({
 
   const done = tally.published + tally.paused + tally.rejected;
   const pageIds = visible.map((c) => c.id);
+  // Cambia cuando cambia la lista: desarma los botones de dos toques, para que
+  // el segundo toque nunca publique algo distinto de lo que se veía en el primero.
+  const pageKey = pageIds.join(',');
+  const selectedKey = selectedItems.map((item) => item.id).join(',');
+
+  const unknownTotal = summary?.unknownIds.length ?? 0;
   const nothingApproved = summary !== null && summary.published + summary.paused.length === 0;
+  // Lo que sigue pendiente según la última lectura de la página.
+  const pendingNow = new Set([...candidates.flatMap((c) => [c.id, ...c.siblings.map((s) => s.id)]), ...filterIds]);
+  const unknownStill = summary ? summary.unknownIds.filter((id) => pendingNow.has(id)).length : 0;
+  const listReread = summary !== null && now !== summary.renderedAt;
 
   return (
     <div className="flex flex-col gap-3">
@@ -391,16 +457,17 @@ export function CandidatesList({
           </p>
           <div className="flex shrink-0 flex-col gap-2 sm:items-end">
             <ConfirmButton
+              key={`arriba:${pageKey}`}
               label={`Aprobar los ${visible.length} de esta página`}
               confirmLabel={`Toca de nuevo para publicar ${visible.length}`}
-              disabled={busy}
-              onConfirm={() => approveDirect(pageIds, true)}
+              disabled={locked}
+              onConfirm={() => approveDirect(pageIds)}
             />
             {allIds.length > visible.length && (
               <button
                 type="button"
                 onClick={() => setConfirmAll(true)}
-                disabled={busy}
+                disabled={locked}
                 className="min-h-11 px-1 text-left text-xs font-medium text-accent underline-offset-2 hover:underline disabled:opacity-40 sm:text-right"
               >
                 {moreThanShown
@@ -416,13 +483,21 @@ export function CandidatesList({
         <div
           role="status"
           className={`rounded-xl border px-3 py-3 text-xs ${
-            nothingApproved ? 'border-red-500/30 bg-red-500/5' : 'border-accent/30 bg-accent/5'
+            unknownTotal > 0
+              ? 'border-amber-500/40 bg-amber-500/5'
+              : nothingApproved
+                ? 'border-red-500/30 bg-red-500/5'
+                : 'border-accent/30 bg-accent/5'
           }`}
         >
           <div className="flex items-start justify-between gap-2">
             <p className="text-sm font-semibold text-fg">
               {nothingApproved ? (
-                'No se aprobó ninguno'
+                unknownTotal > 0 ? (
+                  'Se cortó la conexión a mitad de la tanda'
+                ) : (
+                  'No se aprobó ninguno'
+                )
               ) : (
                 <>
                   ✓ {plural(summary.published, 'publicado', 'publicados')}
@@ -473,9 +548,48 @@ export function CandidatesList({
               </ul>
             </div>
           )}
+          {summary.failure && <p className="mt-2 text-red-400">{summary.failure}</p>}
+          {/* La respuesta de una tanda se perdió: se dice lo que muestra la
+              cola ahora, nunca "no se aprobó" a ciegas. Si el servidor seguía
+              trabajando, la cola puede cambiar todavía: por eso el botón. */}
+          {unknownTotal > 0 && (
+            <div className="mt-2 text-amber-400">
+              <p>
+                {!listReread
+                  ? `Se perdió la respuesta de una tanda de ${unknownTotal}: puede que se haya publicado igual. ${
+                      isRefreshing ? 'Comprobando en la cola…' : 'Todavía no se pudo comprobar en la cola.'
+                    }`
+                  : unknownStill === 0
+                    ? `Se perdió la respuesta de una tanda de ${unknownTotal}, pero sí se aprobó: ya no ${
+                        unknownTotal === 1 ? 'está' : 'están'
+                      } en la cola.`
+                    : unknownStill === unknownTotal
+                      ? `Se perdió la respuesta de una tanda de ${unknownTotal} y por ahora ${
+                          unknownTotal === 1 ? 'sigue' : 'siguen'
+                        } en la cola. Si el servidor todavía la estaba publicando, pueden salir en un momento.`
+                      : `Se perdió la respuesta de una tanda de ${unknownTotal}: ${
+                          unknownTotal - unknownStill
+                        } ya se ${unknownTotal - unknownStill === 1 ? 'aprobó' : 'aprobaron'} y ${unknownStill} ${
+                          unknownStill === 1 ? 'sigue' : 'siguen'
+                        } en la cola por ahora.`}
+              </p>
+              <p className="mt-1 text-muted">
+                La lista de abajo es la cola como está ahora, no necesariamente la misma tanda: mírala antes de aprobar
+                de nuevo.
+              </p>
+              <button
+                type="button"
+                onClick={() => startRefresh(() => router.refresh())}
+                disabled={isRefreshing}
+                className="mt-2 min-h-11 rounded-md border border-border px-3 py-2 font-medium text-fg transition hover:border-accent/50 disabled:opacity-40"
+              >
+                {isRefreshing ? 'Comprobando…' : 'Comprobar de nuevo'}
+              </button>
+            </div>
+          )}
           {summary.notSent > 0 && (
             <p className="mt-2 text-amber-400">
-              {summary.notSent === 1 ? 'Quedó 1' : `Quedaron ${summary.notSent}`} sin procesar:{' '}
+              {summary.notSent === 1 ? 'Quedó 1' : `Quedaron ${summary.notSent}`} sin enviar:{' '}
               {summary.notSent === 1 ? 'sigue' : 'siguen'} en la cola.
             </p>
           )}
@@ -544,10 +658,11 @@ export function CandidatesList({
       {/* Al final de la lista: después de mirar la página, el botón queda a mano. */}
       {directLinks && visible.length >= BOTTOM_BUTTON_FROM && (
         <ConfirmButton
+          key={`abajo:${pageKey}`}
           label={`Aprobar los ${visible.length} que quedan en esta página`}
           confirmLabel={`Toca de nuevo para publicar ${visible.length}`}
-          disabled={busy}
-          onConfirm={() => approveDirect(pageIds, true)}
+          disabled={locked}
+          onConfirm={() => approveDirect(pageIds)}
           wide
         />
       )}
@@ -604,23 +719,28 @@ export function CandidatesList({
             >
               {isPending ? 'Rechazando…' : `Rechazar ${count}`}
             </button>
-            <button
-              type="button"
-              // Con links directos, elegir las tarjetas ya es la decisión: se
-              // publican sin pasar por la hoja de links.
-              onClick={() =>
-                directLinks
-                  ? approveDirect(
-                      selectedItems.map((item) => item.id),
-                      false
-                    )
-                  : setSheetOpen(true)
-              }
-              disabled={isPending}
-              className="min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition hover:bg-accent/90 disabled:opacity-40"
-            >
-              Aprobar {count}
-            </button>
+            {directLinks ? (
+              // Con links directos se publican sin pasar por la hoja de
+              // links, pero igual con dos toques: la barra aparece bajo el
+              // dedo al elegir la primera tarjeta, y un doble toque en esa
+              // franja caía justo sobre este botón.
+              <ConfirmButton
+                key={`seleccion:${selectedKey}`}
+                label={`Aprobar ${count}`}
+                confirmLabel={`Toca de nuevo: publicar ${count}`}
+                disabled={locked}
+                onConfirm={() => approveDirect(selectedItems.map((item) => item.id))}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSheetOpen(true)}
+                disabled={isPending}
+                className="min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition hover:bg-accent/90 disabled:opacity-40"
+              >
+                Aprobar {count}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSelected(new Set())}
@@ -733,7 +853,7 @@ export function CandidatesList({
               </button>
               <button
                 type="button"
-                onClick={() => approveDirect(allIds, true)}
+                onClick={() => approveDirect(allIds)}
                 className="min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition hover:bg-accent/90"
               >
                 Publicar {allIds.length}

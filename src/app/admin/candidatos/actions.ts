@@ -48,15 +48,25 @@ const PROMOTE_CONCURRENCY = 5;
  * La acción tiene 60 segundos (maxDuration del layout del admin). Pasado
  * este punto no se empieza a publicar otro candidato: los que faltan siguen
  * en la cola y se avisa, en vez de que Vercel corte la acción a medias.
+ * Publicar la tanda toma un par de segundos; el plazo es largo porque, con
+ * links pegados, abrir cada link para verificarlo se lleva la mayor parte.
  */
-const PROMOTE_DEADLINE_MS = 30_000;
+const PROMOTE_DEADLINE_MS = 45_000;
 
 /**
- * Desde aquí no se le piden más precios a ML (una consulta en curso puede
- * tardar ~17 s con su reintento). Lo que falte queda publicado con el precio
- * del candidato y lo corrige el cron en la próxima pasada.
+ * Desde aquí no se le piden más precios a ML. Lo que falte queda publicado
+ * con el precio del candidato y lo corrige el cron en la próxima pasada.
  */
-const PRICING_DEADLINE_MS = 35_000;
+const PRICING_DEADLINE_MS = 40_000;
+
+/**
+ * Pase lo que pase con ML, la acción responde antes de esto. Una consulta
+ * que ya salió puede tardar ~17 s con su reintento, y después viene la
+ * reputación de los vendedores: sin este tope, con ML lento la acción se
+ * pasaba de los 60 s, Vercel la cortaba y el admin veía un error aunque los
+ * productos ya estaban publicados.
+ */
+const RESPOND_BY_MS = 52_000;
 
 /** Slugs que se consultan por vez: van en la URL y los nombres de ML son largos. */
 const SLUG_LOOKUP_CHUNK = 20;
@@ -231,6 +241,44 @@ async function priceNewProducts(
 }
 
 /**
+ * Precio de los productos recién publicados, hasta donde alcance el tiempo:
+ * lo que ML no responda antes del plazo queda sin resultado (el admin lo ve
+ * como "por confirmar") y lo revisa el cron. Nunca lanza.
+ *
+ * `token`: el que ya se pidió, null si ya se intentó y ML no lo entregó, o
+ * undefined para pedirlo acá, dentro del mismo plazo.
+ */
+async function priceWithin(
+  admin: SupabaseAdmin,
+  productIds: string[],
+  startedAt: number,
+  token?: string | null
+): Promise<Map<string, PricingResult>> {
+  const none = new Map<string, PricingResult>();
+  if (productIds.length === 0) return none;
+  const elapsed = () => Date.now() - startedAt;
+
+  const pricing = (async () => {
+    const usable = token === undefined ? await getMlToken() : token;
+    if (!usable) return none;
+    return priceNewProducts(admin, productIds, usable, () => elapsed() > PRICING_DEADLINE_MS);
+  })().catch((err) => {
+    console.error('[candidatos] no se pudo revisar el precio de lo aprobado:', err);
+    return none;
+  });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<Map<string, PricingResult>>((resolve) => {
+    timer = setTimeout(() => resolve(none), Math.max(0, RESPOND_BY_MS - elapsed()));
+  });
+  try {
+    return await Promise.race([pricing, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Publica un candidato.
  *
  * El link se valida ANTES de publicar: si es de otra cuenta o lleva a otra
@@ -242,6 +290,7 @@ async function priceNewProducts(
  */
 export async function approveCandidate(candidateId: string, affiliateUrl: string): Promise<ApproveResult> {
   const actor = await requireAdmin();
+  const startedAt = Date.now();
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
 
@@ -258,7 +307,10 @@ export async function approveCandidate(candidateId: string, affiliateUrl: string
   let url = affiliateUrl.trim();
   let itemId: string | null = null;
   let linkVerified = false;
-  const token = await getMlToken();
+  // Con link directo el token solo hace falta para el precio, y se pide
+  // después de publicar: ML a veces demora en entregarlo y aprobar no puede
+  // quedar esperando por eso.
+  let token: string | null | undefined;
 
   if (!url) {
     if (!usable) return { ok: false, error: DIRECT_NOT_CONFIRMED };
@@ -279,6 +331,7 @@ export async function approveCandidate(candidateId: string, affiliateUrl: string
       const foreign = checkAffiliateOwnership(inspected.info, await expectedAffiliateOwner(admin));
       if (foreign) return { ok: false, error: foreign };
 
+      token = await getMlToken();
       const verdict = await linkVerdict(inspected.info, candidate.ml_product_id, token);
       if (verdict === 'otra_ficha') {
         return {
@@ -303,10 +356,9 @@ export async function approveCandidate(candidateId: string, affiliateUrl: string
   if (!promoted.ok) return promoted;
   await markReviewedBy(admin, [candidate.id], actor);
 
-  let result: PricingResult | undefined;
-  if (promoted.productId && token) {
-    result = (await priceNewProducts(admin, [promoted.productId], token)).get(promoted.productId);
-  }
+  const result = promoted.productId
+    ? (await priceWithin(admin, [promoted.productId], startedAt, token)).get(promoted.productId)
+    : undefined;
   refreshPublic([candidate.category as string]);
 
   // 'activo' o sin respuesta de ML: el producto entra visible con el precio
@@ -479,24 +531,39 @@ export async function approveBatch(candidateIds: string[], pasted: string): Prom
     }
     const link = links.get(c.id)!;
     const slug = slugs.get(c.id) ?? suffixedSlug(c.name, c.id);
-    const promoted = await promote(admin, c, link.url, link.itemId, link.verified, slug);
-    if (!promoted.ok) failed.set(c.id, promoted.error);
-    else if (promoted.productId) productByCandidate.set(c.id, promoted.productId);
+    try {
+      const promoted = await promote(admin, c, link.url, link.itemId, link.verified, slug);
+      if (!promoted.ok) failed.set(c.id, promoted.error);
+      else if (promoted.productId) productByCandidate.set(c.id, promoted.productId);
+    } catch (err) {
+      // Uno que se cae (un corte de red a media escritura) no puede botar la
+      // tanda: los que ya se publicaron tienen que informarse igual.
+      console.error(`[candidatos] no se pudo aprobar ${c.id}:`, err);
+      failed.set(c.id, 'Falló la conexión con la base. Si sigue en la cola, apruébalo de nuevo.');
+    }
   });
 
   // En el orden de la tanda, no en el que terminó cada escritura.
   const approvedIds = candidates.filter((c) => productByCandidate.has(c.id)).map((c) => c.id);
   await markReviewedBy(admin, approvedIds, actor);
 
-  const token = approvedIds.length > 0 ? await getMlToken() : null;
-  const outcomes = token
-    ? await priceNewProducts(
-        admin,
-        approvedIds.map((id) => productByCandidate.get(id)!),
-        token,
-        () => elapsed() > PRICING_DEADLINE_MS
-      )
-    : new Map<string, PricingResult>();
+  // El registro va antes de consultar precios: lo publicado tiene que quedar
+  // anotado aunque la acción no alcance a responder (ML lento, Vercel la
+  // corta). Cómo quedó cada producto se ve en el catálogo.
+  if (approvedIds.length > 0) {
+    await logAdminEvent(admin, {
+      actor,
+      action: 'aprobar',
+      target: `${approvedIds.length} candidatos`,
+      after: { count: approvedIds.length, ids: approvedIds, direct: !pasted.trim() },
+    });
+  }
+
+  const outcomes = await priceWithin(
+    admin,
+    approvedIds.map((id) => productByCandidate.get(id)!),
+    startedAt
+  );
   if (approvedIds.length > 0) {
     refreshPublic(approvedIds.map((id) => rows.get(id)?.category ?? ''));
   }
@@ -510,20 +577,6 @@ export async function approveBatch(candidateIds: string[], pasted: string): Prom
     if (!productId) return { ...base, outcome: 'sin_link' };
     return { ...base, outcome: outcomes.get(productId) ?? 'pendiente' };
   });
-
-  if (approvedIds.length > 0) {
-    await logAdminEvent(admin, {
-      actor,
-      action: 'aprobar',
-      target: `${approvedIds.length} candidatos`,
-      after: {
-        count: approvedIds.length,
-        ids: approvedIds,
-        outcomes: Object.fromEntries(items.filter((i) => productByCandidate.has(i.id)).map((i) => [i.id, i.outcome])),
-        direct: !pasted.trim(),
-      },
-    });
-  }
 
   return {
     ok: true,

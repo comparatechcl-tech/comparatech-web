@@ -347,7 +347,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }
 vi.mock('@/lib/admin-settings', () => ({ directLinksUsable: vi.fn(async () => false) }));
 vi.mock('@/lib/ml-enrichment', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ml-enrichment')>()),
-  getMlToken: async () => null,
+  getMlToken: vi.fn(async () => null),
 }));
 vi.mock('@/lib/affiliate-link', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/affiliate-link')>()),
@@ -359,6 +359,7 @@ describe('acciones de candidatos', async () => {
   const { directLinksUsable } = await import('@/lib/admin-settings');
   const { inspectAffiliateLink } = await import('@/lib/affiliate-link');
   const { logAdminEvent } = await import('@/lib/admin-audit');
+  const { getMlToken } = await import('@/lib/ml-enrichment');
 
   const pendingCandidate = {
     id: 'cand-1',
@@ -377,6 +378,8 @@ describe('acciones de candidatos', async () => {
     vi.mocked(directLinksUsable).mockResolvedValue(false);
     vi.mocked(inspectAffiliateLink).mockReset();
     vi.mocked(logAdminEvent).mockClear();
+    vi.mocked(getMlToken).mockReset();
+    vi.mocked(getMlToken).mockResolvedValue(null);
     process.env.AFFILIATE_WORD = 'comparatech';
     process.env.AFFILIATE_TOOL = '12345';
   });
@@ -582,6 +585,45 @@ describe('acciones de candidatos', async () => {
       expect(reviewed?.filters).toContainEqual(['in', 'id', ['fffff-6']]);
       expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toMatchObject({ action: 'aprobar', after: { count: 1, direct: true } });
     });
+  });
+
+  it('si Mercado Libre no responde, la acción igual contesta y lo aprobado queda anotado', async () => {
+    vi.useFakeTimers();
+    try {
+      // El token nunca llega: sin tope, la acción se quedaría esperando hasta que Vercel la corte.
+      vi.mocked(getMlToken).mockImplementationOnce(() => new Promise<string | null>(() => {}));
+      vi.mocked(directLinksUsable).mockResolvedValue(true);
+      db.handler = (op) => {
+        if (op.table === 'product_candidates' && op.method === 'select') {
+          return {
+            data: [{ id: 'ggggg-7', name: 'Router X', ml_product_id: 'MLC7', ml_family_id: null, category: 'computacion', price: 30_000, status: 'pending_review' }],
+            error: null,
+          };
+        }
+        if (op.table === 'site_settings') {
+          return { data: { value: { word: 'comparatech', tool: '12345', directLinks: true } }, error: null };
+        }
+        if (op.method === 'rpc') return { data: 'prod-7', error: null };
+        return { data: null, error: null };
+      };
+
+      let settled = false;
+      const pending = actions.approveBatch(['ggggg-7'], '').then((res) => {
+        settled = true;
+        return res;
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      // Publicado y anotado, pero todavía esperando el precio.
+      expect(rpcCalls()).toHaveLength(1);
+      expect(vi.mocked(logAdminEvent)).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(25_000);
+      const res = await pending;
+      expect(res.ok && res.items[0].outcome).toBe('pendiente');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rechazar y deshacer devuelve el candidato a la cola', async () => {
