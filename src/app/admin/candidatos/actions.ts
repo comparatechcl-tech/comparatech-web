@@ -14,6 +14,7 @@ import type { PostgrestError } from '@supabase/supabase-js';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { getMlToken } from '@/lib/ml-enrichment';
+import { mapWithConcurrency } from '@/lib/ml-catalog';
 import { requireAdmin } from '@/lib/admin-auth';
 import { logAdminEvent } from '@/lib/admin-audit';
 import { directLinksUsable } from '@/lib/admin-settings';
@@ -22,7 +23,7 @@ import { linkVerdict } from '@/lib/link-check';
 import { PRICED_COLUMNS, applyPricing, priceProducts, type PricedProduct, type PricingResult } from '@/lib/pricing';
 import { expectedAffiliateOwner, readAffiliateSettings, rememberAffiliateParams } from '@/lib/settings';
 import { directAffiliateUrl, isAllowedAffiliateUrl, isMeliLaUrl } from '@/lib/outbound';
-import { stripDiacritics } from '@/lib/text';
+import { assignSlugs, baseSlug, suffixedSlug } from '@/lib/candidate-slugs';
 import { MAX_BATCH, extractAffiliateLinks, matchLinksToTargets } from '@/lib/link-batch';
 import { isRejectReason } from '@/lib/candidate-sort';
 import type { ApproveResult, BatchItemResult, BatchResult } from '@/lib/batch-result';
@@ -32,14 +33,33 @@ const DIRECT_NOT_CONFIRMED =
 
 const VARIANT_SKIPPED = 'Se omitió otro color del mismo modelo';
 
+const OUT_OF_TIME = 'No alcanzó el tiempo en esta tanda: sigue en la cola, apruébalo de nuevo.';
+
 /** Tope para rechazar o recuperar de una vez: una página de la cola con margen. */
 const MAX_REVIEW = 200;
 
-function slugify(text: string): string {
-  return stripDiacritics(text.toLowerCase())
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
+/**
+ * Candidatos que se publican a la vez dentro de una tanda. Cada uno son dos
+ * escrituras; de a uno, 30 candidatos tardaban unos 10 segundos solo en esto.
+ */
+const PROMOTE_CONCURRENCY = 5;
+
+/**
+ * La acción tiene 60 segundos (maxDuration del layout del admin). Pasado
+ * este punto no se empieza a publicar otro candidato: los que faltan siguen
+ * en la cola y se avisa, en vez de que Vercel corte la acción a medias.
+ */
+const PROMOTE_DEADLINE_MS = 30_000;
+
+/**
+ * Desde aquí no se le piden más precios a ML (una consulta en curso puede
+ * tardar ~17 s con su reintento). Lo que falte queda publicado con el precio
+ * del candidato y lo corrige el cron en la próxima pasada.
+ */
+const PRICING_DEADLINE_MS = 35_000;
+
+/** Slugs que se consultan por vez: van en la URL y los nombres de ML son largos. */
+const SLUG_LOOKUP_CHUNK = 20;
 
 type SupabaseAdmin = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
 
@@ -118,27 +138,65 @@ function promoteErrorMessage(error: PostgrestError): string {
   return error.message;
 }
 
-/** Pasa el candidato a `products` con su link. Devuelve el id y el slug del producto nuevo. */
+/**
+ * De los slugs que se van a necesitar, cuáles ya existen en `products`. Una
+ * lectura por tanda en vez de una por candidato. Si la consulta falla se
+ * responde "ninguno": promote reintenta con el sufijo si el slug choca.
+ */
+async function readTakenSlugs(admin: SupabaseAdmin, slugs: string[]): Promise<Set<string>> {
+  const unique = [...new Set(slugs.filter(Boolean))];
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += SLUG_LOOKUP_CHUNK) chunks.push(unique.slice(i, i + SLUG_LOOKUP_CHUNK));
+
+  const taken = new Set<string>();
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      const { data } = await admin.from('products').select('slug').in('slug', chunk);
+      for (const row of (data ?? []) as { slug: string }[]) taken.add(row.slug);
+    })
+  );
+  return taken;
+}
+
+/** El slug único de products (products_slug_key) rechazó el insert. */
+function isSlugConflict(error: PostgrestError): boolean {
+  return error.code === '23505' && /slug/i.test(error.message);
+}
+
+/**
+ * Pasa el candidato a `products` con su link. Devuelve el id y el slug del
+ * producto nuevo.
+ *
+ * El slug llega ya repartido (ver lib/candidate-slugs): dos candidatos
+ * distintos pueden tener el mismo nombre de producto y el slug tiene que ser
+ * único igual, o la aprobación se cae por la restricción de products.slug.
+ */
 async function promote(
   admin: SupabaseAdmin,
   candidate: { id: string; name: string; ml_product_id: string },
   url: string,
   itemId: string | null,
-  linkVerified: boolean
+  linkVerified: boolean,
+  assignedSlug: string
 ): Promise<{ ok: true; productId: string | null; slug: string } | { ok: false; error: string }> {
-  const baseSlug = slugify(candidate.name);
+  const call = (p_slug: string) =>
+    admin.rpc('promote_candidate_to_product', {
+      candidate_id: candidate.id,
+      p_slug,
+      p_affiliate_url: url,
+    });
 
-  // Dos candidatos distintos pueden tener el mismo nombre de producto: el
-  // slug tiene que ser único igual, o la aprobación se cae por la
-  // restricción unique de products.slug.
-  const { data: existing } = await admin.from('products').select('id').eq('slug', baseSlug).maybeSingle();
-  const slug = existing ? `${baseSlug}-${candidate.id.slice(0, 5)}` : baseSlug;
+  let slug = assignedSlug;
+  let { data: newProductId, error } = await call(slug);
 
-  const { data: newProductId, error } = await admin.rpc('promote_candidate_to_product', {
-    candidate_id: candidate.id,
-    p_slug: slug,
-    p_affiliate_url: url,
-  });
+  // Alguien tomó el slug entre la consulta y el guardado (otra pestaña
+  // aprobando a la vez): la función de la base no dejó nada a medias, así
+  // que se reintenta una vez con el sufijo.
+  const fallback = suffixedSlug(candidate.name, candidate.id);
+  if (error && isSlugConflict(error) && slug !== fallback) {
+    slug = fallback;
+    ({ data: newProductId, error } = await call(slug));
+  }
   if (error) return { ok: false, error: promoteErrorMessage(error) };
 
   if (newProductId) {
@@ -162,11 +220,12 @@ async function promote(
 async function priceNewProducts(
   admin: SupabaseAdmin,
   productIds: string[],
-  token: string
+  token: string,
+  outOfTime?: () => boolean
 ): Promise<Map<string, PricingResult>> {
   const { data: fresh } = await admin.from('products').select(PRICED_COLUMNS).in('id', productIds);
   if (!fresh?.length) return new Map();
-  const outcomes = await priceProducts(fresh as unknown as PricedProduct[], token);
+  const outcomes = await priceProducts(fresh as unknown as PricedProduct[], token, { outOfTime });
   await applyPricing(admin, outcomes);
   return new Map(outcomes.map((o) => [o.id, o.result]));
 }
@@ -237,7 +296,10 @@ export async function approveCandidate(candidateId: string, affiliateUrl: string
     // sitio y vuelve.
   }
 
-  const promoted = await promote(admin, candidate, url, itemId, linkVerified);
+  const slug =
+    assignSlugs([candidate], await readTakenSlugs(admin, [baseSlug(candidate.name)])).get(candidate.id) ??
+    suffixedSlug(candidate.name, candidate.id);
+  const promoted = await promote(admin, candidate, url, itemId, linkVerified, slug);
   if (!promoted.ok) return promoted;
   await markReviewedBy(admin, [candidate.id], actor);
 
@@ -283,6 +345,8 @@ export async function approveCandidate(candidateId: string, affiliateUrl: string
  */
 export async function approveBatch(candidateIds: string[], pasted: string): Promise<BatchResult> {
   const actor = await requireAdmin();
+  const startedAt = Date.now();
+  const elapsed = () => Date.now() - startedAt;
   if (candidateIds.length === 0) return { ok: false, error: 'No hay candidatos seleccionados' };
   if (candidateIds.length > MAX_BATCH) return { ok: false, error: `Máximo ${MAX_BATCH} candidatos por tanda` };
 
@@ -396,23 +460,42 @@ export async function approveBatch(candidateIds: string[], pasted: string): Prom
     }
   }
 
-  // Uno por uno a propósito: en paralelo, dos candidatos con el mismo nombre
-  // podrían tomar el mismo slug antes de que cualquiera de los dos se guarde.
+  // Varios a la vez. Los slugs se reparten antes: en paralelo, dos candidatos
+  // con el mismo nombre tomarían el mismo slug antes de que cualquiera de los
+  // dos se guardara.
+  const toPromote = candidates.filter((c) => links.has(c.id));
+  const slugs = assignSlugs(
+    toPromote,
+    await readTakenSlugs(
+      admin,
+      toPromote.map((c) => baseSlug(c.name))
+    )
+  );
   const productByCandidate = new Map<string, string>();
-  for (const c of candidates) {
-    const link = links.get(c.id);
-    if (!link) continue;
-    const promoted = await promote(admin, c, link.url, link.itemId, link.verified);
+  await mapWithConcurrency(toPromote, PROMOTE_CONCURRENCY, async (c) => {
+    if (elapsed() > PROMOTE_DEADLINE_MS) {
+      failed.set(c.id, OUT_OF_TIME);
+      return;
+    }
+    const link = links.get(c.id)!;
+    const slug = slugs.get(c.id) ?? suffixedSlug(c.name, c.id);
+    const promoted = await promote(admin, c, link.url, link.itemId, link.verified, slug);
     if (!promoted.ok) failed.set(c.id, promoted.error);
     else if (promoted.productId) productByCandidate.set(c.id, promoted.productId);
-  }
+  });
 
-  const approvedIds = [...productByCandidate.keys()];
+  // En el orden de la tanda, no en el que terminó cada escritura.
+  const approvedIds = candidates.filter((c) => productByCandidate.has(c.id)).map((c) => c.id);
   await markReviewedBy(admin, approvedIds, actor);
 
   const token = approvedIds.length > 0 ? await getMlToken() : null;
   const outcomes = token
-    ? await priceNewProducts(admin, [...productByCandidate.values()], token)
+    ? await priceNewProducts(
+        admin,
+        approvedIds.map((id) => productByCandidate.get(id)!),
+        token,
+        () => elapsed() > PRICING_DEADLINE_MS
+      )
     : new Map<string, PricingResult>();
   if (approvedIds.length > 0) {
     refreshPublic(approvedIds.map((id) => rows.get(id)?.category ?? ''));

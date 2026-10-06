@@ -5,7 +5,13 @@ import { useRouter } from 'next/navigation';
 import { Check, Copy, ExternalLink } from 'lucide-react';
 import { republishBatch } from '@/lib/actions/catalog-admin';
 import { approveBatch } from './candidatos/actions';
-import { MAX_BATCH, type BatchItemResult, type BatchOutcome, type BatchResult } from '@/lib/batch-result';
+import {
+  MAX_BATCH,
+  isSavedOutcome,
+  type BatchItemResult,
+  type BatchOutcome,
+  type BatchResult,
+} from '@/lib/batch-result';
 import { reasonInfo } from '@/lib/inactive-reasons';
 
 /**
@@ -74,7 +80,7 @@ export function BulkLinkPanel({
       const res = mode === 'aprobar' ? await approveBatch(ids, text) : await republishBatch(ids, text);
       setResult(res);
       if (!res.ok) return;
-      const saved = res.items.filter((i) => isSaved(i.outcome)).map((i) => i.id);
+      const saved = res.items.filter((i) => isSavedOutcome(i.outcome)).map((i) => i.id);
       if (saved.length > 0) {
         setPasted('');
         onDone?.(saved, res.items);
@@ -179,11 +185,6 @@ export function BulkLinkPanel({
       {result && <BatchReport result={result} mode={mode} />}
     </div>
   );
-}
-
-/** Quedó guardado (publicado o en pausa): se saca de la lista. */
-function isSaved(outcome: BatchOutcome): boolean {
-  return !['sin_link', 'error', 'otra_cuenta', 'omitido_variante'].includes(outcome);
 }
 
 function describe(item: BatchItemResult, mode: 'republicar' | 'aprobar'): string {

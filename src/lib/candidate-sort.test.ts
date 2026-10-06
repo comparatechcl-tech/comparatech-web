@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  MAX_APPROVE_ALL,
   PAGE_SIZE,
   buildCandidateView,
   candidateCommission,
@@ -221,6 +222,22 @@ describe('cola de 2.500 candidatos', () => {
       for (const g of buildCandidateView(rows, { filters: {}, sort: 'valor', page: p }, NOW).items) seen.add(g.id);
     }
     expect(seen.size).toBe(2000);
+  });
+
+  it('ids trae los modelos de todas las páginas, en el orden de la vista y con tope', () => {
+    const query = { filters: { precio: 'sobre300' as const }, sort: 'valor' as const, page: 1 };
+    const view = buildCandidateView(rows, query, NOW);
+    expect(view.total).toBeGreaterThan(PAGE_SIZE);
+    expect(view.ids).toHaveLength(Math.min(view.total, MAX_APPROVE_ALL));
+    // La primera página es el comienzo de la lista completa.
+    expect(view.ids.slice(0, PAGE_SIZE)).toEqual(view.items.map((g) => g.id));
+    // Y la segunda sigue justo después: aprobar "todo el filtro" recorre lo mismo que paginar.
+    const second = buildCandidateView(rows, { ...query, page: 2 }, NOW);
+    expect(view.ids.slice(PAGE_SIZE, PAGE_SIZE + second.items.length)).toEqual(second.items.map((g) => g.id));
+
+    const all = buildCandidateView(rows, { filters: {}, sort: 'valor', page: 1 }, NOW);
+    expect(all.total).toBe(2000);
+    expect(all.ids).toHaveLength(MAX_APPROVE_ALL);
   });
 
   it('los conteos de los chips cuadran con lo que muestra cada filtro', () => {
@@ -479,6 +496,92 @@ describe('acciones de candidatos', async () => {
     });
     expect(res.items.find((i) => i.id === 'b')?.outcome).toBe('pendiente');
     expect(rpcCalls().map((o) => o.patch?.candidate_id)).toEqual(['b']);
+  });
+
+  describe('en bloque con links directos', () => {
+    const candidate = (id: string, name: string, ml: string) => ({
+      id,
+      name,
+      ml_product_id: ml,
+      ml_family_id: null,
+      category: 'computacion',
+      price: 10_000,
+      status: 'pending_review',
+    });
+    const SETTINGS = { data: { value: { word: 'comparatech', tool: '12345', directLinks: true } }, error: null };
+
+    /** La base de una tanda: candidatos, configuración y lo que cada test agregue. */
+    function useBatch(rows: ReturnType<typeof candidate>[], extra: (op: Op) => Reply | null = () => null) {
+      vi.mocked(directLinksUsable).mockResolvedValue(true);
+      db.handler = (op) => {
+        const custom = extra(op);
+        if (custom) return custom;
+        if (op.table === 'product_candidates' && op.method === 'select') return { data: rows, error: null };
+        if (op.table === 'site_settings') return SETTINGS;
+        if (op.method === 'rpc') return { data: `prod-${String(op.patch?.candidate_id)}`, error: null };
+        return { data: null, error: null };
+      };
+    }
+
+    it('publica toda la tanda de una vez, con un slug distinto para cada producto', async () => {
+      useBatch(
+        [candidate('aaaaa-1', 'Mouse Gamer', 'MLC1'), candidate('bbbbb-2', 'Mouse Gamer', 'MLC2'), candidate('ccccc-3', 'Teclado Pro', 'MLC3')],
+        // "teclado-pro" ya existe en el catálogo.
+        (op) => (op.table === 'products' && op.cols === 'slug' ? { data: [{ slug: 'teclado-pro' }], error: null } : null)
+      );
+      const res = await actions.approveBatch(['aaaaa-1', 'bbbbb-2', 'ccccc-3'], '');
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      expect(res.items.map((i) => i.outcome)).toEqual(['pendiente', 'pendiente', 'pendiente']);
+
+      const calls = rpcCalls();
+      expect(Object.fromEntries(calls.map((o) => [o.patch?.candidate_id, o.patch?.p_slug]))).toEqual({
+        'aaaaa-1': 'mouse-gamer',
+        'bbbbb-2': 'mouse-gamer-bbbbb',
+        'ccccc-3': 'teclado-pro-ccccc',
+      });
+      // El link se arma desde la ficha de cada uno, con los datos de la cuenta.
+      expect(calls.find((o) => o.patch?.candidate_id === 'bbbbb-2')?.patch?.p_affiliate_url).toBe(
+        'https://www.mercadolibre.cl/p/MLC2?matt_word=comparatech&matt_tool=12345'
+      );
+      // Una sola consulta de slugs para toda la tanda, no una por candidato.
+      expect(db.ops.filter((o) => o.table === 'products' && o.cols === 'slug')).toHaveLength(1);
+      // Queda anotado quién aprobó, en el orden de la tanda.
+      const reviewed = db.ops.find((o) => o.method === 'update' && o.patch && 'reviewed_by' in o.patch);
+      expect(reviewed?.filters).toContainEqual(['in', 'id', ['aaaaa-1', 'bbbbb-2', 'ccccc-3']]);
+    });
+
+    it('si el slug se tomó justo antes de guardar, reintenta una vez con el sufijo', async () => {
+      useBatch([candidate('ddddd-4', 'Monitor 24', 'MLC4')], (op) =>
+        op.method === 'rpc' && op.patch?.p_slug === 'monitor-24'
+          ? { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "products_slug_key"' } }
+          : null
+      );
+      const res = await actions.approveBatch(['ddddd-4'], '');
+      expect(res.ok && res.items[0].outcome).toBe('pendiente');
+      expect(rpcCalls().map((o) => o.patch?.p_slug)).toEqual(['monitor-24', 'monitor-24-ddddd']);
+    });
+
+    it('uno que falla no bota la tanda: los demás se publican y el error queda explicado', async () => {
+      useBatch([candidate('eeeee-5', 'Tablet A', 'MLC5'), candidate('fffff-6', 'Tablet B', 'MLC6')], (op) =>
+        op.method === 'rpc' && op.patch?.candidate_id === 'eeeee-5'
+          ? {
+              data: null,
+              error: { code: '23505', message: 'duplicate key value violates unique constraint "products_ml_product_id_key"' },
+            }
+          : null
+      );
+      const res = await actions.approveBatch(['eeeee-5', 'fffff-6'], '');
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      expect(res.items.find((i) => i.id === 'eeeee-5')).toMatchObject({ outcome: 'error' });
+      expect(res.items.find((i) => i.id === 'eeeee-5')?.detail).toMatch(/ya está publicado/);
+      expect(res.items.find((i) => i.id === 'fffff-6')?.outcome).toBe('pendiente');
+      // Solo el que se publicó queda como revisado y en el registro.
+      const reviewed = db.ops.find((o) => o.method === 'update' && o.patch && 'reviewed_by' in o.patch);
+      expect(reviewed?.filters).toContainEqual(['in', 'id', ['fffff-6']]);
+      expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toMatchObject({ action: 'aprobar', after: { count: 1, direct: true } });
+    });
   });
 
   it('rechazar y deshacer devuelve el candidato a la cola', async () => {

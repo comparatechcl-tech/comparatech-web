@@ -187,18 +187,21 @@ export default async function CandidatosPage({
       </div>
 
       <div className="mt-6">
-        {view.items.length === 0 && !pending.error ? (
-          <p className="text-sm text-muted">
-            {filtered ? 'Ningún candidato calza con estos filtros.' : 'No hay candidatos pendientes por ahora.'}
-          </p>
-        ) : (
+        {/* Se muestra también sin candidatos: después de aprobar la última
+            tanda, el resumen de lo publicado tiene que seguir a la vista. */}
+        {!(view.items.length === 0 && pending.error) && (
           <CandidatesList
             // Otra página u otros filtros: selección y avisos parten de cero.
-            key={pageHref(view.page)}
+            // Va con la página pedida, no con la que quedó: al aprobar la
+            // última página la vista retrocede una y el resumen se perdería.
+            key={pageHref(query.page)}
             candidates={view.items}
             directLinks={directLinks}
             todayReviewed={todayReviewed}
             now={now.getTime()}
+            filterIds={view.ids}
+            filterTotal={view.total}
+            emptyText={filtered ? 'Ningún candidato calza con estos filtros.' : 'No hay candidatos pendientes por ahora.'}
           />
         )}
       </div>

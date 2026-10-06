@@ -22,6 +22,12 @@ import type { ProductCandidate } from '@/lib/types';
 /** Tamaño de una tanda: lo que se revisa cómodo de una sentada. */
 export const PAGE_SIZE = 30;
 
+/**
+ * Tope de "Aprobar todo el filtro": 10 tandas seguidas, un par de minutos
+ * con la pestaña abierta. Con más, se repite sobre lo que quede.
+ */
+export const MAX_APPROVE_ALL = 300;
+
 /** Supabase devuelve como máximo 1000 filas por consulta (max-rows de PostgREST). */
 export const SUPABASE_PAGE = 1000;
 
@@ -364,16 +370,20 @@ export function facetCounts(
   };
 }
 
-/** Filtra, agrupa, ordena y corta la página pedida. */
+/**
+ * Filtra, agrupa, ordena y corta la página pedida. `ids` trae los modelos de
+ * todas las páginas en el orden de la vista (hasta MAX_APPROVE_ALL), para
+ * "Aprobar todo el filtro".
+ */
 export function buildCandidateView(
   rows: CandidateRow[],
   query: { filters: CandidateFilters; sort: CandidateSort; page: number },
   now: Date
-): { items: CandidateGroup[]; page: number; pages: number; total: number; totalAll: number } {
+): { items: CandidateGroup[]; page: number; pages: number; total: number; totalAll: number; ids: string[] } {
   const totalAll = groupByFamily(rows).length;
   const filtered = rows.filter((r) => matchesFilters(r, query.filters, now));
   const sorted = sortCandidates(groupByFamily(filtered), query.sort);
-  return { ...paginate(sorted, query.page), totalAll };
+  return { ...paginate(sorted, query.page), totalAll, ids: sorted.slice(0, MAX_APPROVE_ALL).map((g) => g.id) };
 }
 
 // ─── Utilidades de lectura ─────────────────────────────────────────────────

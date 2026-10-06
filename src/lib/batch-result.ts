@@ -31,6 +31,16 @@ export type BatchOutcome =
    */
   | 'omitido_variante';
 
+/** Quedó guardado (publicado o en pausa): ya no está en la cola ni en la lista. */
+export function isSavedOutcome(outcome: BatchOutcome): boolean {
+  return !['sin_link', 'error', 'otra_cuenta', 'omitido_variante'].includes(outcome);
+}
+
+/** Guardado, pero fuera del sitio hasta que la revisión de precios lo vuelva a publicar. */
+export function isPausedOutcome(outcome: BatchOutcome): boolean {
+  return outcome === 'sin_ganador' || outcome === 'ganador_no_verde' || outcome === 'link_otro_producto';
+}
+
 export interface BatchItemResult {
   id: string;
   name: string;
