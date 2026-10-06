@@ -85,33 +85,88 @@ const TOKEN_MARGIN_MS = 10 * 60 * 1000;
 /** Tope de reuso aunque ML diga que dura más. */
 const TOKEN_MAX_REUSE_MS = 5 * 60 * 60 * 1000;
 
+/**
+ * Esperas entre intentos de pedir el token. La bitácora de los crons mostró
+ * que el refresco de las horas en punto fallaba casi siempre con "sin token"
+ * mientras el de los minutos :30 funcionaba: ML rechaza pedidos de token en
+ * los momentos de más carga. Sin reintento, esa corrida se perdía entera y
+ * los precios pasaban una hora sin revisarse.
+ */
+const TOKEN_RETRY_WAITS_MS = [1000, 2500];
+const TOKEN_TIMEOUT_MS = 4000;
+
+/** Por qué falló el último pedido de token (para la bitácora). Null si salió bien. */
+let lastTokenError: string | null = null;
+
+export function mlTokenError(): string | null {
+  return lastTokenError;
+}
+
+type TokenAttempt =
+  | { ok: true; token: string; expiresIn: number | null }
+  | { ok: false; error: string; retry: boolean };
+
+async function requestMlToken(): Promise<TokenAttempt> {
+  try {
+    const res = await fetchWithTimeout(
+      'https://api.mercadolibre.com/oauth/token',
+      {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: process.env.ML_CLIENT_ID ?? '',
+          client_secret: process.env.ML_CLIENT_SECRET ?? '',
+        }),
+      },
+      TOKEN_TIMEOUT_MS
+    );
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+
+    if (typeof body?.access_token === 'string') {
+      return {
+        ok: true,
+        token: body.access_token,
+        expiresIn: typeof body.expires_in === 'number' && body.expires_in > 0 ? body.expires_in : null,
+      };
+    }
+    // Solo el estado y el código de error de ML: el cuerpo no se guarda.
+    const raw = typeof body?.error === 'string' ? body.error : typeof body?.code === 'string' ? body.code : '';
+    const code = raw ? ` ${raw.slice(0, 60)}` : '';
+    return {
+      ok: false,
+      error: `HTTP ${res.status}${code}`,
+      // Con credenciales rechazadas (400/401) insistir no cambia nada; un
+      // 429, un 403 del filtro de ML o un 5xx sí pueden pasar al rato.
+      retry: res.status !== 400 && res.status !== 401,
+    };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === 'AbortError';
+    return { ok: false, error: timedOut ? `sin respuesta en ${TOKEN_TIMEOUT_MS / 1000} s` : 'error de red', retry: true };
+  }
+}
+
 export async function getMlToken(): Promise<string | null> {
   if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.value;
 
-  try {
-    const res = await fetchWithTimeout('https://api.mercadolibre.com/oauth/token', {
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: process.env.ML_CLIENT_ID ?? '',
-        client_secret: process.env.ML_CLIENT_SECRET ?? '',
-      }),
-    }).then((r) => r.json());
+  for (let attempt = 0; ; attempt++) {
+    const result = await requestMlToken();
 
-    const token: string | null = typeof res.access_token === 'string' ? res.access_token : null;
-    if (!token) return null;
+    if (result.ok) {
+      const lifetimeMs = result.expiresIn ? result.expiresIn * 1000 - TOKEN_MARGIN_MS : TOKEN_MAX_REUSE_MS;
+      const reuseMs = Math.min(lifetimeMs, TOKEN_MAX_REUSE_MS);
+      cachedToken = reuseMs > 0 ? { value: result.token, expiresAt: Date.now() + reuseMs } : null;
+      lastTokenError = null;
+      return result.token;
+    }
 
-    const lifetimeMs =
-      typeof res.expires_in === 'number' && res.expires_in > 0
-        ? res.expires_in * 1000 - TOKEN_MARGIN_MS
-        : TOKEN_MAX_REUSE_MS;
-    const reuseMs = Math.min(lifetimeMs, TOKEN_MAX_REUSE_MS);
-    cachedToken = reuseMs > 0 ? { value: token, expiresAt: Date.now() + reuseMs } : null;
-
-    return token;
-  } catch {
-    return null;
+    lastTokenError = attempt > 0 ? `${result.error} (${attempt + 1} intentos)` : result.error;
+    const wait = TOKEN_RETRY_WAITS_MS[attempt];
+    if (!result.retry || wait === undefined) {
+      console.warn(`[ml] no se pudo obtener el token: ${lastTokenError}`);
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait));
   }
 }
 

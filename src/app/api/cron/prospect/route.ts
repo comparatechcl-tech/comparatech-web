@@ -5,7 +5,7 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { pingHealthcheck, startCronRun, type CronRun } from '@/lib/cron-runs';
 import { fetchAllRows } from '@/lib/admin-stats';
-import { enrichFromMlProduct, getMlToken } from '@/lib/ml-enrichment';
+import { enrichFromMlProduct, getMlToken, mlTokenError } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
 import { gatherDigestInput } from '@/lib/digest-data';
 import { buildDigestHtml, buildDigestSubject, buildDigestText } from '@/lib/daily-digest';
@@ -459,7 +459,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const token = await getMlToken();
-    if (!token) return fail(502, 'No se pudo obtener token de ML');
+    if (!token) return fail(502, `No se pudo obtener token de ML (${mlTokenError() ?? 'sin detalle'})`);
 
     // 1. Subcategorías de las ramas que sigue el proyecto, en dos niveles. El
     //    segundo nivel casi triplica los destacados (en un censo de octubre de

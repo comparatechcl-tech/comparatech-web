@@ -6,7 +6,7 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { pingHealthcheck, startCronRun } from '@/lib/cron-runs';
 import { fetchAllRows } from '@/lib/admin-stats';
 import { syncTelegramPosts } from '@/lib/social/telegram';
-import { enrichFromMl, getMlToken } from '@/lib/ml-enrichment';
+import { enrichFromMl, getMlToken, mlTokenError } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
 import { mapWithConcurrency, mlErrorCounts } from '@/lib/ml-catalog';
 import { resolveLinkTarget } from '@/lib/link-check';
@@ -193,6 +193,12 @@ export async function GET(req: NextRequest) {
 
   try {
     // De a páginas: PostgREST corta en 1.000 filas y el catálogo crece.
+    //
+    // Primero los que llevan más tiempo sin revisar (y los nunca revisados).
+    // Si el catálogo crece hasta no caber en una corrida, lo que quede fuera
+    // por tiempo pasa al frente de la siguiente. Ordenado por id, los
+    // últimos de la lista se quedaban sin revisar corrida tras corrida, con
+    // el precio viejo y sin que nada avisara.
     const readProducts = (columns: string) =>
       fetchAllRows<PricedProduct & RepairRow>(
         (from, to) =>
@@ -201,6 +207,7 @@ export async function GET(req: NextRequest) {
             .select(columns)
             .not('ml_product_id', 'is', null)
             .eq('is_hidden', false)
+            .order('price_checked_at', { ascending: true, nullsFirst: true })
             .order('id', { ascending: true })
             .range(from, to) as unknown as PromiseLike<{ data: unknown; error: { code?: string; message: string } | null }>
       );
@@ -221,7 +228,12 @@ export async function GET(req: NextRequest) {
     if (rows.length === 0) return finish(true, { revisados: 0 }, 200);
 
     const token = await getMlToken();
-    if (!token) return finish(false, { error: 'No se pudo obtener token de ML' }, 502, 'sin token de ML');
+    if (!token) {
+      // Con el motivo: "sin token" a secas no decía si ML estaba rechazando
+      // los pedidos, caído o si las credenciales dejaron de servir.
+      const reason = mlTokenError() ?? 'sin detalle';
+      return finish(false, { error: `No se pudo obtener token de ML (${reason})` }, 502, `sin token de ML: ${reason}`);
+    }
 
     const { directLinks } = await readAffiliateSettings(admin);
     const outcomes = await priceProducts(rows, token, {
