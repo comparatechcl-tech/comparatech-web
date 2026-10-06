@@ -97,56 +97,33 @@ export function Header({ categories }: { categories: CategoryInfo[] }) {
     if (searchOpen) mobileSearchRef.current?.focus();
   }, [searchOpen]);
 
-  const links = [
-    ...categories.map((c) => ({
-      href: `/categoria/${c.slug}`,
-      label: c.name,
-      icon: CATEGORY_ICONS[c.slug] ?? Package,
-    })),
-    ...FIXED_LINKS,
-  ];
+  const categoryLinks = categories.map((c) => ({
+    href: `/categoria/${c.slug}`,
+    label: c.name,
+    icon: CATEGORY_ICONS[c.slug] ?? Package,
+  }));
+  const links = [...categoryLinks, ...FIXED_LINKS];
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-bg/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3.5">
-        <Link href="/" className="flex items-center gap-2.5 font-heading text-xl font-extrabold tracking-tight text-fg">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-4 py-3.5 lg:py-3">
+        <Link
+          href="/"
+          className="flex shrink-0 items-center gap-2.5 font-heading text-xl font-extrabold tracking-tight text-fg"
+        >
           <Logo size={34} className="text-fg" />
           <span>
             Compara<span className="text-accent">Tech</span>
           </span>
         </Link>
 
-        {/* Desde lg y no md: entre 768 y 1023 px las categorías no caben en
-            una fila y la página se desplazaba de lado. El campo de búsqueda
-            va recién desde xl; antes, un ícono que lleva a /buscar (que
-            tiene su propio buscador) ocupa lo mismo que el viejo link. */}
-        <div className="hidden min-w-0 items-center gap-6 lg:flex">
-          <nav className="flex items-center gap-5">
-            {links.map((l) => {
-              const active = pathname === l.href;
-              const Icon = l.icon;
-              return (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className={`flex items-center gap-1.5 text-sm font-medium transition ${
-                    active ? 'text-accent' : 'text-muted hover:text-fg'
-                  }`}
-                >
-                  <Icon size={16} />
-                  {l.label}
-                </Link>
-              );
-            })}
-          </nav>
-          <SearchForm className="hidden xl:block xl:w-52" />
-          <Link
-            href="/buscar"
-            aria-label="Buscar"
-            className={`transition xl:hidden ${pathname === '/buscar' ? 'text-accent' : 'text-muted hover:text-fg'}`}
-          >
-            <Search size={18} />
-          </Link>
+        {/* Escritorio: arriba solo el logo, el buscador y el tema; las
+            categorías van en su propia fila, más abajo. Antes iba todo en
+            una fila y, al llegar a siete categorías, el menú medía más que
+            la pantalla de un notebook: la página se desplazaba de lado y el
+            buscador quedaba fuera de la vista. */}
+        <SearchForm className="hidden min-w-0 max-w-xl flex-1 lg:block" />
+        <div className="hidden shrink-0 lg:block">
           <ThemeToggle />
         </div>
 
@@ -180,6 +157,42 @@ export function Header({ categories }: { categories: CategoryInfo[] }) {
           </button>
         </div>
       </div>
+
+      {/* Fila de categorías (desde lg; antes, el menú desplegable). Solo
+          texto, para que quepan aunque se sumen categorías; si igual no
+          caben, la fila se desliza de lado sin mover el resto de la página.
+          Las secciones del sitio van a la derecha, con Ofertas destacada. */}
+      <nav aria-label="Categorías y secciones" className="hidden border-t border-border/60 lg:block">
+        <div className="mx-auto flex max-w-6xl items-center gap-x-5 overflow-x-auto px-4 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {categoryLinks.map((l) => (
+            <Link
+              key={l.href}
+              href={l.href}
+              className={`shrink-0 whitespace-nowrap text-sm font-medium transition ${
+                pathname === l.href ? 'text-accent' : 'text-muted hover:text-fg'
+              }`}
+            >
+              {l.label}
+            </Link>
+          ))}
+          {FIXED_LINKS.map((l, i) => {
+            const Icon = l.icon;
+            const isDeals = l.href === '/ofertas';
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm font-medium transition ${
+                  i === 0 ? 'ml-auto' : ''
+                } ${pathname === l.href || isDeals ? 'text-accent' : 'text-muted hover:text-fg'}`}
+              >
+                {isDeals && <Icon size={15} aria-hidden />}
+                {l.label}
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
 
       <div id={MOBILE_SEARCH_ID} hidden={!searchOpen} className="border-t border-border px-4 py-3 lg:hidden">
         <SearchForm inputRef={mobileSearchRef} onSubmit={() => setSearchOpen(false)} />
