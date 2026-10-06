@@ -88,18 +88,35 @@ const TOKEN_MAX_REUSE_MS = 5 * 60 * 60 * 1000;
 /**
  * Esperas entre intentos de pedir el token. La bitácora de los crons mostró
  * que el refresco de las horas en punto fallaba casi siempre con "sin token"
- * mientras el de los minutos :30 funcionaba: ML rechaza pedidos de token en
- * los momentos de más carga. Sin reintento, esa corrida se perdía entera y
- * los precios pasaban una hora sin revisarse.
+ * mientras el de los minutos :30 funcionaba. Medido el 6 de octubre de 2026:
+ * ML responde 429 (too_many_requests) a los pedidos de token entre los
+ * segundos 3 y 7 después de cada hora en punto, y bien antes y después; nueve
+ * pedidos seguidos a otra hora pasan todos, así que no es por cantidad. Sin
+ * reintento, esa corrida se perdía entera y los precios pasaban una hora sin
+ * revisarse.
+ *
+ * Con estas esperas el último intento sale unos 9 segundos después del
+ * primero: fuera de esa ventana aunque el primero caiga justo al empezarla.
  */
-const TOKEN_RETRY_WAITS_MS = [1000, 2500];
+const TOKEN_RETRY_WAITS_MS = [1000, 2500, 5000];
 const TOKEN_TIMEOUT_MS = 4000;
 
 /** Por qué falló el último pedido de token (para la bitácora). Null si salió bien. */
 let lastTokenError: string | null = null;
+/** Intentos que tomó el último pedido de token; 0 si se usó el que estaba en memoria. */
+let lastTokenAttempts = 0;
 
 export function mlTokenError(): string | null {
   return lastTokenError;
+}
+
+/**
+ * Cuántas veces hubo que pedirle el token a ML la última vez (0 = se reusó
+ * el de memoria). Va en la bitácora del cron: si las horas en punto empiezan
+ * a necesitar todos los intentos, conviene mover el cron de la hora.
+ */
+export function mlTokenAttempts(): number {
+  return lastTokenAttempts;
 }
 
 type TokenAttempt =
@@ -147,10 +164,14 @@ async function requestMlToken(): Promise<TokenAttempt> {
 }
 
 export async function getMlToken(): Promise<string | null> {
-  if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.value;
+  if (cachedToken && Date.now() < cachedToken.expiresAt) {
+    lastTokenAttempts = 0;
+    return cachedToken.value;
+  }
 
   for (let attempt = 0; ; attempt++) {
     const result = await requestMlToken();
+    lastTokenAttempts = attempt + 1;
 
     if (result.ok) {
       const lifetimeMs = result.expiresIn ? result.expiresIn * 1000 - TOKEN_MARGIN_MS : TOKEN_MAX_REUSE_MS;

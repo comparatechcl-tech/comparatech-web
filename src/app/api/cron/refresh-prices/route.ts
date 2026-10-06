@@ -6,7 +6,7 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { pingHealthcheck, startCronRun } from '@/lib/cron-runs';
 import { fetchAllRows } from '@/lib/admin-stats';
 import { syncTelegramPosts } from '@/lib/social/telegram';
-import { enrichFromMl, getMlToken, mlTokenError } from '@/lib/ml-enrichment';
+import { enrichFromMl, getMlToken, mlTokenAttempts, mlTokenError } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
 import { mapWithConcurrency, mlErrorCounts } from '@/lib/ml-catalog';
 import { resolveLinkTarget } from '@/lib/link-check';
@@ -235,6 +235,7 @@ export async function GET(req: NextRequest) {
       const reason = mlTokenError() ?? 'sin detalle';
       return finish(false, { error: `No se pudo obtener token de ML (${reason})` }, 502, `sin token de ML: ${reason}`);
     }
+    const tokenAttempts = mlTokenAttempts();
 
     const { directLinks } = await readAffiliateSettings(admin);
     const outcomes = await priceProducts(rows, token, {
@@ -289,6 +290,9 @@ export async function GET(req: NextRequest) {
         escrituras_omitidas_por_tiempo: writesSkipped,
         escrituras_parciales_por_tiempo: late && !writesSkipped ? toWrite.length : 0,
         columnas_0016: has0016,
+        // 0 = token en memoria; 1 = ML lo entregó a la primera; más = hubo
+        // que insistir (pasa en los primeros segundos de cada hora en punto).
+        token_intentos: tokenAttempts,
         telegram,
         sitio_actualizado: visible,
         // 429/5xx/red por endpoint de ML: muestra si ML nos está limitando.
