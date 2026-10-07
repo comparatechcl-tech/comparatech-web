@@ -14,7 +14,9 @@ export function FounderBio({ compact = false }: { compact?: boolean }) {
       }`}
     >
       <Image
-        src="/roxana.jpg"
+        // Nombre nuevo al cambiar la foto: con el mismo nombre, el optimizador
+        // de imágenes puede seguir sirviendo la anterior por un rato.
+        src="/roxana-fundadora.jpg"
         alt="Roxana, fundadora de ComparaTech"
         width={80}
         height={80}
