@@ -406,16 +406,32 @@ function withoutOptionalColumns(patch: Record<string, unknown>): Record<string, 
   return rest;
 }
 
+/** Ids por escritura en bloque: viajan en la URL (37 caracteres cada uno). */
+const TOUCH_CHUNK = 100;
+
+/** ¿Lo único que hay que anotar es que se revisó? */
+function isTouchOnly(patch: Record<string, unknown>): boolean {
+  const keys = Object.keys(patch);
+  return keys.length === 1 && keys[0] === 'price_checked_at';
+}
+
 /**
  * Escribe los cambios y agrega al historial los precios que cambiaron.
  * Devuelve cuántas escrituras de productos fallaron.
+ *
+ * La gran mayoría de los productos no cambia entre una revisión y la
+ * siguiente: solo hay que anotar la hora. Esos van en bloque, de a cien por
+ * consulta. De a uno, con 790 productos eran 790 escrituras en cada corrida
+ * del cron (unos 6 segundos de sus 60) para decir casi siempre lo mismo.
  */
 export async function applyPricing(
   admin: SupabaseClient,
   outcomes: PricingOutcome[],
   concurrency = 8
 ): Promise<number> {
-  const writes = outcomes.filter((o) => Object.keys(o.patch).length > 0);
+  const withPatch = outcomes.filter((o) => Object.keys(o.patch).length > 0);
+  const writes = withPatch.filter((o) => !isTouchOnly(o.patch));
+  const touches = withPatch.filter((o) => isTouchOnly(o.patch));
   const observations: PriceObservation[] = [];
 
   // Apenas un update confirma que faltan las columnas nuevas, el resto de la
@@ -448,7 +464,26 @@ export async function applyPricing(
     }
   }
 
-  return results.reduce<number>((sum, failed) => sum + failed, 0);
+  // Después de los cambios de verdad: si el tiempo no alcanza, lo que se
+  // pierde es solo la hora de revisión, y esos productos pasan al frente de
+  // la próxima corrida.
+  const byTime = new Map<string, string[]>();
+  for (const o of touches) {
+    const at = String(o.patch.price_checked_at);
+    const ids = byTime.get(at);
+    if (ids) ids.push(o.id);
+    else byTime.set(at, [o.id]);
+  }
+  const chunks: { at: string; ids: string[] }[] = [];
+  for (const [at, ids] of byTime) {
+    for (let i = 0; i < ids.length; i += TOUCH_CHUNK) chunks.push({ at, ids: ids.slice(i, i + TOUCH_CHUNK) });
+  }
+  const touchFailures = await mapWithConcurrency(chunks, 4, async ({ at, ids }) => {
+    const { error } = await admin.from('products').update({ price_checked_at: at }).in('id', ids);
+    return error ? ids.length : 0;
+  });
+
+  return [...results, ...touchFailures].reduce<number>((sum, failed) => sum + failed, 0);
 }
 
 export function summarizePricing(outcomes: PricingOutcome[]) {

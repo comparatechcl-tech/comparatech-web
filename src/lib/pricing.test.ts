@@ -278,9 +278,11 @@ describe('offerInfoFrom', () => {
  */
 function fakeAdmin(respond: {
   update?: (patch: Record<string, unknown>) => { code: string; message: string } | null;
+  bulk?: () => { code: string; message: string } | null;
   insert?: () => { code: string; message: string } | null;
 }) {
   const updates: Record<string, unknown>[] = [];
+  const bulk: { patch: Record<string, unknown>; ids: string[] }[] = [];
   const inserts: { table: string; rows: unknown[] }[] = [];
   const client = {
     from(table: string) {
@@ -291,6 +293,10 @@ function fakeAdmin(respond: {
               updates.push(patch);
               return { error: respond.update?.(patch) ?? null };
             },
+            in: async (_column: string, ids: string[]) => {
+              bulk.push({ patch, ids });
+              return { error: respond.bulk?.() ?? null };
+            },
           };
         },
         insert: async (rows: unknown[]) => {
@@ -300,7 +306,19 @@ function fakeAdmin(respond: {
       };
     },
   };
-  return { admin: client as unknown as SupabaseClient, updates, inserts };
+  return { admin: client as unknown as SupabaseClient, updates, bulk, inserts };
+}
+
+/** Un producto revisado sin ningún cambio: solo hay que anotar la hora. */
+function touchedOutcome(id: string): PricingOutcome {
+  return {
+    id,
+    result: 'activo',
+    patch: { price_checked_at: NOW },
+    priceChanged: false,
+    reactivated: false,
+    deactivated: false,
+  };
 }
 
 function changedOutcome(id: string): PricingOutcome {
@@ -347,6 +365,30 @@ describe('applyPricing', () => {
     expect(last).not.toHaveProperty('offer_info');
     expect(last).not.toHaveProperty('ml_root_category');
     expect(inserts).toHaveLength(1);
+  });
+
+  it('los que no cambiaron se anotan en bloque, no de a uno', async () => {
+    const same = Array.from({ length: 250 }, (_, i) => touchedOutcome(`t${i}`));
+    const { admin, updates, bulk, inserts } = fakeAdmin({});
+
+    const failed = await applyPricing(admin, [...same, changedOutcome('p1')]);
+
+    expect(failed).toBe(0);
+    // El que cambió va con su propia escritura; los 250 iguales, en 3 consultas.
+    expect(updates).toHaveLength(1);
+    expect(bulk.map((b) => b.ids.length)).toEqual([100, 100, 50]);
+    expect(bulk.every((b) => Object.keys(b.patch).join() === 'price_checked_at')).toBe(true);
+    expect(new Set(bulk.flatMap((b) => b.ids)).size).toBe(250);
+    expect(inserts).toHaveLength(1);
+  });
+
+  it('si falla una escritura en bloque, cuenta todos sus productos como fallidos', async () => {
+    const { admin } = fakeAdmin({ bulk: () => ({ code: '500', message: 'caído' }) });
+    const failed = await applyPricing(
+      admin,
+      Array.from({ length: 120 }, (_, i) => touchedOutcome(`t${i}`))
+    );
+    expect(failed).toBe(120);
   });
 
   it('no agrega al historial lo que no se pudo escribir en products', async () => {
