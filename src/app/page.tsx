@@ -8,7 +8,7 @@ import { dropsById, rankDeals } from '@/lib/deal-rank';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { DealStrip } from '@/components/product/DealStrip';
 import { DealSpotlight } from '@/components/product/DealSpotlight';
-import { FounderBio } from '@/components/brand/FounderBio';
+import { BrandFace } from '@/components/brand/BrandFace';
 import { BRAND_GRADIENT, COMPARADOR_ICON, IconTile, categoryIconStyle } from '@/components/brand/CategoryIcon';
 import { QuickCompare } from '@/components/compare/QuickCompare';
 import { getSiteCategories } from '@/lib/queries/site-categories';
@@ -29,8 +29,8 @@ const BENEFITS = [
 ];
 
 const WHY_US = [
-  { icon: Search, title: 'Ahorra tiempo', desc: 'Compara múltiples productos en segundos.' },
-  { icon: Tags, title: 'Mejores precios', desc: 'Encuentra siempre la mejor oportunidad.' },
+  { icon: Search, title: 'Ahorra tiempo', desc: 'Compara varios productos en segundos.' },
+  { icon: Tags, title: 'Ofertas a la vista', desc: 'Mira qué productos aparecen con descuento en Mercado Libre y cuáles bajaron de precio.' },
   { icon: ChartNoAxesColumn, title: 'Información clara', desc: 'Especificaciones ordenadas y fáciles de entender.' },
   { icon: Link2, title: 'Enlaces directos', desc: 'Ve directamente a comprar en Mercado Libre.' },
 ];
@@ -41,7 +41,7 @@ const WHY_US = [
  * categoría nueva aparece con icono aunque todavía no tenga texto acá.
  */
 const CATEGORY_DESC: Record<string, string> = {
-  celulares: 'Compara los mejores smartphones',
+  celulares: 'Compara precios y especificaciones de smartphones',
   computacion: 'Notebooks, componentes y más',
   electronica: 'Televisores, relojes y accesorios',
   audio: 'Audífonos, parlantes y más',
@@ -94,8 +94,8 @@ export default async function HomePage() {
   // En escritorio la primera ya está en el encabezado: la grilla sigue desde la segunda.
   const desktopDeals = ranked.slice(1, 1 + DEALS_DESKTOP);
 
-  // Lo que eligió Roxana a mano desde el admin. Si no marcó nada, el bloque
-  // no aparece: mejor nada que una sección vacía.
+  // Los productos marcados como destacados en el admin. Si no hay ninguno,
+  // el bloque no aparece: mejor nada que una sección vacía.
   const picks = catalog.filter((p) => p.is_featured).slice(0, PICKS_LIMIT);
 
   // "Recién agregados" no repite lo que ya está más arriba: con un catálogo
@@ -291,13 +291,15 @@ export default async function HomePage() {
         </section>
       )}
 
-      {/* Elección de Roxana: los productos marcados como destacados. */}
+      {/* Destacados: los productos marcados así en el admin. El título no
+          los atribuye a nadie ni los llama recomendados: nadie los revisa
+          uno por uno. */}
       {picks.length > 0 && (
         <section className="mb-16">
           <div className="mb-5 flex items-baseline justify-between">
             <h2 className="flex items-center gap-2 font-heading text-2xl font-bold">
               <Sparkles size={20} className="text-accent" />
-              Elección de Roxana
+              Destacados
             </h2>
           </div>
           <ProductGrid products={picks} placement="home" />
@@ -319,7 +321,7 @@ export default async function HomePage() {
       <section className="mb-16 text-center">
         <h2 className="font-heading text-2xl font-bold">¿Por qué usar ComparaTech?</h2>
         <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
-          Todo lo que necesitas para tomar la mejor decisión de compra.
+          Precios y especificaciones en un solo lugar, para que compares antes de comprar.
         </p>
         <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-4">
           {WHY_US.map((w) => (
@@ -333,7 +335,7 @@ export default async function HomePage() {
       </section>
 
       <section>
-        <FounderBio />
+        <BrandFace />
       </section>
     </div>
   );

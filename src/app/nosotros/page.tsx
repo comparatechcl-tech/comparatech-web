@@ -1,30 +1,45 @@
 import type { Metadata } from 'next';
-import { Search, GitCompareArrows, ClipboardCheck, ThumbsUp } from 'lucide-react';
-import { FounderBio } from '@/components/brand/FounderBio';
+import { ListOrdered, ShieldCheck, RefreshCw, ThumbsUp } from 'lucide-react';
+import { BrandFace } from '@/components/brand/BrandFace';
 import { SocialLinks } from '@/components/brand/SocialLinks';
 
+/**
+ * Cómo funciona el sitio, en cuatro pasos. Cada frase dice solo lo que el
+ * sitio hace de verdad y de forma automática: nadie revisa ni prueba los
+ * productos uno por uno, así que nada acá puede prometerlo.
+ */
 const STEPS = [
-  { icon: Search, title: 'Buscamos', desc: 'Rastreamos los productos más vendidos en las categorías que nos importan.' },
-  { icon: GitCompareArrows, title: 'Comparamos', desc: 'Precio, specs y vendedor, uno al lado del otro, sin letra chica.' },
-  { icon: ClipboardCheck, title: 'Analizamos', desc: 'Descartamos vendedores sin reputación verde y precios que no cuadran.' },
-  { icon: ThumbsUp, title: 'Tú decides', desc: 'Te dejamos la comparación lista — la decisión de compra es tuya.' },
+  { icon: ListOrdered, title: 'Traemos', desc: 'Los productos salen de las listas de más vendidos de Mercado Libre Chile.' },
+  { icon: ShieldCheck, title: 'Filtramos', desc: 'Solo mostramos productos de vendedores con buena reputación en Mercado Libre.' },
+  { icon: RefreshCw, title: 'Actualizamos', desc: 'El precio se actualiza solo, varias veces al día.' },
+  { icon: ThumbsUp, title: 'Tú decides', desc: 'Comparas acá y compras en Mercado Libre.' },
 ];
 
 export const metadata: Metadata = {
   title: 'Nosotros',
   alternates: { canonical: '/nosotros' },
-  description: 'Quiénes están detrás de ComparaTech y cómo elegimos qué recomendar.',
+  description: 'Cómo funciona ComparaTech: de dónde salen los productos y los precios, y cómo gana dinero el sitio.',
 };
 
 export default function NosotrosPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
-      <h1 className="mb-6 font-heading text-2xl font-bold">Nosotros</h1>
+      <h1 className="mb-4 font-heading text-2xl font-bold">Nosotros</h1>
 
-      <FounderBio compact />
-      <SocialLinks className="mt-4 justify-center" />
+      <div className="space-y-4 text-sm leading-relaxed text-muted">
+        <p>
+          ComparaTech junta en un solo lugar precios y especificaciones de
+          productos de Mercado Libre Chile, para que compares sin abrir veinte
+          pestañas.
+        </p>
+        <p>
+          Todo sale de las fichas de Mercado Libre y puede cambiar: el precio
+          que vale es el que ves ahí al momento de comprar.
+        </p>
+      </div>
 
-      <div className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <h2 className="mt-10 font-heading text-lg font-semibold text-fg">Cómo funciona</h2>
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {STEPS.map((s, i) => {
           const Icon = s.icon;
           return (
@@ -44,32 +59,20 @@ export default function NosotrosPage() {
         })}
       </div>
 
+      <div className="mt-10">
+        <BrandFace compact />
+        <SocialLinks className="mt-4 justify-center" />
+      </div>
+
       <div className="mt-10 space-y-4 text-sm leading-relaxed text-muted">
-        <p>
-          ComparaTech nace para simplificar la decisión de compra de
-          tecnología y artículos para el hogar en Chile: reunimos precios,
-          descuentos y especificaciones en un solo lugar para que compares
-          sin tener que abrir veinte pestañas.
-        </p>
-        <p>
-          Detrás del proyecto está Roxana, quien revisa cada producto que
-          aparece en el sitio: compara precios, lee las especificaciones y
-          descarta lo que no cumple. La idea no es venderte lo primero que
-          aparece, sino ahorrarte el tiempo de comparar por tu cuenta y
-          explicarte en simple qué conviene comprar y por qué — sin letra
-          chica ni tecnicismos.
-        </p>
-        <h2 className="pt-2 font-heading text-lg font-semibold text-fg">
+        <h2 className="font-heading text-lg font-semibold text-fg">
           Cómo ganamos dinero
         </h2>
         <p>
-          Somos afiliados del Programa de Afiliados y Creadores de Mercado
-          Libre. Cuando compras un producto a través de uno de nuestros
-          links, podemos recibir una comisión — sin costo adicional para ti.
-          Esto no cambia el precio que pagas. La comisión es uno de los
-          factores con los que elegimos qué productos revisar, pero solo
-          trabajamos con vendedores de reputación verde y no publicamos
-          afirmaciones sobre productos que no podamos verificar.
+          Participamos en el Programa de Afiliados y Creadores de Mercado
+          Libre. Si compras a través de uno de nuestros links, podemos recibir
+          una comisión, sin costo extra para ti. Esa comisión influye en qué
+          productos aparecen en el sitio.
         </p>
       </div>
     </div>

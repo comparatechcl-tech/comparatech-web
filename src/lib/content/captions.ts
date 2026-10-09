@@ -118,17 +118,20 @@ const HOOKS: Record<HookKind, string[]> = {
   top: [
     '⭐ De un vendedor con reputación verde y miles de ventas',
     '✅ Vendedor con reputación verde y miles de ventas',
-    '🏆 Vendedor top en Mercado Libre',
-    '🤝 Vendedor confiable, con miles de ventas',
+    // Sin "top" ni "confiable": son un aval que el sitio no puede dar. Lo
+    // que consta es la reputación verde y las ventas que informa ML.
+    '🏆 Vendedor con miles de ventas en Mercado Libre',
+    '🤝 Miles de ventas y reputación verde en Mercado Libre',
     '👍 Lo vende alguien con reputación verde',
   ],
   precio: [
     '💡 Dato de precio',
-    '🔎 Lo comparamos por ti',
-    '📌 Precio revisado hoy',
+    // Antes "Lo comparamos por ti": nadie compara producto por producto.
+    '🔎 Míralo antes de comprar',
+    '📌 Ojo con este precio',
     '🛒 Para tener en el radar',
     '✅ Precio actual en Mercado Libre',
-    '👇 Mira cuánto cuesta hoy',
+    '👇 Mira cuánto cuesta',
   ],
 };
 

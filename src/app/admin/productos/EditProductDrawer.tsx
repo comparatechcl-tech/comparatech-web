@@ -133,7 +133,7 @@ export function EditProductDrawer({
           />
           <span>
             Fijar en portada
-            <span className="block text-xs text-muted">Se muestra con la etiqueta &quot;Recomendado&quot;.</span>
+            <span className="block text-xs text-muted">Se muestra con la etiqueta &quot;Destacado&quot;.</span>
           </span>
         </label>
 

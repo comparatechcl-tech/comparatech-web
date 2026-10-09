@@ -39,7 +39,7 @@ export function ProductCard({
       <Link href={`/producto/${product.slug}`} className="flex flex-1 flex-col">
         <div className="relative aspect-square w-full overflow-hidden bg-white">
           {/* El descuento a la izquierda, que es donde parte la lectura; la
-              recomendación pasa a la derecha para no taparlo. */}
+              marca de destacado pasa a la derecha para no taparlo. */}
           {isDeal && <DealBadge discount={discount} className="absolute left-2.5 top-2.5 z-10" />}
           {product.is_featured && (
             <span
@@ -47,7 +47,7 @@ export function ProductCard({
                 isDeal ? 'right-2.5' : 'left-2.5'
               }`}
             >
-              <Sparkles size={11} /> Recomendado
+              <Sparkles size={11} /> Destacado
             </span>
           )}
           <Image

@@ -73,7 +73,7 @@ const INACTIVE_GRACE_DAYS = 60;
 /** Lo que ve el comprador según por qué el producto salió de venta. */
 const INACTIVE_MESSAGES: Record<InactiveReason, string> = {
   sin_ganador: 'Hoy no hay vendedores ofreciendo este producto en Mercado Libre.',
-  ganador_no_verde: 'Hoy no hay un vendedor confiable para este producto.',
+  ganador_no_verde: 'Hoy no hay un vendedor con reputación verde en Mercado Libre para este producto.',
   link_otro_producto: 'Estamos actualizando el link de este producto.',
 };
 const INACTIVE_FALLBACK = 'Hoy este producto no está disponible en Mercado Libre.';
@@ -221,7 +221,7 @@ export default async function ProductoPage({
               {/* Solo si de verdad vuelve sola: un link a otro producto
                   necesita que alguien genere uno nuevo. */}
               {reasonInfo(product.inactive_reason).auto &&
-                ' Apenas vuelva a haber un vendedor confiable, la ficha se actualiza sola.'}
+                ' Apenas vuelva a haber un vendedor con reputación verde, la ficha se actualiza sola.'}
             </p>
             <p className="mt-4 text-sm leading-relaxed text-muted">{resolveDescription(product)}</p>
           </div>

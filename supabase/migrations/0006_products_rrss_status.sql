@@ -1,5 +1,5 @@
 -- ComparaTech — estado de uso en RRSS para productos ya aprobados.
--- Permite a Roxana marcar qué productos aprobados ya usó (o va a usar)
+-- Permite marcar desde el admin qué productos aprobados ya se usaron (o se van a usar)
 -- como contenido en redes sociales, sin depender de una planilla aparte.
 
 alter table products

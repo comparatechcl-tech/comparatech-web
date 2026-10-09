@@ -28,7 +28,8 @@ export default function TerminosPage() {
           Los precios son informados por Mercado Libre y pueden cambiar en cualquier momento.
         </p>
         <p>
-          Los revisamos varias veces al día, pero entre una revisión y otra el vendedor puede cambiar el precio, el
+          Se actualizan de forma automática varias veces al día, pero entre una actualización y otra el vendedor puede
+          cambiar el precio, el
           stock o las condiciones de despacho. Lo que vale es lo que ves en Mercado Libre al momento de comprar. El
           precio, la entrega, la garantía y las devoluciones son responsabilidad del vendedor y de Mercado Libre.
         </p>
@@ -37,14 +38,13 @@ export default function TerminosPage() {
         <p>
           ComparaTech es afiliado del Programa de Afiliados y Creadores de Mercado Libre. Los botones &quot;Ver en
           Mercado Libre&quot; son links de afiliado: si compras después de tocarlos, podemos recibir una comisión,
-          sin costo adicional para ti. La comisión no cambia el precio que pagas. Para decidir qué productos revisar y
-          publicar consideramos, entre otras cosas, el precio, la reputación del vendedor y la comisión que paga
-          Mercado Libre.
+          sin costo adicional para ti. La comisión no cambia el precio que pagas. Para decidir qué productos publicar se
+          consideran, entre otras cosas, la reputación del vendedor y la comisión que paga Mercado Libre.
         </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Contenido</h2>
         <p>
-          Las especificaciones, fotos y descripciones vienen de las fichas de Mercado Libre y de los fabricantes, y
+          Las especificaciones, fotos y descripciones salen de los datos de las fichas de Mercado Libre, y
           las comparaciones son orientativas: antes de comprar, revisa la ficha del producto. Las marcas y logos
           pertenecen a sus respectivos dueños.
         </p>
@@ -60,11 +60,11 @@ export default function TerminosPage() {
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Contacto</h2>
         <p>
-          Si ves un precio o un dato equivocado, escríbenos a{' '}
+          Si ves un precio o un dato equivocado, avísanos a{' '}
           <a href={`mailto:${CONTACT_EMAIL}`} className="text-accent hover:underline">
             {CONTACT_EMAIL}
-          </a>{' '}
-          y lo corregimos.
+          </a>
+          .
         </p>
       </div>
     </div>

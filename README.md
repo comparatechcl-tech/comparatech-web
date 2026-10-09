@@ -15,9 +15,11 @@ Cada push a `main` se publica solo en producción.
    verde, comisión baja, etc.) y deja el resto en la cola de candidatos
    (`product_candidates`). Al terminar manda el correo diario con lo que
    entró y lo que falta revisar.
-2. **Revisión en el admin.** En `/admin/candidatos` una persona aprueba o
-   rechaza cada candidato y le pega su link de afiliado (meli.la, generado
-   en la Central de Afiliados de ML). Aprobar lo publica en `products`.
+2. **Aprobación en el admin.** En `/admin/candidatos` los candidatos se
+   aprueban o rechazan, normalmente en bloque: nadie revisa ni prueba cada
+   producto. Aprobar los publica en `products` con su link de afiliado
+   (directo a la ficha, o un meli.la generado en la Central de Afiliados de
+   ML).
 3. **Refresco de precios (cada 30 minutos).** `/api/cron/refresh-prices`
    pregunta a ML el precio del ganador de la caja de compra (el que ve el
    comprador al llegar a la ficha), marca sin stock lo que ya no se vende y
