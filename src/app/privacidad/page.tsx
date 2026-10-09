@@ -53,9 +53,8 @@ export default function PrivacidadPage() {
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Para qué</h2>
         <p>
-          Para saber qué productos y secciones te sirven, decidir qué comparar después y revisar que los links de
-          afiliado funcionen. ComparaTech se financia con las comisiones del Programa de Afiliados de Mercado Libre
-          (ver{' '}
+          Para saber qué productos y secciones se usan más y comprobar que los links de afiliado funcionen.
+          ComparaTech se financia con las comisiones del Programa de Afiliados de Mercado Libre (ver{' '}
           <Link href="/terminos" className="text-accent hover:underline">
             términos
           </Link>

@@ -54,7 +54,8 @@ function buildChips(product: Product): Chip[] {
   if (info?.is_lowest === true && typeof offers === 'number' && offers >= 2) {
     chips.push({
       key: 'mejor-precio',
-      label: `Mejor precio entre ${offers.toLocaleString('es-CL')} vendedores`,
+      // Solo se compara contra las otras ofertas de la misma ficha de ML.
+      label: `Precio más bajo de las ${offers.toLocaleString('es-CL')} ofertas de esta ficha`,
       Icon: Tag,
     });
   }

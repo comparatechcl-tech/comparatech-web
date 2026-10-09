@@ -117,15 +117,19 @@ export function buildDescription({
  * si el producto se cargó a mano y nadie escribió una. No inventa nada sobre
  * el producto: solo dice qué encuentra el usuario en la página.
  */
-export function fallbackDescription(product: Pick<Product, 'name' | 'brand'>): string {
+export function fallbackDescription(product: Pick<Product, 'name' | 'brand' | 'is_active'>): string {
   const brand = product.brand?.trim();
   const subject = brand ? `${product.name} de ${brand}` : product.name;
+  // Sin vendedor la ficha no tiene precio vigente ni reputación que mostrar.
+  if (!product.is_active) {
+    return `${subject}: especificaciones y alternativas disponibles en Mercado Libre Chile.`;
+  }
   return `${subject}: precio actualizado, especificaciones y reputación del vendedor. Compara antes de comprar en Mercado Libre Chile.`;
 }
 
 /** Descripción efectiva de un producto — nunca vacía. */
 export function resolveDescription(
-  product: Pick<Product, 'name' | 'brand' | 'description'>
+  product: Pick<Product, 'name' | 'brand' | 'description' | 'is_active'>
 ): string {
   return product.description?.trim() || fallbackDescription(product);
 }

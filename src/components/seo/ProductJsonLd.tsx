@@ -28,7 +28,7 @@ export function ProductJsonLd({ product }: { product: Product }) {
     priceCurrency: 'CLP',
     price: product.price,
     ...(product.ml_product_id ? { sku: product.ml_product_id } : {}),
-    itemCondition: 'https://schema.org/NewCondition',
+    // Sin itemCondition: la condición de la oferta (nuevo, usado) no se guarda.
     ...(product.is_active
       ? { availability: 'https://schema.org/InStock', url: buyUrl(product) }
       : { availability: 'https://schema.org/OutOfStock' }),

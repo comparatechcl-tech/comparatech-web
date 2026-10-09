@@ -10,11 +10,15 @@ import { formatCLP } from '@/lib/format';
 import { stripDiacritics } from '@/lib/text';
 import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
 
+// Los valores van en ?orden= y no se cambian (hay links publicados); el
+// rótulo dice lo que el orden hace de verdad: 'relevancia' es lo agregado
+// más recientemente y 'vendidos' son las ventas totales del vendedor, no
+// las del producto.
 export const SORT_OPTIONS = [
-  { value: 'relevancia', label: 'Relevancia' },
+  { value: 'relevancia', label: 'Más recientes' },
   { value: 'descuento', label: 'Mayor descuento' },
   { value: 'precio', label: 'Menor precio' },
-  { value: 'vendidos', label: 'Más vendidos' },
+  { value: 'vendidos', label: 'Vendedor con más ventas' },
 ] as const;
 
 export type SortOrder = (typeof SORT_OPTIONS)[number]['value'];

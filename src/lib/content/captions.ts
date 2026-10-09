@@ -100,9 +100,9 @@ export type HookKind = 'oferta' | 'top' | 'precio';
 
 /**
  * Ganchos por tipo de post. Ninguno afirma algo que no se pueda sostener:
- * "rebajado" se dice sobre el precio de lista que informa ML (no "bajó",
- * que exigiría historial), y "top" habla del vendedor, que es lo que el
- * dato seller_sales_count mide.
+ * el descuento se dice sobre el precio de lista que informa ML (no "bajó"
+ * ni "rebajado", que exigirían historial), y "top" habla del vendedor, que
+ * es lo que el dato seller_sales_count mide.
  */
 const HOOKS: Record<HookKind, string[]> = {
   oferta: [
@@ -111,7 +111,7 @@ const HOOKS: Record<HookKind, string[]> = {
     '🔥 Con descuento en Mercado Libre',
     '⚡ Descuento sobre su precio de lista',
     '👀 Ojo con este descuento',
-    '💸 Precio rebajado',
+    '💸 Bajo su precio de lista',
     '🛒 Para aprovechar mientras dure',
     '📉 Con descuento en este momento',
   ],
@@ -166,9 +166,12 @@ export function priceCheckedLine(priceCheckedAt: string | null): string {
 function priceLine(p: CaptionProduct): string {
   const discount = captionDiscount(p);
   const base = `💰 ${formatPrice(p.price)}`;
-  // El "antes" va solo si el precio de lista es mayor: un "antes" igual o
-  // menor sería una rebaja inventada.
-  if (discount > 0 && p.original_price) return `${base} (antes ${formatPrice(p.original_price)} / -${discount}%)`;
+  // El precio de lista va solo si es mayor: uno igual o menor sería una
+  // rebaja inventada. No se le dice "antes": es el que informa el vendedor,
+  // no un precio anterior comprobado.
+  if (discount > 0 && p.original_price) {
+    return `${base} (precio de lista ${formatPrice(p.original_price)} / -${discount}%)`;
+  }
   return base;
 }
 
@@ -183,9 +186,14 @@ function categoryTag(category: string | null | undefined): string | null {
 
 function hashtags(p: CaptionProduct, channel: CaptionChannel): string | null {
   if (channel === 'whatsapp' || channel === 'telegram') return null;
-  const tags = ['#ofertas', '#tecnologia', '#chile', '#mercadolibre', categoryTag(p.category)].filter(
-    (t): t is string => Boolean(t)
-  );
+  // #ofertas solo si hay descuento: en un producto a precio de lista sería falso.
+  const tags = [
+    captionDiscount(p) > 0 ? '#ofertas' : null,
+    '#tecnologia',
+    '#chile',
+    '#mercadolibre',
+    categoryTag(p.category),
+  ].filter((t): t is string => Boolean(t));
   return [...new Set(tags)].join(' ');
 }
 

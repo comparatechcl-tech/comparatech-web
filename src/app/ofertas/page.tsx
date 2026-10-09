@@ -60,7 +60,7 @@ export default async function OfertasPage() {
             </>
           ) : (
             <>
-              Hoy no hay rebajas sobre el {MIN_DEAL_DISCOUNT}% en el catálogo. Revisamos los precios
+              Hoy no hay rebajas sobre el {MIN_DEAL_DISCOUNT}% en el catálogo. Los precios se actualizan
               varias veces al día, así que vuelve pronto.
             </>
           )}

@@ -19,7 +19,8 @@ import type { Product } from '@/lib/types';
 
 export const metadata: Metadata = {
   title: 'Lo de hoy en redes',
-  description: 'Los productos que mostramos en redes esta semana y las mejores ofertas del día, con precio revisado.',
+  description:
+    'Los productos que mostramos en redes esta semana y los mayores descuentos del día, con precios actualizados varias veces al día.',
   alternates: { canonical: '/hoy' },
   robots: { index: false, follow: true },
 };
@@ -81,7 +82,7 @@ export default async function HoyPage() {
       <div className="mb-8">
         <h1 className="font-heading text-2xl font-bold sm:text-3xl">Lo de hoy</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-          Lo que mostramos en redes y las mejores ofertas del día. Los precios se revisan contra Mercado Libre
+          Lo que mostramos en redes y los mayores descuentos del día. Los precios se revisan contra Mercado Libre
           varias veces al día y pueden cambiar.
         </p>
         {telegram && (
@@ -107,7 +108,7 @@ export default async function HoyPage() {
 
       <section>
         <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-semibold">
-          <Flame size={18} className="text-accent" /> Mejores ofertas de hoy
+          <Flame size={18} className="text-accent" /> Mayores descuentos de hoy
         </h2>
         <ProductGrid products={topDeals} placement="social" />
         <div className="mt-6 text-center">

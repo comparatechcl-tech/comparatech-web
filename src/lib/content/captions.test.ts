@@ -34,21 +34,31 @@ const opts = {
 };
 
 describe('buildCaption', () => {
-  it('sin descuento no muestra porcentaje ni "antes"', () => {
+  it('sin descuento no muestra porcentaje ni precio de lista', () => {
     const noDiscount = { ...base, original_price: null };
     for (const channel of CHANNELS) {
       const text = buildCaption(noDiscount, channel, opts);
       expect(text).not.toContain('%');
-      expect(text).not.toContain('antes');
+      expect(text).not.toContain('precio de lista');
     }
     // Un precio de lista menor o igual tampoco es una rebaja.
     const fake = buildCaption({ ...base, original_price: 20000 }, 'whatsapp', opts);
     expect(fake).not.toContain('%');
   });
 
-  it('con descuento muestra el antes y el porcentaje', () => {
+  it('con descuento muestra el precio de lista y el porcentaje, sin llamarlo "antes"', () => {
     const text = buildCaption(base, 'whatsapp', opts);
-    expect(text).toContain('$27.990 (antes $69.990 / -60%)');
+    expect(text).toContain('$27.990 (precio de lista $69.990 / -60%)');
+    expect(text).not.toContain('antes $');
+  });
+
+  it('#ofertas va solo si el producto tiene descuento', () => {
+    for (const channel of ['instagram', 'tiktok', 'facebook'] as const) {
+      expect(buildCaption(base, channel, opts)).toContain('#ofertas');
+      const text = buildCaption({ ...base, original_price: null }, channel, opts);
+      expect(text).not.toContain('#ofertas');
+      expect(text).toContain('#tecnologia');
+    }
   });
 
   it('la fecha y la hora del precio son las de Chile', () => {

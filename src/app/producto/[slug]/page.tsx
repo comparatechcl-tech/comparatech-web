@@ -78,6 +78,9 @@ const INACTIVE_MESSAGES: Record<InactiveReason, string> = {
 };
 const INACTIVE_FALLBACK = 'Hoy este producto no está disponible en Mercado Libre.';
 
+/** Lo que Google muestra de una meta description (ver truncateAtWord). */
+const META_DESCRIPTION_MAX = 155;
+
 const PRIMARY_CTA_ID = 'cta-principal';
 const SPECS_CTA_ID = 'cta-specs';
 
@@ -125,11 +128,19 @@ export async function generateMetadata({
   // el nombre corto: el de ML (76-90 caracteres) se comía todo el espacio
   // que Google muestra.
   const title = `${short}: precio y ofertas en Chile`;
+  const lead = `${short} a ${formatCLP(product.price)}${discount ? ` (${discount}% dcto)` : ''} en Mercado Libre.`;
+  // La ficha muestra un solo vendedor (el de la oferta ganadora), no una
+  // comparación entre vendedores. Con un nombre largo la frase completa no
+  // cabe en lo que muestra Google: ahí va la versión corta, en vez de dejar
+  // que se corte a la mitad ("… Precio…").
+  const full = `${lead} Mira sus specs y la reputación del vendedor. Precio actualizado hoy.`;
+  const active =
+    full.length <= META_DESCRIPTION_MAX ? full : `${lead} Specs y reputación del vendedor. Precio actualizado hoy.`;
   const description = truncateAtWord(
     product.is_active
-      ? `${short} a ${formatCLP(product.price)}${discount ? ` (${discount}% dcto)` : ''} en Mercado Libre. Compara specs y vendedores, precio revisado hoy.`
+      ? active
       : `${short}: hoy no está a la venta en Mercado Libre. Mira alternativas en ${categoryNameOf(product)} con precio revisado hoy.`,
-    155
+    META_DESCRIPTION_MAX
   );
   const url = `/producto/${product.slug}`;
 

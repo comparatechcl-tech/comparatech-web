@@ -11,7 +11,7 @@ import { captionDiscount, chileDateTime, formatPrice, mlPhotoJpg } from '@/lib/c
  * - La foto de Mercado Libre va tal cual, entera y dentro de un marco blanco.
  *   Nada de texto encima: tapar parte del producto o "decorar" la foto
  *   oficial confunde sobre lo que se compra.
- * - Descuento, "antes", envío gratis y Full aparecen solo si son ciertos.
+ * - Descuento, precio de lista, envío gratis y Full aparecen solo si son ciertos.
  * - Siempre la hora del precio y '#publicidad'.
  *
  * Usa la fuente que trae next/og (sin pedir fuentes a otro servidor), y sin
@@ -175,16 +175,22 @@ export function ProductOgTemplate({
           {formatPrice(product.price)}
         </div>
         {discount > 0 && product.original_price ? (
+          // Es el precio de lista que informa el vendedor, no un "antes"
+          // comprobado. Va en dos líneas para que quepa al lado del precio
+          // (en una sola, los precios sobre un millón lo bajaban de línea y
+          // la pieza de feed no tiene alto para eso), y solo la cifra tachada.
           <div
             style={{
               display: 'flex',
+              flexDirection: 'column',
               fontSize: L.small,
+              lineHeight: 1.2,
               color: COLORS.muted,
-              textDecoration: 'line-through',
               paddingBottom: Math.round(L.small * 0.3),
             }}
           >
-            {`antes ${formatPrice(product.original_price)}`}
+            <span>precio de lista</span>
+            <span style={{ textDecoration: 'line-through' }}>{formatPrice(product.original_price)}</span>
           </div>
         ) : null}
       </div>

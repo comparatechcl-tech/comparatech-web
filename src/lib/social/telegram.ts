@@ -38,7 +38,9 @@ export function telegramConfig(env: NodeJS.ProcessEnv = process.env): TelegramCo
 /** Telegram corta los pies de foto en 1024 caracteres. */
 export const TELEGRAM_CAPTION_MAX = 1024;
 export const TELEGRAM_BUTTON_TEXT = 'Ver oferta en Mercado Libre';
-export const TELEGRAM_ENDED_TEXT = '⚠️ Oferta terminada';
+// No dice "oferta terminada": el post también se cierra cuando el producto
+// se ocultó o se sacó del sitio con el precio intacto.
+export const TELEGRAM_ENDED_TEXT = '⚠️ Publicación retirada';
 
 const API_TIMEOUT_MS = 10_000;
 
@@ -66,7 +68,7 @@ export function telegramCaption(product: CaptionProduct, link: string, now: Date
 export function endedCaption(product: Pick<CaptionProduct, 'name'> | null): string {
   const lines = [TELEGRAM_ENDED_TEXT];
   if (product) lines.push(escapeHtml(shortProductName(product.name)));
-  lines.push('Ya no está disponible a ese precio. Revisa las ofertas vigentes en el canal.');
+  lines.push('Ya no mostramos este producto. Revisa las publicaciones más recientes del canal.');
   return lines.join('\n');
 }
 

@@ -71,7 +71,7 @@ export function DealSpotlight({
           </p>
           {product.original_price && discount > 0 && (
             <p className="mt-1 text-sm text-muted">
-              Antes <span className="line-through">{formatCLP(product.original_price)}</span>
+              Precio de lista <span className="line-through">{formatCLP(product.original_price)}</span>
             </p>
           )}
           {drop && (

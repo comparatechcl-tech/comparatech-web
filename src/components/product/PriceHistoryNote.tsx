@@ -33,7 +33,7 @@ export async function PriceHistoryNote({ productId, price }: { productId: string
   const lines: string[] = [];
 
   if (isLowestIn30Days(stats, price)) {
-    lines.push('Precio más bajo de los últimos 30 días');
+    lines.push('El precio más bajo que registramos en los últimos 30 días');
   } else if (isLowestSinceTracked(stats, price)) {
     lines.push(`Precio más bajo desde que lo seguimos (${stats.daysTracked} días)`);
   }
