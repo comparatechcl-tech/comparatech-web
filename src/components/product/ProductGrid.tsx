@@ -1,6 +1,7 @@
 import { Product } from '@/lib/types';
 import type { Placement } from '@/lib/clicks';
 import type { ConfirmedDrop } from '@/lib/deal-rank';
+import { toCardProduct } from '@/lib/card-product';
 import { ProductCard } from './ProductCard';
 
 /**
@@ -30,10 +31,14 @@ export function ProductGrid({
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-      {products.map(({ description: _description, ...card }) => (
-        // Sin la descripción: la tarjeta no la usa y, como es componente de
-        // cliente, viajaría completa en el HTML de cada página.
-        <ProductCard key={card.id} product={card} placement={placement} drop={drops?.[card.id]} />
+      {products.map((product) => (
+        // La tarjeta es componente de cliente: recibe solo lo que muestra,
+        // no el producto entero, que viajaría completo en el HTML.
+        <ProductCard
+          key={product.id}
+          product={toCardProduct(product, drops?.[product.id])}
+          placement={placement}
+        />
       ))}
     </div>
   );

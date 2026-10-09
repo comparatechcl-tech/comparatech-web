@@ -6,52 +6,31 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
-import { Product } from '@/lib/types';
 import { getCategoryInfo } from '@/lib/queries/categories';
 import { PriceTag } from './PriceTag';
 import { DealBadge, DropChip } from './DealBadge';
 import { AffiliateButton } from './AffiliateButton';
-import { dealTier, discountOf, type ConfirmedDrop } from '@/lib/deal-rank';
-import { buyUrl } from '@/lib/outbound';
-import { specBadges } from '@/lib/spec-badges';
+import { dealTier, discountOf } from '@/lib/deal-rank';
+import type { CardProduct } from '@/lib/card-product';
 import mlImageLoader from '@/lib/ml-image-loader';
 import type { Placement } from '@/lib/clicks';
 
 /**
- * Lo mínimo que la tarjeta lee de la oferta ganadora. Se declara acá y no
- * se importa el tipo completo para que la tarjeta compile aunque el
- * producto todavía no traiga ese dato (columna nueva, se llena con el cron).
- */
-type CardOfferInfo = { free_shipping?: boolean | null; is_full?: boolean | null };
-
-/** Un solo chip, el que más pesa al decidir: envío gratis gana a Full. */
-function offerChip(offer: CardOfferInfo | null | undefined): string | null {
-  if (!offer) return null;
-  if (offer.free_shipping === true) return 'Envío gratis';
-  if (offer.is_full === true) return 'Full';
-  return null;
-}
-
-/**
  * La tarjeta es de cliente, así que todo lo que recibe queda escrito en el
- * HTML. La descripción (larga, y la tarjeta no la muestra) se deja fuera:
- * ProductGrid la quita antes de pasar cada producto.
+ * HTML. Por eso no recibe el producto entero sino un CardProduct, con las
+ * insignias, el chip de envío y el link de compra ya resueltos en el
+ * servidor (ver lib/card-product).
  */
-export type CardProduct = Omit<Product, 'description'>;
-
 export function ProductCard({
   product,
   placement,
-  drop,
 }: {
   product: CardProduct;
   placement?: Placement;
-  /** Baja comprobada con el historial propio (lib/deal-rank), si la hay. */
-  drop?: ConfirmedDrop | null;
 }) {
   const categoryName = getCategoryInfo(product.category)?.name ?? product.category;
-  const badges = specBadges(product.specs);
-  const chip = offerChip((product as CardProduct & { offer_info?: CardOfferInfo | null }).offer_info);
+  const { badges, chip } = product;
+  const dropAmount = product.drop_amount ?? 0;
   const discount = discountOf(product);
   const isDeal = dealTier(discount) !== null;
 
@@ -87,7 +66,7 @@ export function ProductCard({
           <h3 className="line-clamp-2 font-heading text-sm font-medium text-fg transition group-hover:text-accent">
             {product.name}
           </h3>
-          {badges.length > 0 && (
+          {badges && badges.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {badges.map((v) => (
                 <span
@@ -101,9 +80,9 @@ export function ProductCard({
           )}
           <div className="mt-auto pt-2">
             <PriceTag price={product.price} originalPrice={product.original_price} hideDiscount={isDeal} />
-            {(drop || chip) && (
+            {(dropAmount > 0 || chip) && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {drop && <DropChip amount={drop.amount} />}
+                {dropAmount > 0 && <DropChip amount={dropAmount} />}
                 {chip && (
                   <span className="inline-flex rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
                     {chip}
@@ -116,7 +95,7 @@ export function ProductCard({
       </Link>
       <div className="px-4 pb-4">
         <AffiliateButton
-          href={buyUrl(product)}
+          href={product.href}
           productId={product.id}
           productName={product.name}
           placement={placement}

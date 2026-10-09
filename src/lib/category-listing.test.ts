@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Product } from '@/lib/types';
 import {
+  CATEGORY_PAGE,
   categoryIntro,
   categoryMetaDescription,
   domainLabel,
   filterByType,
   itemListJsonLd,
+  parsePageCount,
   parseSortOrder,
   sortProducts,
   summarizeCategory,
@@ -68,6 +70,30 @@ describe('parseSortOrder', () => {
     expect(parseSortOrder(['vendidos', 'precio'])).toBe('vendidos');
     expect(parseSortOrder('cualquiera')).toBe('relevancia');
     expect(parseSortOrder(undefined)).toBe('relevancia');
+  });
+});
+
+describe('parsePageCount', () => {
+  // 100 productos son tres tandas: 48 + 48 + 4.
+  const total = CATEGORY_PAGE * 2 + 4;
+
+  it('sin ?pagina= o con un valor raro es la primera tanda', () => {
+    for (const value of [undefined, '', '0', '-1', 'dos', '1.5', '2e1', '99999']) {
+      expect(parsePageCount(value, total), String(value)).toBe(1);
+    }
+  });
+
+  it('acepta las tandas que existen y recorta las que no', () => {
+    expect(parsePageCount('2', total)).toBe(2);
+    expect(parsePageCount('3', total)).toBe(3);
+    expect(parsePageCount('4', total)).toBe(3);
+    expect(parsePageCount('9999', total)).toBe(3);
+    expect(parsePageCount(['2', '3'], total)).toBe(2);
+  });
+
+  it('una categoría chica o vacía tiene una sola tanda', () => {
+    expect(parsePageCount('5', CATEGORY_PAGE)).toBe(1);
+    expect(parsePageCount('5', 0)).toBe(1);
   });
 });
 
@@ -171,5 +197,14 @@ describe('textos', () => {
       url: 'https://ejemplo.cl/producto/malo',
       name: 'Audífono </script><script>alert(1)</script>',
     });
+  });
+
+  it('ItemList lleva la primera tanda y el total de la categoría', () => {
+    const many = Array.from({ length: CATEGORY_PAGE + 20 }, (_, i) => product({ slug: `p${i}` }));
+    const data = JSON.parse(itemListJsonLd(many, 'https://ejemplo.cl', 'Audio'));
+    expect(data.numberOfItems).toBe(CATEGORY_PAGE + 20);
+    expect(data.itemListElement).toHaveLength(CATEGORY_PAGE);
+    expect(data.itemListElement[0]).toMatchObject({ position: 1, url: 'https://ejemplo.cl/producto/p0' });
+    expect(data.itemListElement[CATEGORY_PAGE - 1].position).toBe(CATEGORY_PAGE);
   });
 });

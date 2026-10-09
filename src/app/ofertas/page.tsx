@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import { Flame, TrendingDown } from 'lucide-react';
-import { getDeals, discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
-import { getPriceStatsMany } from '@/lib/queries/price-history';
+import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
+import { getRankedDeals } from '@/lib/queries/deals';
 import { getSiteCategories } from '@/lib/queries/site-categories';
-import { dropsById, rankDeals } from '@/lib/deal-rank';
+import { ALL_DEALS, countHotDeals, dealsBatch } from '@/lib/deals-listing';
 import { DealsBrowser } from '@/components/product/DealsBrowser';
 
 export const metadata: Metadata = {
@@ -26,15 +26,16 @@ export const revalidate = 300;
  * Por eso no se presenta como verificado: se dice de dónde sale. Lo que sí
  * consta es el historial de precios propio (ver lib/deal-rank), así que los
  * productos que bajaron de verdad van primero y con su propio distintivo.
+ *
+ * La página lleva solo la primera tanda de tarjetas, para que su peso no
+ * crezca con el catálogo. Las demás las pide DealsBrowser a /ofertas/lote.
  */
 export default async function OfertasPage() {
-  const [deals, siteCategories] = await Promise.all([getDeals(), getSiteCategories()]);
-  const stats = await getPriceStatsMany(deals.map((p) => p.id));
-
-  const ordered = rankDeals(deals, stats);
-  const drops = dropsById(deals, stats);
+  const [{ ranked: deals, drops, best }, siteCategories] = await Promise.all([
+    getRankedDeals(),
+    getSiteCategories(),
+  ]);
   const confirmed = Object.keys(drops).length;
-  const best = deals[0];
 
   // Solo las categorías que hoy tienen ofertas, en el orden del menú.
   const counts = new Map<string, number>();
@@ -80,9 +81,9 @@ export default async function OfertasPage() {
 
       {deals.length > 0 && (
         <DealsBrowser
-          products={ordered.map(({ description: _description, ...card }) => card)}
+          initial={dealsBatch(deals, drops, ALL_DEALS, 0)}
           categories={categories}
-          drops={drops}
+          hotCount={countHotDeals(deals)}
           placement="ofertas"
         />
       )}

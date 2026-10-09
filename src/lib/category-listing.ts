@@ -44,6 +44,23 @@ export function sortProducts(products: Product[], order: SortOrder): Product[] {
   }
 }
 
+/** Cuántos productos muestra una categoría de entrada, y cuántos suma cada "ver más". */
+export const CATEGORY_PAGE = 48;
+
+/**
+ * ?pagina= dice cuántas tandas se muestran, no cuál: la 2 trae las dos
+ * primeras. Así "ver más" agrega productos debajo de los que ya se estaban
+ * viendo, y cualquier valor es la misma lista de la dirección sin
+ * parámetros, solo más larga. Un valor raro cae a 1, y uno más grande que la
+ * categoría, a la categoría completa.
+ */
+export function parsePageCount(value: string | string[] | undefined, total: number): number {
+  const v = Array.isArray(value) ? value[0] : value;
+  if (!v || !/^\d{1,4}$/.test(v)) return 1;
+  const last = Math.max(1, Math.ceil(total / CATEGORY_PAGE));
+  return Math.min(Math.max(1, Number(v)), last);
+}
+
 /**
  * Nombre en castellano de cada tipo de producto de Mercado Libre. Un
  * dominio que no está acá se agrupa como 'Otros': es preferible a mostrar
@@ -239,7 +256,13 @@ export function categoryMetaDescription(name: string, summary: CategorySummary):
 }
 
 /**
- * ItemList de schema.org con las fichas de la categoría, ya serializado.
+ * ItemList de schema.org de la categoría, ya serializado.
+ *
+ * Lleva las fichas de la primera tanda, que son las que muestra la página
+ * sin parámetros (la canónica); `numberOfItems` dice cuántas tiene la
+ * categoría entera, que es como schema.org describe una lista que no cabe
+ * en una página. Con todas las fichas, el bloque crecía con el catálogo.
+ *
  * Se escapa '<' para que un nombre con "</script>" no pueda cerrar la
  * etiqueta en que se inserta.
  */
@@ -249,7 +272,7 @@ export function itemListJsonLd(products: Product[], siteUrl: string, name: strin
     '@type': 'ItemList',
     name,
     numberOfItems: products.length,
-    itemListElement: products.map((p, i) => ({
+    itemListElement: products.slice(0, CATEGORY_PAGE).map((p, i) => ({
       '@type': 'ListItem',
       position: i + 1,
       url: `${siteUrl}/producto/${p.slug}`,
