@@ -44,7 +44,10 @@ export function sortProducts(products: Product[], order: SortOrder): Product[] {
   }
 }
 
-/** Cuántos productos muestra una categoría de entrada, y cuántos suma cada "ver más". */
+/**
+ * Cuántos productos muestra una categoría de entrada, y cuántos suma cada
+ * "ver más". La búsqueda (/buscar) usa la misma tanda.
+ */
 export const CATEGORY_PAGE = 48;
 
 /**

@@ -2,10 +2,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getCatalogProducts, getDeals } from '@/lib/queries/products';
 import { getPopulatedCategories } from '@/lib/categories';
+import { CATEGORY_PAGE, parsePageCount } from '@/lib/category-listing';
 import { ProductGrid } from '@/components/product/ProductGrid';
+import { PendingLabel } from '@/components/layout/PendingLabel';
 import { FilterPanel } from '@/components/search/FilterPanel';
 import { formatDiscountPct } from '@/lib/format';
-import { searchProducts } from '@/lib/search';
+import { readSearchQuery, searchHref, searchProducts } from '@/lib/search';
 import { stripDiacritics } from '@/lib/text';
 
 export const metadata: Metadata = {
@@ -13,28 +15,20 @@ export const metadata: Metadata = {
   robots: { index: false, follow: true },
 };
 
-interface SearchParams {
-  q?: string;
-  brand?: string;
-  maxPrice?: string;
-  minDiscount?: string;
-}
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 /** Ofertas que se sugieren cuando la búsqueda no encuentra nada. */
 const FALLBACK_DEALS = 8;
 
-export default async function BuscarPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
+export default async function BuscarPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const all = await getCatalogProducts();
 
-  const q = params.q?.trim() ?? '';
-  const brand = params.brand ? stripDiacritics(params.brand.toLowerCase().trim()) : undefined;
-  const maxPrice = params.maxPrice ? Number(params.maxPrice) : undefined;
-  const minDiscount = params.minDiscount ? Number(params.minDiscount) : undefined;
+  const query = readSearchQuery(params);
+  const q = query.q ?? '';
+  const brand = query.brand ? stripDiacritics(query.brand.toLowerCase()) : undefined;
+  const maxPrice = query.maxPrice ? Number(query.maxPrice) : undefined;
+  const minDiscount = query.minDiscount ? Number(query.minDiscount) : undefined;
 
   // Con texto, cada palabra se busca por separado y en orden de relevancia
   // (ver lib/search). Sin texto, el catálogo completo para filtrar.
@@ -50,6 +44,13 @@ export default async function BuscarPage({
     return true;
   });
 
+  // Sin texto, o con una búsqueda amplia, la grilla traía el catálogo entero
+  // (663 tarjetas, 2,5 MB) y crecía con él. Se muestra de a tandas, igual
+  // que las categorías: ?pagina= dice cuántas se ven.
+  const pagina = parsePageCount(params.pagina, results.length);
+  const shown = results.slice(0, pagina * CATEGORY_PAGE);
+  const remaining = results.length - shown.length;
+
   // Una búsqueda sin resultados no puede ser un callejón sin salida: quien
   // busca ya quiere comprar algo, así que se le ofrece lo mejor de hoy y el
   // camino a las categorías.
@@ -62,14 +63,9 @@ export default async function BuscarPage({
     <div className="mx-auto max-w-6xl px-4 py-10">
       <h1 className="mb-6 font-heading text-2xl font-bold sm:text-3xl">Buscar</h1>
       <div className="mb-8">
-        <FilterPanel
-          defaultValues={{
-            q: params.q,
-            brand: params.brand,
-            maxPrice: params.maxPrice,
-            minDiscount: params.minDiscount,
-          }}
-        />
+        {/* El formulario no manda `pagina`: al cambiar el texto o un filtro
+            la lista vuelve a su primera tanda. */}
+        <FilterPanel defaultValues={query} />
       </div>
 
       {noResults ? (
@@ -102,7 +98,29 @@ export default async function BuscarPage({
               {results.length === 1 ? '1 resultado' : `${results.length} resultados`} para “{q}”
             </p>
           )}
-          <ProductGrid products={results} placement="buscar" />
+          <ProductGrid products={shown} placement="buscar" />
+
+          {remaining > 0 && (
+            <div className="mt-8 flex flex-col items-center gap-2">
+              {/* Mismo link que en las categorías: los productos nuevos
+                  aparecen debajo, sin mover la página ni sumar un paso al
+                  botón "atrás", y funciona sin JavaScript. */}
+              <Link
+                href={searchHref(query, pagina + 1)}
+                replace
+                scroll={false}
+                prefetch={false}
+                className="inline-flex min-h-11 items-center rounded-full border border-accent/40 px-6 py-2.5 text-sm font-semibold text-accent transition hover:bg-accent/10"
+              >
+                <PendingLabel>
+                  Ver {Math.min(CATEGORY_PAGE, remaining)} {remaining === 1 ? 'producto' : 'productos'} más
+                </PendingLabel>
+              </Link>
+              <p className="text-xs text-muted">
+                Mostrando {shown.length} de {results.length}
+              </p>
+            </div>
+          )}
         </>
       )}
     </div>

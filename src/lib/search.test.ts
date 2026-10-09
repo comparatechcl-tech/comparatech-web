@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickAlternatives, searchProducts, singularize, tokenize } from './search';
+import { pickAlternatives, readSearchQuery, searchHref, searchProducts, singularize, tokenize } from './search';
 import { normalizeName, shortProductName } from './text';
 import { jsonLdString } from '@/components/seo/ProductJsonLd';
 
@@ -186,6 +186,35 @@ describe('searchProducts', () => {
 
   it('una palabra que no existe deja la búsqueda en cero', () => {
     expect(searchProducts(CATALOG, 'parlante marshall')).toEqual([]);
+  });
+});
+
+describe('dirección de la búsqueda', () => {
+  it('lee el texto y los filtros, sin espacios ni vacíos', () => {
+    expect(readSearchQuery({ q: '  parlante jbl ', brand: '', maxPrice: '50000', otro: 'x' })).toEqual({
+      q: 'parlante jbl',
+      maxPrice: '50000',
+    });
+    expect(readSearchQuery({})).toEqual({});
+  });
+
+  it('de un parámetro repetido toma el primero', () => {
+    expect(readSearchQuery({ q: ['sony', 'jbl'], brand: [] })).toEqual({ q: 'sony' });
+  });
+
+  it('"ver más" conserva el texto y todos los filtros', () => {
+    const query = { q: 'audífonos sony', brand: 'Sony', maxPrice: '50000', minDiscount: '20' };
+    const href = searchHref(query, 2);
+    const params = new URL(href, 'https://x.cl').searchParams;
+    expect(href.startsWith('/buscar?')).toBe(true);
+    expect(readSearchQuery(Object.fromEntries(params))).toEqual(query);
+    expect(params.get('pagina')).toBe('2');
+  });
+
+  it('la primera tanda no lleva ?pagina=, y sin nada que buscar es /buscar', () => {
+    expect(searchHref({ q: 'jbl' })).toBe('/buscar?q=jbl');
+    expect(searchHref({}, 1)).toBe('/buscar');
+    expect(searchHref({}, 3)).toBe('/buscar?pagina=3');
   });
 });
 

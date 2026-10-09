@@ -128,6 +128,42 @@ export function searchProducts<T extends SearchableProduct>(products: T[], query
     .map((s) => s.product);
 }
 
+/** Lo que se puede pedir en /buscar: el texto y los filtros del panel. */
+export const SEARCH_PARAMS = ['q', 'brand', 'maxPrice', 'minDiscount'] as const;
+
+export type SearchQuery = Partial<Record<(typeof SEARCH_PARAMS)[number], string>>;
+
+/**
+ * El texto y los filtros tal como vienen en la dirección, sin espacios de
+ * más y sin los vacíos. Un parámetro repetido (?q=a&q=b) llega como lista y
+ * se toma el primero: antes eso botaba la página con un error.
+ */
+export function readSearchQuery(params: Record<string, string | string[] | undefined>): SearchQuery {
+  const query: SearchQuery = {};
+  for (const key of SEARCH_PARAMS) {
+    const raw = params[key];
+    const value = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+    if (value) query[key] = value;
+  }
+  return query;
+}
+
+/**
+ * Dirección de la misma búsqueda mostrando `pagina` tandas (ver
+ * parsePageCount en lib/category-listing). Conserva el texto y los filtros:
+ * "ver más" no puede cambiar lo que se estaba buscando.
+ */
+export function searchHref(query: SearchQuery, pagina = 1): string {
+  const qs = new URLSearchParams();
+  for (const key of SEARCH_PARAMS) {
+    const value = query[key];
+    if (value) qs.set(key, value);
+  }
+  if (pagina > 1) qs.set('pagina', String(pagina));
+  const search = qs.toString();
+  return `/buscar${search ? `?${search}` : ''}`;
+}
+
 export type AlternativeCandidate = Pick<
   Product,
   'id' | 'name' | 'category' | 'ml_domain_id' | 'ml_family_id' | 'price'
