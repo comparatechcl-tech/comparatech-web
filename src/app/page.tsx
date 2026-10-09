@@ -1,11 +1,15 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Search, Check, Tags, ChartNoAxesColumn, Link2, Smartphone, Headphones, Sofa, WashingMachine, Package, Flame, Gamepad2, Sparkles } from 'lucide-react';
+import { Search, Check, Tags, ChartNoAxesColumn, Link2, Flame, Sparkles } from 'lucide-react';
 import { getCatalogProducts, getDeals } from '@/lib/queries/products';
+import { getPriceStatsMany } from '@/lib/queries/price-history';
+import { dropsById, rankDeals } from '@/lib/deal-rank';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { DealStrip } from '@/components/product/DealStrip';
+import { DealSpotlight } from '@/components/product/DealSpotlight';
 import { FounderBio } from '@/components/brand/FounderBio';
+import { BRAND_GRADIENT, COMPARADOR_ICON, IconTile, categoryIconStyle } from '@/components/brand/CategoryIcon';
 import { QuickCompare } from '@/components/compare/QuickCompare';
 import { getSiteCategories } from '@/lib/queries/site-categories';
 
@@ -32,66 +36,39 @@ const WHY_US = [
 ];
 
 /**
- * Presentación de cada categoría en el home. Solo hay ilustración propia
- * para algunas; el resto cae al ícono de lucide, para que una categoría
- * nueva pueda aparecer sin esperar a que alguien dibuje su arte.
+ * Qué decir de cada categoría en la portada. El icono y el color salen de
+ * components/brand/CategoryIcon, el mismo mapa que usa el menú: una
+ * categoría nueva aparece con icono aunque todavía no tenga texto acá.
  */
-const CATEGORY_STYLE: Record<
-  string,
-  { image?: string; icon?: typeof Smartphone; glow: string; desc: string }
-> = {
-  celulares: {
-    image: '/category-celulares.png',
-    glow: 'rgba(0,212,255,0.45)',
-    desc: 'Compara los mejores smartphones',
-  },
-  computacion: {
-    image: '/category-computacion.png',
-    glow: 'rgba(168,85,247,0.4)',
-    desc: 'Notebooks, componentes y más',
-  },
-  electronica: {
-    image: '/category-electronica.png',
-    glow: 'rgba(16,217,160,0.4)',
-    desc: 'Cargadores, antenas y wearables',
-  },
-  audio: {
-    icon: Headphones,
-    glow: 'rgba(0,212,255,0.4)',
-    desc: 'Audífonos, parlantes y más',
-  },
-  gaming: {
-    icon: Gamepad2,
-    glow: 'rgba(168,85,247,0.4)',
-    desc: 'Consolas, controles y accesorios',
-  },
-  hogar: {
-    icon: Sofa,
-    glow: 'rgba(255,138,76,0.4)',
-    desc: 'Muebles y artículos para la casa',
-  },
-  electrodomesticos: {
-    icon: WashingMachine,
-    glow: 'rgba(120,190,255,0.4)',
-    desc: 'Línea blanca y cocina',
-  },
+const CATEGORY_DESC: Record<string, string> = {
+  celulares: 'Compara los mejores smartphones',
+  computacion: 'Notebooks, componentes y más',
+  electronica: 'Televisores, relojes y accesorios',
+  audio: 'Audífonos, parlantes y más',
+  gaming: 'Consolas, controles y accesorios',
+  hogar: 'Sillas, escritorios e iluminación',
+  electrodomesticos: 'Línea blanca y cocina',
 };
 
-const FALLBACK_STYLE = { icon: Package, glow: 'rgba(148,163,184,0.35)', desc: 'Ver productos' };
+/** Hex de 6 dígitos a rgba, para el resplandor de cada tarjeta. */
+function glowOf(hex: string, alpha = 0.45): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 
-const COMPARADOR_CARD = {
-  href: '/comparador',
-  image: '/category-comparador.png',
-  glow: 'rgba(255,230,0,0.4)',
-  title: 'Comparador',
-  desc: 'Compara 2 productos en detalle',
-};
-
+/** Ofertas que se miran en el historial para decidir cuál va primero. */
+const DEALS_POOL = 24;
 /** Cuántas ofertas van en la franja del celular y en la grilla de escritorio. */
 const DEALS_MOBILE = 8;
-const DEALS_DESKTOP = 4;
+const DEALS_DESKTOP = 8;
 const PICKS_LIMIT = 4;
 const NEW_LIMIT = 8;
+
+const dropDateFmt = new Intl.DateTimeFormat('es-CL', {
+  timeZone: 'America/Santiago',
+  day: 'numeric',
+  month: 'short',
+});
 
 export default async function HomePage() {
   const [catalog, categories, allDeals] = await Promise.all([
@@ -99,7 +76,21 @@ export default async function HomePage() {
     getSiteCategories(),
     getDeals(),
   ]);
-  const deals = allDeals.slice(0, DEALS_MOBILE);
+
+  // Las ofertas que bajaron de verdad (según nuestro propio registro de
+  // precios) van primero; el resto, por descuento. Se mira solo el comienzo
+  // de la lista: leer el historial de las cien ofertas en cada regeneración
+  // de la portada no cambia qué se ve arriba.
+  const pool = allDeals.slice(0, DEALS_POOL);
+  const stats = await getPriceStatsMany(pool.map((p) => p.id));
+  const ranked = rankDeals(pool, stats);
+  const drops = dropsById(ranked, stats);
+
+  const spotlight = ranked[0];
+  const spotlightDrop = spotlight ? drops[spotlight.id] : undefined;
+  const mobileDeals = ranked.slice(0, DEALS_MOBILE);
+  // En escritorio la primera ya está en el encabezado: la grilla sigue desde la segunda.
+  const desktopDeals = ranked.slice(1, 1 + DEALS_DESKTOP);
 
   // Lo que eligió Roxana a mano desde el admin. Si no marcó nada, el bloque
   // no aparece: mejor nada que una sección vacía.
@@ -107,7 +98,7 @@ export default async function HomePage() {
 
   // "Recién agregados" no repite lo que ya está más arriba: con un catálogo
   // chico, las mismas tarjetas dos veces en la portada parecían un relleno.
-  const shownAbove = new Set([...deals, ...picks].map((p) => p.id));
+  const shownAbove = new Set([...ranked.slice(0, 1 + DEALS_DESKTOP), ...picks].map((p) => p.id));
   const fresh = catalog.filter((p) => !shownAbove.has(p.id)).slice(0, NEW_LIMIT);
 
   // El comparador rápido recibe solo lo que usa para elegir: mandar el
@@ -121,19 +112,27 @@ export default async function HomePage() {
   }));
 
   const categoryCards = [
-    ...categories.map((c) => {
-      const style = CATEGORY_STYLE[c.slug] ?? FALLBACK_STYLE;
-      return { href: `/categoria/${c.slug}`, title: c.name, ...style };
-    }),
-    COMPARADOR_CARD,
+    ...categories.map((c) => ({
+      href: `/categoria/${c.slug}`,
+      title: c.name,
+      desc: CATEGORY_DESC[c.slug] ?? 'Ver productos',
+      style: categoryIconStyle(c.slug),
+    })),
+    {
+      href: '/comparador',
+      title: 'Comparador',
+      desc: 'Compara 2 productos en detalle',
+      style: COMPARADOR_ICON,
+    },
   ];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 sm:pt-10">
+    <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 sm:pt-8">
       {/* Hero. En el celular queda solo el título y el buscador: todo lo
           demás empujaba la primera oferta fuera de la pantalla, y el tráfico
-          de redes llega casi entero desde el teléfono. */}
-      <section className="relative mb-6 overflow-hidden rounded-3xl border border-border bg-surface px-5 py-6 sm:mb-16 sm:px-10 sm:py-16">
+          de redes llega casi entero desde el teléfono. En escritorio, la
+          mitad derecha es la mejor oferta del momento. */}
+      <section className="relative mb-6 overflow-hidden rounded-3xl border border-border bg-surface px-5 py-6 sm:mb-12 sm:px-10 sm:py-10">
         <div
           className="pointer-events-none absolute inset-0 -z-10"
           style={{
@@ -141,7 +140,7 @@ export default async function HomePage() {
               'radial-gradient(55% 65% at 15% 15%, rgba(8,126,255,0.18) 0%, rgba(8,126,255,0) 60%), radial-gradient(45% 55% at 90% 20%, rgba(0,212,255,0.14) 0%, rgba(0,212,255,0) 65%)',
           }}
         />
-        <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
             <span className="hidden items-center gap-1.5 rounded-full border border-border bg-surface2 px-3.5 py-1.5 text-xs font-medium text-muted sm:inline-flex">
               Compara · Elige · Ahorra
@@ -184,79 +183,91 @@ export default async function HomePage() {
             </form>
           </div>
 
-          <div className="relative mx-auto hidden aspect-square w-full max-w-md sm:block">
-            <Image
-              src="/hero-products.png"
-              alt="Notebook, celular y audífonos sobre una plataforma iluminada"
-              fill
-              sizes="(min-width: 640px) 448px, 0px"
-              className="object-contain drop-shadow-2xl"
-              priority
-            />
-          </div>
+          {spotlight ? (
+            // Desde lg: más abajo el encabezado es de una columna y la
+            // franja de ofertas viene justo después.
+            <div className="hidden lg:block">
+              <DealSpotlight
+                product={(({ description: _description, ...card }) => card)(spotlight)}
+                drop={spotlightDrop}
+                dropDate={spotlightDrop ? dropDateFmt.format(new Date(spotlightDrop.since)) : null}
+                dealsCount={allDeals.length}
+              />
+            </div>
+          ) : (
+            // Sin ninguna oferta en el catálogo queda la ilustración de siempre.
+            <div className="relative mx-auto hidden aspect-square w-full max-w-md lg:block">
+              <Image
+                src="/hero-products.png"
+                alt="Notebook, celular y audífonos sobre una plataforma iluminada"
+                fill
+                sizes="(min-width: 1024px) 448px, 0px"
+                className="object-contain drop-shadow-2xl"
+                priority
+              />
+            </div>
+          )}
         </div>
       </section>
 
       {/* Ofertas — lo primero después del hero: es el gancho real del sitio
           y el destino de lo que se publica en redes. Solo aparece si hay
           rebajas de verdad, para no dejar una sección vacía. */}
-      {deals.length > 0 && (
+      {mobileDeals.length > 0 && (
         <section className="mb-12 sm:mb-16">
-          <div className="mb-3 flex items-baseline justify-between gap-4 sm:mb-5">
-            <h2 className="flex items-center gap-2 font-heading text-xl font-bold sm:text-2xl">
-              <Flame size={22} className="text-accent" />
-              Ofertas del día
-            </h2>
-            <Link href="/ofertas" className="text-sm font-medium text-accent hover:underline">
-              Ver todas →
+          <div className="mb-3 flex items-end justify-between gap-4 sm:mb-5">
+            <div>
+              <h2 className="flex items-center gap-2 font-heading text-xl font-bold sm:text-2xl">
+                <Flame size={22} className="text-orange-500" />
+                Ofertas del día
+              </h2>
+              <p className="mt-1 hidden text-sm text-muted sm:block">
+                {allDeals.length} {allDeals.length === 1 ? 'producto' : 'productos'} con 20% o más de descuento.
+                Primero, los que bajaron de precio.
+              </p>
+            </div>
+            <Link
+              href="/ofertas"
+              className="shrink-0 rounded-full border border-accent/40 px-3.5 py-1.5 text-sm font-medium text-accent transition hover:bg-accent/10"
+            >
+              Ver las {allDeals.length} →
             </Link>
           </div>
           {/* Franja deslizable en el celular, grilla en pantallas grandes. */}
-          <div className="sm:hidden">
+          <div className="lg:hidden">
             <DealStrip
-              products={deals.map(({ description: _description, ...card }) => card)}
+              products={mobileDeals.map(({ description: _description, ...card }) => card)}
               placement="home-ofertas"
+              drops={drops}
             />
           </div>
-          <div className="hidden sm:block">
-            <ProductGrid products={deals.slice(0, DEALS_DESKTOP)} placement="home-ofertas" />
+          <div className="hidden lg:block">
+            <ProductGrid products={desktopDeals} placement="home-ofertas" drops={drops} />
           </div>
         </section>
       )}
 
       {/* Categorías */}
       <section className="mb-16">
+        <h2 className="mb-5 font-heading text-xl font-bold sm:text-2xl">Explora por categoría</h2>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {categoryCards.map((c) => {
-            const CardIcon = 'icon' in c ? c.icon : undefined;
-            return (
-              <Link
-                key={c.href}
-                href={c.href}
-                className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:shadow-[0_0_40px_-14px_var(--glow)]"
-                style={{ '--glow': c.glow } as React.CSSProperties}
-              >
-                <span className="relative flex h-16 w-16 items-center justify-center">
-                  <span
-                    className="absolute inset-0 rounded-full blur-xl"
-                    style={{ background: c.glow }}
-                  />
-                  {'image' in c && c.image ? (
-                    <Image src={c.image} alt="" width={64} height={64} className="relative object-contain" />
-                  ) : (
-                    CardIcon && <CardIcon size={34} className="relative text-accent" strokeWidth={1.5} />
-                  )}
-                </span>
-                <div>
-                  <p className="font-heading text-base font-semibold text-fg">{c.title}</p>
-                  <p className="mt-0.5 text-xs text-muted">{c.desc}</p>
-                </div>
-                <span className="mt-auto text-xs font-medium text-accent opacity-0 transition group-hover:opacity-100">
-                  Ver más →
-                </span>
-              </Link>
-            );
-          })}
+          {categoryCards.map((c) => (
+            <Link
+              key={c.href}
+              href={c.href}
+              className="group flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5 transition duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:shadow-[0_0_40px_-14px_var(--glow)]"
+              style={{ '--glow': glowOf(c.style.to) } as React.CSSProperties}
+            >
+              <IconTile {...c.style} className="transition duration-200 group-hover:scale-105" />
+              <div>
+                <p className="font-heading text-base font-semibold text-fg">{c.title}</p>
+                <p className="mt-0.5 text-xs text-muted">{c.desc}</p>
+              </div>
+              <span className="mt-auto text-xs font-medium text-accent opacity-0 transition group-hover:opacity-100">
+                Ver más →
+              </span>
+            </Link>
+          ))}
         </div>
       </section>
 
@@ -298,18 +309,13 @@ export default async function HomePage() {
           Todo lo que necesitas para tomar la mejor decisión de compra.
         </p>
         <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-4">
-          {WHY_US.map((w) => {
-            const Icon = w.icon;
-            return (
-              <div key={w.title} className="flex flex-col items-center gap-2.5">
-                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
-                  <Icon size={20} />
-                </span>
-                <p className="font-heading text-sm font-semibold text-fg">{w.title}</p>
-                <p className="text-xs leading-relaxed text-muted">{w.desc}</p>
-              </div>
-            );
-          })}
+          {WHY_US.map((w) => (
+            <div key={w.title} className="flex flex-col items-center gap-2.5">
+              <IconTile icon={w.icon} {...BRAND_GRADIENT} size="base" />
+              <p className="font-heading text-sm font-semibold text-fg">{w.title}</p>
+              <p className="text-xs leading-relaxed text-muted">{w.desc}</p>
+            </div>
+          ))}
         </div>
       </section>
 

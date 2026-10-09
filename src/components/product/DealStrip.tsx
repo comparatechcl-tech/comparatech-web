@@ -9,7 +9,9 @@ import { formatCLP, formatDiscountPct } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
 import mlImageLoader from '@/lib/ml-image-loader';
 import { AffiliateButton } from './AffiliateButton';
+import { DealBadge, DropChip } from './DealBadge';
 import type { Placement } from '@/lib/clicks';
+import type { ConfirmedDrop } from '@/lib/deal-rank';
 
 /**
  * Franja horizontal de ofertas para el celular.
@@ -23,15 +25,19 @@ import type { Placement } from '@/lib/clicks';
 export function DealStrip({
   products,
   placement,
+  drops,
 }: {
   // Sin la descripción, que la franja no usa (ver page.tsx).
   products: Omit<Product, 'description'>[];
   placement?: Placement;
+  /** Bajas comprobadas con el historial propio, por id (lib/deal-rank). */
+  drops?: Record<string, ConfirmedDrop>;
 }) {
   return (
     <ul className="-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-2">
       {products.map((p) => {
         const discount = formatDiscountPct(p.price, p.original_price);
+        const drop = drops?.[p.id];
         return (
           <li
             key={p.id}
@@ -39,11 +45,7 @@ export function DealStrip({
           >
             <Link href={`/producto/${p.slug}`} className="flex flex-1 flex-col">
               <div className="relative aspect-square w-full bg-white">
-                {discount && (
-                  <span className="absolute left-2 top-2 z-10 rounded-md bg-accent px-1.5 py-0.5 text-[11px] font-bold text-ink">
-                    -{discount}%
-                  </span>
-                )}
+                {discount && <DealBadge discount={discount} className="absolute left-2 top-2 z-10" />}
                 <Image
                   loader={mlImageLoader}
                   src={p.image_url}
@@ -59,6 +61,7 @@ export function DealStrip({
                 {p.original_price && discount && (
                   <p className="text-[11px] text-muted line-through">{formatCLP(p.original_price)}</p>
                 )}
+                {drop && <DropChip amount={drop.amount} className="mt-0.5 w-fit" />}
               </div>
             </Link>
             <div className="px-3 pb-3">

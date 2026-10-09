@@ -3,9 +3,15 @@ import { formatCLP, formatDiscountPct } from '@/lib/format';
 export function PriceTag({
   price,
   originalPrice,
+  hideDiscount = false,
 }: {
   price: number;
   originalPrice: number | null;
+  /**
+   * Las tarjetas muestran el descuento como distintivo sobre la foto
+   * (DealBadge): repetirlo acá le quita una línea al precio en el celular.
+   */
+  hideDiscount?: boolean;
 }) {
   const discount = formatDiscountPct(price, originalPrice);
 
@@ -22,9 +28,11 @@ export function PriceTag({
           <span className="text-sm text-muted line-through">
             {formatCLP(originalPrice)}
           </span>
-          <span className="rounded bg-accent/10 px-1.5 py-0.5 text-xs font-medium text-accent">
-            -{discount}%
-          </span>
+          {!hideDiscount && (
+            <span className="rounded bg-accent/10 px-1.5 py-0.5 text-xs font-medium text-accent">
+              -{discount}%
+            </span>
+          )}
         </>
       )}
     </div>

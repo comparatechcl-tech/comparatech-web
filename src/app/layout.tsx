@@ -7,6 +7,7 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { SITE_URL } from '@/lib/site';
 import { getSiteCategories } from '@/lib/queries/site-categories';
+import { getDeals } from '@/lib/queries/products';
 import { UtmCapture } from '@/components/analytics/UtmCapture';
 import { SOCIAL_LINKS } from '@/components/brand/SocialLinks';
 
@@ -47,7 +48,14 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const categories = await getSiteCategories();
+  // El contador de ofertas del menú sale del mismo catálogo en caché que las
+  // categorías. Si esa lectura falla, el menú se muestra igual, sin número.
+  const [categories, dealsCount] = await Promise.all([
+    getSiteCategories(),
+    getDeals()
+      .then((deals) => deals.length)
+      .catch(() => 0),
+  ]);
 
   return (
     <html lang="es-CL" className={inter.variable} suppressHydrationWarning>
@@ -65,7 +73,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 'radial-gradient(32% 30% at 100% 85%, rgba(0,212,255,0.10) 0%, rgba(0,212,255,0) 60%)',
             }}
           />
-          <Header categories={categories} />
+          <Header categories={categories} dealsCount={dealsCount} />
           <main className="flex-1">{children}</main>
           <Footer categories={categories} />
         </ThemeProvider>

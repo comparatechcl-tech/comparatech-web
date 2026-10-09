@@ -7,6 +7,7 @@ import { getAffiliateSettings } from '@/lib/settings';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { normalizeName } from '@/lib/text';
 import { pickAlternatives } from '@/lib/search';
+import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 
 /**
  * Capa de acceso a datos de productos, siempre desde la tabla `products`.
@@ -259,8 +260,11 @@ export async function getProductsByCategory(category: string): Promise<Product[]
  * Bajo esto no vale la pena promocionarlo: un 5% no mueve a nadie a comprar
  * y llenaría la sección de ruido. Con el catálogo actual, 20% deja fuera lo
  * marginal y conserva las rebajas que sí llaman la atención.
+ *
+ * El valor vive en lib/deal-rank, que también usan las tarjetas (componentes
+ * de cliente, que no pueden importar este módulo).
  */
-export const MIN_DEAL_DISCOUNT = 20;
+export { MIN_DEAL_DISCOUNT };
 
 /** Porcentaje de descuento respecto al precio de lista. 0 si no hay rebaja. */
 export function discountPercent(product: Product): number {

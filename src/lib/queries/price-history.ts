@@ -87,16 +87,90 @@ export async function getPriceStats(productId: string): Promise<PriceStats | nul
 /** Una sola lectura por producto y por render, aunque la pidan varios componentes. */
 export const getPriceStatsCached = cache(getPriceStats);
 
+/** Productos por consulta: los ids viajan en la URL (37 caracteres cada uno). */
+const BULK_CHUNK = 40;
+/** Filas por página: el tope por respuesta de Supabase. */
+const BULK_PAGE = 1000;
 /**
- * Estadísticas de varios productos (página de ofertas). De a pocos en
- * paralelo para no saturar Supabase durante una regeneración.
+ * Páginas por tanda de productos. Si una tanda tiene más historial que esto
+ * no se afirma nada de ella: con el historial cortado, la "última baja"
+ * podría no ser la última.
+ */
+const BULK_MAX_PAGES = 6;
+
+type HistoryRow = PricePoint & { product_id: string };
+
+/** El historial de una tanda de productos, o null si no se pudo leer entero. */
+async function readHistoryChunk(ids: string[], since: string): Promise<Map<string, PricePoint[]> | null> {
+  const supabase = getSupabase();
+  if (!supabase || Date.now() < missingTableUntil) return null;
+
+  const byId = new Map<string, PricePoint[]>();
+  for (let page = 0; page < BULK_MAX_PAGES; page++) {
+    const from = page * BULK_PAGE;
+    const { data, error } = await supabase
+      .from('price_history')
+      .select('product_id, price, observed_at')
+      .in('product_id', ids)
+      .gte('observed_at', since)
+      // Con el id al final el orden es estable y las páginas no se pisan.
+      .order('observed_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + BULK_PAGE - 1);
+
+    if (error) {
+      if (isMissingSchemaError(error)) {
+        missingTableUntil = Date.now() + MISSING_TABLE_RETRY_MS;
+      } else {
+        console.warn('[price-history] no se pudo leer el historial:', error.message);
+      }
+      return null;
+    }
+
+    const rows = (data ?? []) as HistoryRow[];
+    for (const row of rows) {
+      const list = byId.get(row.product_id);
+      const point = { price: row.price, observed_at: row.observed_at };
+      if (list) list.push(point);
+      else byId.set(row.product_id, [point]);
+    }
+    if (rows.length < BULK_PAGE) return byId;
+  }
+  return null;
+}
+
+/**
+ * Estadísticas de varios productos (portada y página de ofertas).
+ *
+ * Lee el historial de a tandas de productos y no producto por producto: con
+ * 325 ofertas eran 650 consultas en cada regeneración de la página, y ahora
+ * son unas veinte. A diferencia de la lectura de la ficha, no trae el precio
+ * anterior a la ventana de 90 días: una baja cuyo precio anterior es más
+ * viejo que eso no se reconoce acá. Nunca al revés: lo que se afirma es
+ * cierto.
+ *
+ * Nunca lanza: sin historial, las páginas se muestran sin la marca "Bajó".
  */
 export async function getPriceStatsMany(productIds: string[]): Promise<Map<string, PriceStats>> {
   const byId = new Map<string, PriceStats>();
   const unique = [...new Set(productIds)];
-  await mapWithConcurrency(unique, 6, async (id) => {
-    const stats = await getPriceStatsCached(id);
-    if (stats) byId.set(id, stats);
-  });
+  if (unique.length === 0) return byId;
+
+  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString();
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += BULK_CHUNK) chunks.push(unique.slice(i, i + BULK_CHUNK));
+
+  try {
+    await mapWithConcurrency(chunks, 4, async (chunk) => {
+      const histories = await readHistoryChunk(chunk, since);
+      if (!histories) return;
+      for (const [id, history] of histories) {
+        const stats = priceStats(history);
+        if (stats) byId.set(id, stats);
+      }
+    });
+  } catch (err) {
+    console.warn('[price-history] no se pudo leer el historial:', err);
+  }
   return byId;
 }

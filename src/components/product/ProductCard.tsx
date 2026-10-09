@@ -9,7 +9,9 @@ import { Sparkles } from 'lucide-react';
 import { Product } from '@/lib/types';
 import { getCategoryInfo } from '@/lib/queries/categories';
 import { PriceTag } from './PriceTag';
+import { DealBadge, DropChip } from './DealBadge';
 import { AffiliateButton } from './AffiliateButton';
+import { dealTier, discountOf, type ConfirmedDrop } from '@/lib/deal-rank';
 import { buyUrl } from '@/lib/outbound';
 import { specBadges } from '@/lib/spec-badges';
 import mlImageLoader from '@/lib/ml-image-loader';
@@ -37,17 +39,35 @@ function offerChip(offer: CardOfferInfo | null | undefined): string | null {
  */
 export type CardProduct = Omit<Product, 'description'>;
 
-export function ProductCard({ product, placement }: { product: CardProduct; placement?: Placement }) {
+export function ProductCard({
+  product,
+  placement,
+  drop,
+}: {
+  product: CardProduct;
+  placement?: Placement;
+  /** Baja comprobada con el historial propio (lib/deal-rank), si la hay. */
+  drop?: ConfirmedDrop | null;
+}) {
   const categoryName = getCategoryInfo(product.category)?.name ?? product.category;
   const badges = specBadges(product.specs);
   const chip = offerChip((product as CardProduct & { offer_info?: CardOfferInfo | null }).offer_info);
+  const discount = discountOf(product);
+  const isDeal = dealTier(discount) !== null;
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-surface transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow">
       <Link href={`/producto/${product.slug}`} className="flex flex-1 flex-col">
         <div className="relative aspect-square w-full overflow-hidden bg-white">
+          {/* El descuento a la izquierda, que es donde parte la lectura; la
+              recomendación pasa a la derecha para no taparlo. */}
+          {isDeal && <DealBadge discount={discount} className="absolute left-2.5 top-2.5 z-10" />}
           {product.is_featured && (
-            <span className="absolute left-2.5 top-2.5 z-10 inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-ink">
+            <span
+              className={`absolute top-2.5 z-10 inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-ink ${
+                isDeal ? 'right-2.5' : 'left-2.5'
+              }`}
+            >
               <Sparkles size={11} /> Recomendado
             </span>
           )}
@@ -80,11 +100,16 @@ export function ProductCard({ product, placement }: { product: CardProduct; plac
             </div>
           )}
           <div className="mt-auto pt-2">
-            <PriceTag price={product.price} originalPrice={product.original_price} />
-            {chip && (
-              <span className="mt-1.5 inline-flex rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
-                {chip}
-              </span>
+            <PriceTag price={product.price} originalPrice={product.original_price} hideDiscount={isDeal} />
+            {(drop || chip) && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {drop && <DropChip amount={drop.amount} />}
+                {chip && (
+                  <span className="inline-flex rounded-md bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                    {chip}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>

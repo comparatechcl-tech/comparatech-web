@@ -17,6 +17,7 @@ import {
 } from '@/lib/category-listing';
 import { SITE_URL } from '@/lib/site';
 import { ProductGrid } from '@/components/product/ProductGrid';
+import { IconTile, categoryIconStyle } from '@/components/brand/CategoryIcon';
 
 type Params = Promise<{ categoria: string }>;
 type SearchParams = Promise<{ orden?: string | string[]; tipo?: string | string[] }>;
@@ -102,8 +103,11 @@ export default async function CategoriaPage({
         dangerouslySetInnerHTML={{ __html: itemListJsonLd(products, SITE_URL, info.name) }}
       />
 
-      <h1 className="font-heading text-2xl font-bold sm:text-3xl">{info.name}</h1>
-      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{categoryIntro(summary)}</p>
+      <div className="flex items-center gap-3">
+        <IconTile {...categoryIconStyle(categoria)} size="base" />
+        <h1 className="font-heading text-2xl font-bold sm:text-3xl">{info.name}</h1>
+      </div>
+      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{categoryIntro(summary)}</p>
 
       <div className="mt-6 flex flex-col gap-3">
         {chips.length > 0 && (
