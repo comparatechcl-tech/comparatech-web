@@ -107,14 +107,28 @@ function requireSupabase() {
   return supabase;
 }
 
+/** Productos por lectura del catálogo. */
+const CATALOG_PAGE = 500;
+/** Tope de lecturas: 10.000 productos. Evita un bucle si algo responde raro. */
+const CATALOG_MAX_PAGES = 20;
+
 /**
- * La lectura del catálogo, compartida entre todas las páginas por 60
- * segundos (o hasta que algo invalide la etiqueta 'catalog'). Sin esto cada
- * página que se regenera vuelve a pedir la tabla completa a Supabase.
+ * Una página del catálogo, compartida entre todas las páginas del sitio por
+ * 60 segundos (o hasta que algo invalide la etiqueta 'catalog'). Sin esto
+ * cada página que se regenera vuelve a pedir la tabla a Supabase.
+ *
+ * De a 500 productos y no la tabla entera, por dos límites que con el
+ * catálogo chico no se veían:
+ *  - Supabase corta cada respuesta en 1.000 filas sin avisar: al pasar de
+ *    mil productos, los más antiguos desaparecían del sitio.
+ *  - El caché de datos de Vercel no guarda entradas de más de 2 MB, y el
+ *    catálogo pesa cerca de 1,4 KB por producto: entero dejaba de caber (y
+ *    de guardarse) cerca de los 1.400.
  */
-const readCatalogCached = unstable_cache(
-  async (): Promise<Product[]> => {
+const readCatalogPage = unstable_cache(
+  async (page: number): Promise<Product[]> => {
     const supabase = requireSupabase();
+    const from = page * CATALOG_PAGE;
 
     // is_active lo maneja el cron (el vendedor dejó de ofrecer el producto);
     // is_hidden es una decisión humana desde /admin/productos. Para los
@@ -122,7 +136,11 @@ const readCatalogCached = unstable_cache(
     const { data, error } = await selectWithFallback((columns, excludeDeleted) => {
       let query = supabase.from('products').select(columns).eq('is_active', true).eq('is_hidden', false);
       if (excludeDeleted) query = query.is('deleted_at', null);
-      return query.order('created_at', { ascending: false });
+      // El id desempata: sin un orden estable las páginas se pisarían.
+      return query
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, from + CATALOG_PAGE - 1);
     });
 
     // Un error no puede terminar publicado como un catálogo vacío: fallar
@@ -130,9 +148,27 @@ const readCatalogCached = unstable_cache(
     if (error) throw new Error(`No se pudo leer el catálogo: ${error.message}`);
     return (data ?? []) as Product[];
   },
-  ['catalog-v1'],
+  ['catalog-v2'],
   { revalidate: 60, tags: ['catalog'] }
 );
+
+/** El catálogo completo, armado de sus páginas. */
+async function readCatalogCached(): Promise<Product[]> {
+  const all: Product[] = [];
+  // Si entra un producto nuevo entre dos lecturas, las filas se corren una
+  // posición y la última de una página se repite al comienzo de la otra.
+  const seen = new Set<string>();
+  for (let page = 0; page < CATALOG_MAX_PAGES; page++) {
+    const rows = await readCatalogPage(page);
+    for (const row of rows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      all.push(row);
+    }
+    if (rows.length < CATALOG_PAGE) break;
+  }
+  return all;
+}
 
 /**
  * `cache` hace que el layout y la página compartan una sola lectura por

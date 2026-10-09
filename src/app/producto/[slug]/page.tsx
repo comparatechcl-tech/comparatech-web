@@ -2,7 +2,6 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { CircleAlert } from 'lucide-react';
 import {
-  getAllProducts,
   getAlternatives,
   getCatalogProducts,
   getProductBySlugAnyStatus,
@@ -25,11 +24,37 @@ import { shortProductName, truncateAtWord } from '@/lib/text';
 import { formatCLP, formatDiscountPct } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
 import { reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
+import { MIN_DEAL_DISCOUNT, discountOf } from '@/lib/deal-rank';
 import type { Product } from '@/lib/types';
 
+/**
+ * Fichas que se generan en cada despliegue. Las demás se generan la primera
+ * vez que alguien entra (dynamicParams, por defecto) y desde ahí salen de
+ * caché igual que estas.
+ *
+ * Antes se generaban todas. Con 250 productos daba lo mismo; con 790 cada
+ * despliegue armaba 724 fichas (más de 100 MB) y cualquier tropiezo de la
+ * base en una de ellas botaba el despliegue entero. Como el catálogo crece
+ * de a cien por día, el despliegue no puede depender de su tamaño.
+ */
+const PRERENDER_LIMIT = 150;
+
+/**
+ * Los nombres de Mercado Libre dan slugs de hasta 200 caracteres, y la ficha
+ * pre-generada se guarda en archivos con ese nombre más un sufijo: muy cerca
+ * del máximo de un nombre de archivo. Las de slug largo se generan al vuelo.
+ */
+const PRERENDER_MAX_SLUG = 150;
+
 export async function generateStaticParams() {
-  const products = await getAllProducts();
-  return products.map((p) => ({ slug: p.slug }));
+  // Una por producto real (sin los otros colores): las destacadas y las
+  // ofertas primero, que es a donde llega la gente; después, lo más vendido.
+  const weight = (p: Product) => (p.is_featured ? 2 : 0) + (discountOf(p) >= MIN_DEAL_DISCOUNT ? 1 : 0);
+  return (await getCatalogProducts())
+    .filter((p) => p.slug.length <= PRERENDER_MAX_SLUG)
+    .sort((a, b) => weight(b) - weight(a) || (b.seller_sales_count ?? 0) - (a.seller_sales_count ?? 0))
+    .slice(0, PRERENDER_LIMIT)
+    .map((p) => ({ slug: p.slug }));
 }
 
 // Revalida cada 5 minutos (precios/specs actualizados) y permite que

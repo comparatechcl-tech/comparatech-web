@@ -63,6 +63,8 @@ const DEALS_MOBILE = 8;
 const DEALS_DESKTOP = 8;
 const PICKS_LIMIT = 4;
 const NEW_LIMIT = 8;
+/** Productos de cada categoría que ofrece el comparador rápido de la portada. */
+const COMPARE_PER_CATEGORY = 15;
 
 const dropDateFmt = new Intl.DateTimeFormat('es-CL', {
   timeZone: 'America/Santiago',
@@ -101,15 +103,26 @@ export default async function HomePage() {
   const shownAbove = new Set([...ranked.slice(0, 1 + DEALS_DESKTOP), ...picks].map((p) => p.id));
   const fresh = catalog.filter((p) => !shownAbove.has(p.id)).slice(0, NEW_LIMIT);
 
-  // El comparador rápido recibe solo lo que usa para elegir: mandar el
-  // catálogo completo (descripciones incluidas) inflaba el HTML de la home.
-  const compareOptions = catalog.map(({ slug, name, category, ml_domain_id, seller_sales_count }) => ({
-    slug,
-    name,
-    category,
-    ml_domain_id,
-    seller_sales_count,
-  }));
+  // El comparador rápido recibe solo lo que usa para elegir, y solo lo más
+  // vendido de cada categoría: con el catálogo entero la portada llevaba dos
+  // listas de 700 productos escritas en el HTML (dos tercios de su peso), y
+  // nadie encuentra nada en un desplegable de ese largo. El comparador
+  // completo sigue en /comparador.
+  const perCategory = new Map<string, number>();
+  const compareOptions = [...catalog]
+    .sort((a, b) => (b.seller_sales_count ?? 0) - (a.seller_sales_count ?? 0))
+    .filter((p) => {
+      const used = perCategory.get(p.category) ?? 0;
+      perCategory.set(p.category, used + 1);
+      return used < COMPARE_PER_CATEGORY;
+    })
+    .map(({ slug, name, category, ml_domain_id, seller_sales_count }) => ({
+      slug,
+      name,
+      category,
+      ml_domain_id,
+      seller_sales_count,
+    }));
 
   const categoryCards = [
     ...categories.map((c) => ({
