@@ -12,3 +12,7 @@ tsconfig.tsbuildinfo
 
 # Archivos de apoyo locales (por ejemplo, las migraciones juntas para pegar en Supabase)
 /_local/
+
+# Imagenes de referencia del avatar: son material de trabajo, no del sitio.
+# En public/ quedarian publicadas con cada deploy.
+/public/Avatar/
