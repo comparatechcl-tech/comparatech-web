@@ -81,7 +81,10 @@ function chipHref(categoria: string, orden: SortOrder, tipo: string | undefined,
 }
 
 function chipClass(active: boolean): string {
-  return `inline-flex shrink-0 items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+  // whitespace-nowrap: el chip va dentro de un <li>, que es el que se achica
+  // cuando la fila no cabe. Sin esto, un nombre de varias palabras ("Lectores
+  // de código de barras") se partía en tres líneas en vez de deslizarse.
+  return `inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
     active
       ? 'border-accent bg-accent/10 text-accent'
       : 'border-border bg-surface text-muted hover:border-accent/40 hover:text-fg'
