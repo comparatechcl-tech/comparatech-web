@@ -54,7 +54,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 
   const products = await getProductsByCategory(categoria);
   return {
-    title: `${info.name} — Mejores precios en Chile`,
+    title: `${info.name} — Precios y ofertas en Chile`,
     // El canonical no lleva ?orden=, ?tipo= ni ?pagina=: son la misma lista
     // en otro orden o más larga, no páginas distintas.
     alternates: { canonical: `/categoria/${categoria}` },
