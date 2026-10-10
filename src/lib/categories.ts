@@ -34,7 +34,9 @@ export const CATEGORIES: CategoryInfo[] = [
  * cola de revisión. Los identificadores salen del domain_discovery de ML o
  * del reporte de dominios descartados que devuelve el cron de prospección.
  * Al sumar uno, los productos que se habían descartado por ese dominio
- * vuelven solos a ser analizados.
+ * vuelven solos a ser analizados. Cada dominio necesita además su nombre en
+ * castellano en lib/product-types: sin él, sus productos se muestran como
+ * 'Otros' en los filtros de la categoría y en el comparador.
  */
 const DOMAIN_TO_CATEGORY: Record<string, string> = {
   // Audio
@@ -166,6 +168,11 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
 export function categoryFromDomain(domainId: string | null | undefined): string | null {
   if (!domainId) return null;
   return DOMAIN_TO_CATEGORY[domainId] ?? null;
+}
+
+/** Los dominios de ML que el sitio acepta. */
+export function getAcceptedDomains(): string[] {
+  return Object.keys(DOMAIN_TO_CATEGORY);
 }
 
 export function getAllCategories(): CategoryInfo[] {

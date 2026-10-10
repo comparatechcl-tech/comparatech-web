@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Product } from '@/lib/types';
+import { getAcceptedDomains } from '@/lib/categories';
 import {
   CATEGORY_PAGE,
   categoryIntro,
@@ -129,6 +130,22 @@ describe('tipos', () => {
     expect(domainLabel('MLC-RARO')).toBe('Otros');
     expect(domainLabel(null)).toBe('Otros');
     expect(typeSlug('Audífonos')).toBe('audifonos');
+  });
+
+  it('todos los dominios que el sitio acepta tienen nombre en castellano', () => {
+    // Si falla: al sumar un dominio en lib/categories faltó su nombre en
+    // DOMAIN_LABELS (lib/product-types), y sus productos saldrían como 'Otros'.
+    const unnamed = getAcceptedDomains().filter((d) => domainLabel(d) === 'Otros');
+    expect(unnamed).toEqual([]);
+  });
+
+  it('los nombres sirven de filtro: cada uno da un ?tipo= distinto y legible', () => {
+    const labels = new Set(getAcceptedDomains().map(domainLabel));
+    const slugs = new Set([...labels].map(typeSlug));
+    expect(slugs.size).toBe(labels.size);
+    for (const slug of slugs) expect(slug, slug).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    expect(domainLabel('MLC-OVENS')).toBe('Hornos');
+    expect(typeSlug(domainLabel('MLC-STABILIZERS_AND_UPS'))).toBe('ups-y-estabilizadores');
   });
 
   it('arma chips por cantidad, con Otros al final', () => {

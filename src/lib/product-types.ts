@@ -11,6 +11,14 @@ import { stripDiacritics } from '@/lib/text';
  * Nombre en castellano de cada tipo de producto de Mercado Libre. Un
  * dominio que no está acá se agrupa como 'Otros': es preferible a mostrar
  * "MLC-WIRELESS_ANTENNAS_AND_ADAPTERS" en un chip.
+ *
+ * Tienen que estar todos los dominios que el sitio acepta (la lista de
+ * lib/categories): llegaron a faltar 33 de 85, y casi uno de cada cuatro
+ * productos quedaba escondido en 'Otros' (hornos, campanas, racks de TV). Un
+ * test lo revisa. Los nombres salen de cómo los vendedores titulan esos
+ * productos.
+ * Dos dominios pueden llevar el mismo nombre si para quien compra son lo
+ * mismo (los teclados, las cámaras).
  */
 const DOMAIN_LABELS: Record<string, string> = {
   // Audio
@@ -42,6 +50,16 @@ const DOMAIN_LABELS: Record<string, string> = {
   'MLC-WEBCAMS': 'Cámaras web',
   'MLC-RAM_MEMORY_MODULES': 'Memorias RAM',
   'MLC-USB_HUBS': 'Hubs USB',
+  'MLC-STABILIZERS_AND_UPS': 'UPS y estabilizadores',
+  'MLC-VIDEO_CAPTURE_DEVICES': 'Capturadoras de video',
+  'MLC-DATA_CABLES_AND_ADAPTERS': 'Cables y adaptadores',
+  'MLC-PC_THERMAL_COMPOUND_PASTES': 'Pasta térmica',
+  'MLC-DESKTOP_COMPUTER_COOLERS_AND_FANS': 'Refrigeración para PC',
+  'MLC-HARD_DRIVES_AND_SSDS_ENCLOSURES': 'Carcasas para discos',
+  'MLC-NETWORK_CABLES': 'Cables de red',
+  'MLC-NETWORK_SWITCHES': 'Switches de red',
+  'MLC-NETWORK_CARDS': 'Tarjetas de red',
+  'MLC-BAR_CODE_SCANNERS': 'Lectores de código de barras',
   // Electrónica
   'MLC-SMARTWATCHES': 'Smartwatch',
   'MLC-TELEVISIONS': 'Televisores',
@@ -55,6 +73,19 @@ const DOMAIN_LABELS: Record<string, string> = {
   'MLC-SURVEILLANCE_CAMERAS': 'Cámaras de seguridad',
   'MLC-E_READERS': 'Lectores de e-books',
   'MLC-SMARTWATCH_AND_WATCH_BANDS': 'Correas',
+  'MLC-SMARTWATCH_CHARGERS': 'Cargadores de smartwatch',
+  'MLC-OBJECT_FINDERS': 'Localizadores',
+  'MLC-AUDIO_AND_VIDEO_CABLES_AND_ADAPTERS': 'Cables de audio y video',
+  'MLC-TV_AND_MONITOR_STANDS_AND_WALL_HANGERS': 'Soportes para TV',
+  'MLC-TV_ANTENNAS': 'Antenas de TV',
+  'MLC-TV_REMOTE_CONTROLS': 'Controles remotos',
+  'MLC-WALKIE_TALKIES': 'Walkie talkies',
+  'MLC-CELL_BATTERIES': 'Pilas',
+  'MLC-BATTERY_AND_CELL_BATTERIES_CHARGERS': 'Cargadores de pilas',
+  // Aros de luz y paneles LED.
+  'MLC-CONTINUOUS_LIGHTING': 'Luces para foto y video',
+  'MLC-CAMERA_TRIPODS': 'Trípodes',
+  'MLC-DOORBELLS': 'Timbres',
   // Gaming
   'MLC-GAME_CONSOLES': 'Consolas',
   'MLC-GAMEPADS_AND_JOYSTICKS': 'Controles',
@@ -64,14 +95,26 @@ const DOMAIN_LABELS: Record<string, string> = {
   'MLC-HOME_OFFICE_DESKS': 'Escritorios',
   'MLC-LIGHT_BULBS': 'Ampolletas',
   'MLC-LED_STRIPS': 'Tiras LED',
+  'MLC-TV_STORAGE_UNITS': 'Racks de TV',
+  'MLC-EMERGENCY_LIGHTS': 'Luces de emergencia',
+  'MLC-TABLE_AND_DESK_LAMPS': 'Lámparas de escritorio',
   // Electrodomésticos
   'MLC-MICROWAVES': 'Microondas',
   'MLC-REFRIGERATORS': 'Refrigeradores',
+  'MLC-FREEZERS': 'Congeladores',
   'MLC-WASHING_MACHINES': 'Lavadoras',
   'MLC-VACUUM_AND_STEAM_CLEANERS': 'Aspiradoras',
   'MLC-ELECTRIC_JUGS': 'Hervidores',
   'MLC-FANS': 'Ventiladores',
   'MLC-ELECTRIC_HOME_HEATERS': 'Estufas',
+  'MLC-OVENS': 'Hornos',
+  'MLC-COOKTOPS': 'Encimeras',
+  // Cocinas de piso, con horno.
+  'MLC-RANGES': 'Cocinas',
+  'MLC-KITCHEN_RANGE_HOODS': 'Campanas',
+  'MLC-WATER_DISPENSERS': 'Dispensadores de agua',
+  'MLC-WATER_HEATERS': 'Calefonts y termos',
+  'MLC-HAIR_CLIPPERS_ELECTRIC_SHAVERS_AND_HAIR_TRIMMERS': 'Afeitadoras y cortapelos',
 };
 
 export const OTHER_TYPE_LABEL = 'Otros';
