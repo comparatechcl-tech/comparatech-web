@@ -6,18 +6,17 @@ import { isCronAuthorized } from '@/lib/cron-auth';
 import { startCronRun, type CronRun } from '@/lib/cron-runs';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings } from '@/lib/settings';
-import { dropSince, priceStats, type PricePoint } from '@/lib/deals';
-import { captionDiscount } from '@/lib/content/captions';
 import {
   TELEGRAM_RULES,
   pickForTelegram,
-  selectSocialProducts,
+  readFreshSocialProducts,
   sendPhoto,
   telegramCaption,
   telegramConfig,
   type SocialProduct,
   type TelegramPick,
 } from '@/lib/social/telegram';
+import { readConfirmedDrops } from '@/lib/social/drops';
 
 /**
  * Publica en el canal de Telegram las mejores ofertas del momento (3 a 5).
@@ -74,42 +73,15 @@ async function recentlyPosted(
 
 /**
  * Bajas de precio confirmadas por el historial propio (en %), solo para los
- * que no llegan al descuento mínimo: a los demás no les hace falta. Sin la
- * tabla price_history, ninguna.
+ * que no llegan al descuento mínimo: a los demás no les hace falta.
+ *
+ * Antes leía price_history acá mismo con un tope de 5.000 filas, pero
+ * Supabase corta cada respuesta en 1.000: con el catálogo actual llegaban
+ * solo los registros más antiguos y ninguna baja se reconocía. Ahora usa la
+ * lectura por tandas de las páginas del sitio.
  */
-async function historyDrops(admin: SupabaseClient, rows: SocialProduct[], now: Date): Promise<Map<string, number>> {
-  const drops = new Map<string, number>();
-  const ids = rows.filter((p) => captionDiscount(p) < TELEGRAM_RULES.minDiscount).map((p) => p.id);
-  if (ids.length === 0) return drops;
-
-  // 60 días alcanzan para ver el precio anterior a una baja de los últimos
-  // 30, que es lo que dropSince considera noticia.
-  const since = new Date(now.getTime() - 60 * 86_400_000).toISOString();
-  const { data, error } = await admin
-    .from('price_history')
-    .select('product_id, price, observed_at')
-    .in('product_id', ids)
-    .gte('observed_at', since)
-    .order('observed_at', { ascending: true })
-    .limit(5000);
-  if (error) {
-    if (!isMissingSchemaError(error)) console.warn('[social-telegram] historial no disponible:', error.message);
-    return drops;
-  }
-
-  const byProduct = new Map<string, PricePoint[]>();
-  for (const row of (data ?? []) as (PricePoint & { product_id: string })[]) {
-    const list = byProduct.get(row.product_id) ?? [];
-    list.push({ price: row.price, observed_at: row.observed_at });
-    byProduct.set(row.product_id, list);
-  }
-  for (const p of rows) {
-    const history = byProduct.get(p.id);
-    if (!history) continue;
-    const drop = dropSince(priceStats(history, now.getTime()), p.price, now.getTime());
-    if (drop) drops.set(p.id, (drop.amount / (p.price + drop.amount)) * 100);
-  }
-  return drops;
+function historyDrops(rows: SocialProduct[], now: Date): Promise<Map<string, number>> {
+  return readConfirmedDrops(rows, now, TELEGRAM_RULES.minDiscount);
 }
 
 function describe(pick: TelegramPick<SocialProduct>) {
@@ -144,20 +116,11 @@ export async function GET(req: NextRequest) {
   const freshSince = new Date(now.getTime() - TELEGRAM_RULES.maxPriceAgeMs).toISOString();
 
   try {
-    const read = await selectSocialProducts((columns, has0017) => {
-      let query = admin
-        .from('products')
-        .select(columns)
-        .eq('is_active', true)
-        .eq('is_hidden', false)
-        .gte('price_checked_at', freshSince);
-      if (has0017) query = query.is('deleted_at', null);
-      return query;
-    });
+    const read = await readFreshSocialProducts(admin, freshSince);
     if (read.error) throw new Error(`No se pudo leer el catálogo: ${read.error}`);
 
     const posted = await recentlyPosted(admin, read.rows, now);
-    const drops = await historyDrops(admin, read.rows, now);
+    const drops = await historyDrops(read.rows, now);
     const picks = pickForTelegram(read.rows, { now, recentlyPosted: posted ?? new Set(), drops });
 
     if (dry) {
