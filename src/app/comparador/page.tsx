@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { getCatalogProducts } from '@/lib/queries/products';
-import { CompareClient, type CompareProduct } from '@/components/compare/CompareClient';
+import { categoriesWithCounts } from '@/lib/queries/site-categories';
+import { defaultComparePair, toCompareDetail } from '@/lib/compare';
+import { CompareClient } from '@/components/compare/CompareClient';
 
 export const metadata: Metadata = {
   title: 'Comparador de productos',
@@ -13,22 +15,14 @@ export const metadata: Metadata = {
 export const revalidate = 300;
 
 export default async function ComparadorPage() {
-  // Solo los campos que usa la tabla: la descripción de cada producto
-  // viajaría entera al navegador sin mostrarse nunca.
-  const products: CompareProduct[] = (await getCatalogProducts()).map((p) => ({
-    id: p.id,
-    slug: p.slug,
-    name: p.name,
-    category: p.category,
-    ml_domain_id: p.ml_domain_id,
-    seller_sales_count: p.seller_sales_count,
-    price: p.price,
-    image_url: p.image_url,
-    specs: p.specs,
-    affiliate_url: p.affiliate_url,
-    outbound_url: p.outbound_url,
-    ml_product_id: p.ml_product_id,
-  }));
+  const catalog = await getCatalogProducts();
+
+  // La página lleva solo el par con que abre y las categorías. Antes le
+  // pasaba al navegador todos los productos con sus specs: 790 KB que
+  // crecían con el catálogo. El resto se pide a /comparador/datos.
+  const [slugA, slugB] = defaultComparePair(catalog);
+  const a = catalog.find((p) => p.slug === slugA);
+  const b = catalog.find((p) => p.slug === slugB);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">
@@ -37,7 +31,14 @@ export default async function ComparadorPage() {
         Elige dos productos y compara sus especificaciones y precio en una
         sola tabla.
       </p>
-      <CompareClient products={products} />
+      {a && b ? (
+        <CompareClient
+          initial={{ a: toCompareDetail(a), b: toCompareDetail(b) }}
+          categories={categoriesWithCounts(catalog, 1)}
+        />
+      ) : (
+        <p className="py-12 text-center text-muted">Todavía no hay productos para comparar.</p>
+      )}
     </div>
   );
 }

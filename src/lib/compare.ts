@@ -5,6 +5,9 @@
  * Sin I/O: lo usan componentes de cliente.
  */
 import { getAllCategories } from '@/lib/categories';
+import { buyUrl } from '@/lib/outbound';
+import { domainLabel, OTHER_TYPE_LABEL } from '@/lib/product-types';
+import type { Product } from '@/lib/types';
 
 /** Lo mínimo que el comparador necesita de cada producto para elegir. */
 export interface CompareCandidate {
@@ -13,6 +16,82 @@ export interface CompareCandidate {
   category: string;
   ml_domain_id: string | null;
   seller_sales_count: number;
+}
+
+/**
+ * Lo que la tabla de /comparador muestra de un producto.
+ *
+ * Antes la página le pasaba al navegador todos los productos con sus specs
+ * (790 KB, y crecía con el catálogo) para poder armar cualquier par. Ahora
+ * lleva solo el par con que abre; la lista para elegir se pide por categoría
+ * y las specs, por producto, a /comparador/datos.
+ */
+export interface CompareDetail extends CompareCandidate {
+  id: string;
+  price: number;
+  image_url: string;
+  specs: Record<string, string | number>;
+  /** Destino del botón de compra, ya resuelto con lib/outbound. */
+  href: string;
+}
+
+/** Solo los campos para elegir: lo demás del producto no viaja. */
+export function toCompareCandidate(product: CompareCandidate): CompareCandidate {
+  return {
+    slug: product.slug,
+    name: product.name,
+    category: product.category,
+    ml_domain_id: product.ml_domain_id,
+    seller_sales_count: product.seller_sales_count,
+  };
+}
+
+export function toCompareDetail(product: Product): CompareDetail {
+  return {
+    ...toCompareCandidate(product),
+    id: product.id,
+    price: product.price,
+    image_url: product.image_url,
+    specs: product.specs ?? {},
+    href: buyUrl(product),
+  };
+}
+
+/** Lo que responde /comparador/datos?cat=: los productos de una categoría. */
+export interface CompareList {
+  items: CompareCandidate[];
+}
+
+/** Lo que se le puede pedir a /comparador/datos. */
+export type CompareQuery = { category: string } | { slug: string };
+
+export function compareListUrl(category: string): string {
+  return `/comparador/datos?cat=${encodeURIComponent(category)}`;
+}
+
+export function compareProductUrl(slug: string): string {
+  return `/comparador/datos?slug=${encodeURIComponent(slug)}`;
+}
+
+const CATEGORY_SLUG_RE = /^[a-z0-9-]{1,40}$/;
+// Los slugs salen del nombre del producto (lib/candidate-slugs) y los nombres
+// de Mercado Libre son largos: el más largo del catálogo tiene 198 letras.
+const PRODUCT_SLUG_RE = /^[a-z0-9-]{1,250}$/;
+
+/**
+ * Lee lo que pide /comparador/datos. Estricto, igual que /ofertas/lote: cada
+ * dirección distinta es una respuesta distinta en el caché, así que solo se
+ * aceptan las que arman compareListUrl y compareProductUrl. Un parámetro de
+ * más, repetido, los dos juntos o con otro formato es null (400).
+ */
+export function parseCompareQuery(params: URLSearchParams): CompareQuery | null {
+  const keys = [...params.keys()];
+  if (keys.length !== 1) return null;
+
+  const value = params.get(keys[0]) ?? '';
+  if (keys[0] === 'cat') return CATEGORY_SLUG_RE.test(value) ? { category: value } : null;
+  if (keys[0] === 'slug') return PRODUCT_SLUG_RE.test(value) ? { slug: value } : null;
+  return null;
 }
 
 /**
@@ -100,6 +179,32 @@ export function groupByCategory<T extends CompareCandidate>(
     .map(([slug, items]) => ({
       slug,
       label: label(slug),
+      items: [...items].sort((x, y) => x.name.localeCompare(y.name, 'es')),
+    }));
+}
+
+/**
+ * Productos agrupados por tipo ("Audífonos", "Parlantes") para los
+ * <optgroup> de /comparador, que lista una categoría a la vez. Los grupos
+ * van en orden alfabético, que es como se busca en un desplegable, con
+ * 'Otros' al final; dentro de cada uno, por nombre.
+ */
+export function groupByType<T extends CompareCandidate>(products: T[]): { label: string; items: T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const p of products) {
+    const label = domainLabel(p.ml_domain_id);
+    const list = groups.get(label) ?? [];
+    list.push(p);
+    groups.set(label, list);
+  }
+
+  return [...groups.entries()]
+    .sort(
+      ([a], [b]) =>
+        Number(a === OTHER_TYPE_LABEL) - Number(b === OTHER_TYPE_LABEL) || a.localeCompare(b, 'es')
+    )
+    .map(([label, items]) => ({
+      label,
       items: [...items].sort((x, y) => x.name.localeCompare(y.name, 'es')),
     }));
 }
