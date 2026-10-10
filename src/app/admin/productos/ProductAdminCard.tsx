@@ -38,6 +38,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   whatsapp: 'WhatsApp',
   telegram: 'Telegram',
   facebook: 'Facebook',
+  youtube: 'YouTube',
 };
 
 const RESULT_MESSAGES: Record<string, string> = {
@@ -104,6 +105,8 @@ export function ProductAdminCard({
   const reason = !product.is_active ? reasonInfo(product.inactive_reason) : null;
   const checkedAgo = formatTimeAgo(product.price_checked_at);
   const publishedAgo = formatTimeAgo(product.rrss_published_at);
+  // Lo programado desde Metricool queda con la fecha en que sale.
+  const scheduled = product.rrss_published_at ? new Date(product.rrss_published_at).getTime() > Date.now() : false;
 
   /** Corre una acción con su etiqueta de "en curso" y la libera al terminar. */
   function run(action: Exclude<PendingAction, null>, task: () => Promise<void>) {
@@ -316,7 +319,8 @@ export function ProductAdminCard({
               )}
               {status === 'publicado' && publishedAgo && (
                 <span className="text-muted">
-                  Publicado{product.rrss_channel ? ` en ${CHANNEL_LABELS[product.rrss_channel] ?? product.rrss_channel}` : ''}{' '}
+                  {scheduled ? 'Programado' : 'Publicado'}
+                  {product.rrss_channel ? ` en ${CHANNEL_LABELS[product.rrss_channel] ?? product.rrss_channel}` : ''}{' '}
                   {publishedAgo}
                 </span>
               )}

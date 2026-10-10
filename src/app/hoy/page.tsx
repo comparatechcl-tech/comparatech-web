@@ -53,6 +53,10 @@ async function recentSocialIds(): Promise<string[]> {
   const supabase = getSupabase();
   if (!supabase) return [];
   const since = new Date(Date.now() - SOCIAL_WINDOW_DAYS * 86_400_000).toISOString();
+  // Lo programado en Metricool lleva la fecha en que sale (a lo más dos días
+  // adelante) y se muestra desde ya: esta página se regenera cuando alguien
+  // la pide, así que esperar a la hora exacta la dejaría sin el producto
+  // justo para quien llega primero desde el post.
   const { data, error } = await supabase
     .from('products')
     .select('id, rrss_published_at')
@@ -84,6 +88,11 @@ export default async function HoyPage() {
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
           Lo que mostramos en redes y los mayores descuentos del día. Los precios se revisan contra Mercado Libre
           varias veces al día y pueden cambiar.
+        </p>
+        {/* Arriba y legible: a esta página llega quien viene de un post, y el aviso no puede quedar al pie en letra chica. */}
+        <p className="mt-2 max-w-2xl text-sm text-fg">
+          Publicidad · Los links a Mercado Libre son de afiliado: si compras, ComparaTech recibe una comisión sin
+          costo extra para ti.
         </p>
         {telegram && (
           <a
@@ -117,11 +126,6 @@ export default async function HoyPage() {
           </Link>
         </div>
       </section>
-
-      <p className="mt-10 text-center text-xs text-muted">
-        #publicidad · Los links a Mercado Libre son de afiliado: si compras, ComparaTech recibe una comisión sin
-        costo extra para ti.
-      </p>
     </div>
   );
 }

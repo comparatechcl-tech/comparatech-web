@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AD_LABEL,
   DISCLOSURE,
   buildCaption,
   captionDiscount,
@@ -69,14 +70,34 @@ describe('buildCaption', () => {
     expect(late).toContain('el 04/10 a las 22:15');
   });
 
-  it('el aviso de publicidad va siempre, como última línea y aparte de los hashtags', () => {
+  it('el aviso de publicidad es la primera línea, en palabras y no como hashtag', () => {
     for (const channel of CHANNELS) {
       const text = buildCaption(base, channel, opts);
-      const lines = text.split('\n');
-      expect(lines[lines.length - 1]).toBe(DISCLOSURE);
-      expect(lines[lines.length - 2]).toBe('');
-      expect(text).toContain('#publicidad');
+      expect(text.split('\n')[0]).toBe(AD_LABEL);
+      expect(AD_LABEL).toMatch(/^Publicidad/);
+      expect(text).not.toContain('#publicidad');
     }
+  });
+
+  it('la frase de la comisión va aparte y antes de los hashtags, nunca mezclada con ellos', () => {
+    for (const channel of CHANNELS) {
+      const lines = buildCaption(base, channel, opts).split('\n');
+      const at = lines.indexOf(DISCLOSURE);
+      expect(at).toBeGreaterThan(0);
+      expect(lines[at - 1]).toBe('');
+      const tagLine = lines.findIndex((l) => l.startsWith('#'));
+      if (tagLine >= 0) {
+        expect(tagLine).toBeGreaterThan(at);
+        expect(lines[lines.length - 1]).toBe(lines[tagLine]);
+      } else {
+        expect(lines[lines.length - 1]).toBe(DISCLOSURE);
+      }
+    }
+  });
+
+  it('Instagram no pasa de cinco hashtags', () => {
+    const tags = buildCaption(base, 'instagram', opts).match(/#[a-z0-9]+/g) ?? [];
+    expect(tags.length).toBeLessThanOrEqual(5);
   });
 
   it('sin fecha de revisión no inventa una', () => {
@@ -207,7 +228,44 @@ describe('Telegram', async () => {
     const caption = telegramCaption(row({ name: 'Parlante <b>Pro</b> & Más' }), 'https://meli.la/abc', now);
     expect(caption).toContain('&lt;b&gt;Pro&lt;/b&gt; &amp; Más');
     expect(caption.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_MAX);
-    expect(caption).toContain('#publicidad');
+    expect(caption.startsWith(AD_LABEL)).toBe(true);
+    expect(caption).toContain(DISCLOSURE);
+  });
+
+  it('si el pie no cabe, saca los links enteros y conserva el aviso, el precio y la comisión', () => {
+    // Un link pegado a mano con parámetros de seguimiento puede medir más que el pie entero.
+    const longLink = `https://articulo.mercadolibre.cl/MLC-1?${'x'.repeat(1300)}`;
+    const caption = telegramCaption(row({}), longLink, now);
+    expect(caption.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_MAX);
+    expect(caption.startsWith(AD_LABEL)).toBe(true);
+    expect(caption).toContain('Precio revisado el');
+    expect(caption).toContain(DISCLOSURE);
+    // Ni un link a medias (perdería los parámetros de afiliado) ni el de la ficha.
+    expect(caption).not.toContain('https://');
+
+    // Si basta con sacar el link a la ficha, el de compra se queda completo.
+    const mediumLink = `https://articulo.mercadolibre.cl/MLC-1?${'x'.repeat(620)}`;
+    const medium = telegramCaption(row({}), mediumLink, now);
+    expect(medium.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_MAX);
+    expect(medium).toContain(mediumLink);
+    expect(medium).not.toContain('Compara en ComparaTech');
+    expect(medium).toContain(DISCLOSURE);
+  });
+
+  it('sacar el link a la ficha no se lleva el gancho que empieza con el mismo emoji', () => {
+    const longLink = `https://articulo.mercadolibre.cl/MLC-1?${'x'.repeat(1300)}`;
+    // Un producto sin descuento ni vendedor destacado usa los ganchos de "precio", entre ellos "🔎 Míralo antes de comprar".
+    const plain = row({ original_price: null, seller_sales_count: 10 });
+    const hooks = new Set<string>();
+    for (let day = 1; day <= 20; day++) {
+      const at = new Date(Date.UTC(2026, 9, day, 15));
+      const full = buildCaption(plain, 'telegram', { now: at, siteUrl: 'https://sitio.test', link: longLink });
+      const cut = telegramCaption(plain, longLink, at).split('\n');
+      // Línea 0: el aviso. Línea 1: el mismo gancho del texto completo.
+      expect(cut[1]).toBe(full.split('\n')[1]);
+      hooks.add(cut[1]);
+    }
+    expect([...hooks]).toContain('🔎 Míralo antes de comprar');
   });
 
   it('sin token no hace nada', async () => {

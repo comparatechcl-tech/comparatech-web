@@ -12,7 +12,8 @@ import { captionDiscount, chileDateTime, formatPrice, mlPhotoJpg } from '@/lib/c
  *   Nada de texto encima: tapar parte del producto o "decorar" la foto
  *   oficial confunde sobre lo que se compra.
  * - Descuento, precio de lista, envío gratis y Full aparecen solo si son ciertos.
- * - Siempre la hora del precio y '#publicidad'.
+ * - Siempre la hora del precio y el aviso 'Publicidad', arriba y bien
+ *   visible: el SERNAC pide que no quede escondido ni en letra chica.
  *
  * Usa la fuente que trae next/og (sin pedir fuentes a otro servidor), y sin
  * emojis, que next/og descarga aparte.
@@ -52,7 +53,21 @@ const COLORS = {
   yellow: '#FFE600',
 };
 
+/** Alto de la franja superior que Instagram cubre en una historia de 1080x1920. */
+const STORY_TOP_SAFE = 250;
+
 const PHOTO_TIMEOUT_MS = 6000;
+/** Una foto de producto pesa cientos de KB: más que esto no es una foto. */
+const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
+
+function isMlPhotoUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && (url.hostname === 'mlstatic.com' || url.hostname.endsWith('.mlstatic.com'));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Baja la foto y la entrega como data URI. next/og también sabe pedirla
@@ -61,12 +76,18 @@ const PHOTO_TIMEOUT_MS = 6000;
  */
 export async function loadPhoto(imageUrl: string, size: 'F' | 'O' = 'F'): Promise<string | null> {
   const url = mlPhotoJpg(imageUrl, size);
+  // Solo el CDN de Mercado Libre: estas piezas se piden desde direcciones
+  // públicas, y el servidor no tiene por qué ir a buscar lo que diga una
+  // fila de la base a cualquier otro lado.
+  if (!isMlPhotoUrl(url)) return null;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS) });
-    if (!res.ok) return null;
+    if (!res.ok || !isMlPhotoUrl(res.url || url)) return null;
     const type = (res.headers.get('content-type') ?? '').split(';')[0].trim();
     if (type !== 'image/jpeg' && type !== 'image/png') return null;
+    if (Number(res.headers.get('content-length') ?? 0) > PHOTO_MAX_BYTES) return null;
     const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length > PHOTO_MAX_BYTES) return null;
     return `data:${type};base64,${bytes.toString('base64')}`;
   } catch {
     return null;
@@ -86,7 +107,7 @@ interface Layout {
 
 const LAYOUTS: Record<OgFormat, Layout> = {
   feed: { pad: 64, photo: 640, name: 44, price: 120, small: 30, chip: 34, horizontal: false },
-  story: { pad: 72, photo: 936, name: 54, price: 150, small: 36, chip: 40, horizontal: false },
+  story: { pad: 72, photo: 700, name: 54, price: 150, small: 36, chip: 40, horizontal: false },
   pin: { pad: 60, photo: 760, name: 42, price: 112, small: 28, chip: 32, horizontal: false },
   og: { pad: 40, photo: 550, name: 34, price: 84, small: 22, chip: 26, horizontal: true },
 };
@@ -105,6 +126,28 @@ function Chip({ text, size, strong = false }: { text: string; size: number; stro
       }}
     >
       {text}
+    </div>
+  );
+}
+
+/**
+ * El aviso de publicidad de la pieza. En la cabecera y con buen contraste:
+ * abajo y en gris se perdía, y en las historias lo tapaba la app.
+ */
+function AdTag({ size }: { size: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        padding: `${Math.round(size * 0.22)}px ${Math.round(size * 0.55)}px`,
+        borderRadius: Math.round(size * 0.35),
+        fontSize: size,
+        letterSpacing: 1,
+        background: COLORS.fg,
+        color: COLORS.ink,
+      }}
+    >
+      Publicidad
     </div>
   );
 }
@@ -209,7 +252,7 @@ export function ProductOgTemplate({
       <div style={{ display: 'flex' }}>
         {checked ? `Precio revisado ${checked.date} ${checked.time}` : 'Precio sujeto a cambios'}
       </div>
-      <div style={{ display: 'flex' }}>#publicidad</div>
+      <div style={{ display: 'flex' }}>Precios en Mercado Libre</div>
     </div>
   );
 
@@ -221,6 +264,10 @@ export function ProductOgTemplate({
         width,
         height,
         padding: L.pad,
+        // En una historia la app dibuja arriba la barra de avance, el nombre de
+        // la cuenta y los botones: lo que quede en esa franja no se ve, y ahí
+        // va el aviso de publicidad (una historia no tiene texto aparte).
+        paddingTop: format === 'story' ? STORY_TOP_SAFE : L.pad,
         background: COLORS.bg,
         color: COLORS.fg,
         gap: Math.round(L.pad * 0.5),
@@ -228,7 +275,7 @@ export function ProductOgTemplate({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Wordmark size={Math.round(L.name * 1.05)} />
-        <div style={{ display: 'flex', fontSize: L.small, color: COLORS.muted }}>Precios en Mercado Libre</div>
+        <AdTag size={L.small} />
       </div>
 
       {L.horizontal ? (
@@ -302,7 +349,7 @@ export function OffersOgTemplate({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Wordmark size={44} />
-        <div style={{ display: 'flex', fontSize: 22, color: COLORS.muted }}>Precios en Mercado Libre</div>
+        <AdTag size={22} />
       </div>
       <div style={{ display: 'flex', fontSize: 58, color: COLORS.fg, lineHeight: 1.1 }}>{headline}</div>
       <div style={{ display: 'flex', gap: 28, flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -315,7 +362,6 @@ export function OffersOgTemplate({
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 22, color: COLORS.muted }}>
         <div style={{ display: 'flex' }}>Descuentos según el precio de lista que informa Mercado Libre</div>
-        <div style={{ display: 'flex' }}>#publicidad</div>
       </div>
     </div>
   );

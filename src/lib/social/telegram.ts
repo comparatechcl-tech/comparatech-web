@@ -1,7 +1,15 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
-import { buildCaption, captionDiscount, mlPhotoJpg, type CaptionProduct } from '@/lib/content/captions';
+import { fetchAllRows } from '@/lib/admin-stats';
+import {
+  BUY_LINK_PREFIX,
+  SITE_LINK_PREFIX,
+  buildCaption,
+  captionDiscount,
+  mlPhotoJpg,
+  type CaptionProduct,
+} from '@/lib/content/captions';
 import { estimateCommission } from '@/lib/commission';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
@@ -57,11 +65,22 @@ export function telegramCaption(product: CaptionProduct, link: string, now: Date
   const text = buildCaption(product, 'telegram', { now, siteUrl: SITE_URL, link });
   const html = escapeHtml(text);
   if (html.length <= TELEGRAM_CAPTION_MAX) return html;
-  const withoutSite = text
-    .split('\n')
-    .filter((line) => !line.startsWith('🔎'))
-    .join('\n');
-  return escapeHtml(withoutSite).slice(0, TELEGRAM_CAPTION_MAX);
+
+  // Se sacan líneas enteras, por su comienzo exacto (hay un gancho que
+  // también empieza con 🔎). Cortar por el final dejaría el link a medias
+  // y se llevaría la frase de la comisión, que va al final.
+  const without = (...prefixes: string[]) =>
+    escapeHtml(
+      text
+        .split('\n')
+        .filter((line) => !prefixes.some((prefix) => line.startsWith(prefix)))
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+    );
+  const withoutSite = without(SITE_LINK_PREFIX);
+  if (withoutSite.length <= TELEGRAM_CAPTION_MAX) return withoutSite;
+  // El botón ya lleva a la compra: el link escrito sale entero.
+  return without(SITE_LINK_PREFIX, BUY_LINK_PREFIX).slice(0, TELEGRAM_CAPTION_MAX);
 }
 
 /** Texto del post cuando el producto ya no está a la venta (o se sacó del sitio). */
@@ -228,6 +247,35 @@ export async function selectSocialProducts(
   return { rows: [], has0017: false, error: last.error?.message ?? null };
 }
 
+/**
+ * Los productos a la venta con precio revisado desde `freshSince`.
+ *
+ * De a páginas y con un orden fijo: Supabase corta cada respuesta en 1.000
+ * filas sin avisar, y sin esto se elegiría entre mil productos cualesquiera.
+ * Sin repetidos: si una fila cambia entre dos páginas puede volver a salir.
+ */
+export async function readFreshSocialProducts(
+  admin: SupabaseClient,
+  freshSince: string
+): Promise<{ rows: SocialProduct[]; error: string | null }> {
+  const read = await selectSocialProducts(async (columns, has0017) => {
+    const { rows, error } = await fetchAllRows<SocialProduct>((from, to) => {
+      let query = admin
+        .from('products')
+        .select(columns)
+        .eq('is_active', true)
+        .eq('is_hidden', false)
+        .gte('price_checked_at', freshSince);
+      if (has0017) query = query.is('deleted_at', null);
+      return query.order('id', { ascending: true }).range(from, to) as unknown as PromiseLike<QueryResult>;
+    });
+    return { data: rows, error };
+  });
+  const seen = new Set<string>();
+  const rows = read.rows.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+  return { rows, error: read.error };
+}
+
 /** ¿El producto sigue a la venta y visible en el sitio? */
 export function isOnSale<T extends Pick<SocialProduct, 'is_active' | 'is_hidden' | 'deleted_at'>>(
   p: T | null | undefined
@@ -260,6 +308,18 @@ export interface TelegramPick<T> {
   reason: string;
 }
 
+/** Las reglas de selección que cambian de un canal a otro. */
+export type PickRules = Pick<
+  typeof TELEGRAM_RULES,
+  'maxPosts' | 'perCategory' | 'minDiscount' | 'minDrop' | 'maxPriceAgeMs'
+>;
+
+export interface PickOptions {
+  now: Date;
+  recentlyPosted: Set<string>;
+  drops?: Map<string, number>;
+}
+
 /**
  * Elige qué publicar: precio fresco, una rebaja que valga la pena (o una
  * baja confirmada por el historial), nada repetido en 14 días y como mucho
@@ -268,9 +328,15 @@ export interface TelegramPick<T> {
  *
  * Puro: recibe las bajas ya calculadas (drops, en %).
  */
-export function pickForTelegram<T extends SocialProduct>(
+export function pickForTelegram<T extends SocialProduct>(rows: T[], opts: PickOptions): TelegramPick<T>[] {
+  return pickByRules(rows, opts, TELEGRAM_RULES);
+}
+
+/** La misma selección con las reglas de otro canal (ver lib/social/networks). */
+export function pickByRules<T extends SocialProduct>(
   rows: T[],
-  opts: { now: Date; recentlyPosted: Set<string>; drops?: Map<string, number> }
+  opts: PickOptions,
+  rules: PickRules
 ): TelegramPick<T>[] {
   const now = opts.now.getTime();
   const eligible: TelegramPick<T>[] = [];
@@ -278,12 +344,12 @@ export function pickForTelegram<T extends SocialProduct>(
   for (const p of rows) {
     if (!isOnSale(p) || opts.recentlyPosted.has(p.id)) continue;
     const checked = p.price_checked_at ? new Date(p.price_checked_at).getTime() : NaN;
-    if (!Number.isFinite(checked) || now - checked > TELEGRAM_RULES.maxPriceAgeMs || checked > now + 60_000) continue;
+    if (!Number.isFinite(checked) || now - checked > rules.maxPriceAgeMs || checked > now + 60_000) continue;
 
     const discount = captionDiscount(p);
     const drop = opts.drops?.get(p.id) ?? null;
-    const byDiscount = discount >= TELEGRAM_RULES.minDiscount;
-    const byDrop = drop !== null && drop >= TELEGRAM_RULES.minDrop;
+    const byDiscount = discount >= rules.minDiscount;
+    const byDrop = drop !== null && drop >= rules.minDrop;
     if (!byDiscount && !byDrop) continue;
 
     eligible.push({
@@ -302,11 +368,11 @@ export function pickForTelegram<T extends SocialProduct>(
   const families = new Set<string>();
   const picked: TelegramPick<T>[] = [];
   for (const item of eligible) {
-    if (picked.length >= TELEGRAM_RULES.maxPosts) break;
+    if (picked.length >= rules.maxPosts) break;
     const family = item.product.ml_family_id;
     if (family && families.has(family)) continue;
     const used = perCategory.get(item.product.category) ?? 0;
-    if (used >= TELEGRAM_RULES.perCategory) continue;
+    if (used >= rules.perCategory) continue;
     perCategory.set(item.product.category, used + 1);
     if (family) families.add(family);
     picked.push(item);

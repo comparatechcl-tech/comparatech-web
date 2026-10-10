@@ -36,9 +36,21 @@ export interface CaptionOptions {
   link: string;
 }
 
-/** Línea final de todos los textos. No se edita sin revisar la ley del consumidor. */
-export const DISCLOSURE =
-  '#publicidad · Link de afiliado: si compras, ComparaTech recibe una comisión sin costo extra para ti.';
+/**
+ * El aviso de publicidad. No se edita sin revisar la ley del consumidor.
+ *
+ * Va en dos partes. AD_LABEL es la primera línea de todos los textos, en
+ * palabras y no como hashtag: el SERNAC pide que la publicidad se
+ * identifique de forma expresa, sin depender de abrir "ver más" y sin
+ * mezclarse entre los hashtags (un #publicidad al final no basta).
+ * DISCLOSURE explica la comisión y va antes de los hashtags.
+ */
+export const AD_LABEL = 'Publicidad · link de afiliado';
+export const DISCLOSURE = 'Si compras con nuestro link, ComparaTech recibe una comisión sin costo extra para ti.';
+
+/** Comienzo de las dos líneas con link. Telegram las busca para sacarlas si el texto no cabe. */
+export const BUY_LINK_PREFIX = '👉 Ver en Mercado Libre:';
+export const SITE_LINK_PREFIX = '🔎 Compara en ComparaTech:';
 
 const CHILE_TZ = 'America/Santiago';
 
@@ -111,9 +123,10 @@ const HOOKS: Record<HookKind, string[]> = {
     '🔥 Con descuento en Mercado Libre',
     '⚡ Descuento sobre su precio de lista',
     '👀 Ojo con este descuento',
-    '💸 Bajo su precio de lista',
+    // No "Bajo su precio de lista": sin el acento se lee "bajó".
+    '💸 Por debajo de su precio de lista',
     '🛒 Para aprovechar mientras dure',
-    '📉 Con descuento en este momento',
+    '🏷️ Con descuento en este momento',
   ],
   top: [
     '⭐ De un vendedor con reputación verde y miles de ventas',
@@ -203,7 +216,7 @@ export function productPageUrl(siteUrl: string, slug: string, channel: CaptionCh
 }
 
 export function buildCaption(product: CaptionProduct, channel: CaptionChannel, opts: CaptionOptions): string {
-  const lines: string[] = [pickHook(product, opts.now), shortProductName(product.name), priceLine(product)];
+  const lines: string[] = [AD_LABEL, pickHook(product, opts.now), shortProductName(product.name), priceLine(product)];
   if (product.offer_info?.free_shipping === true) lines.push('🚚 Envío gratis');
   lines.push(priceCheckedLine(product.price_checked_at));
   lines.push('');
@@ -213,19 +226,19 @@ export function buildCaption(product: CaptionProduct, channel: CaptionChannel, o
   if (channel === 'instagram' || channel === 'tiktok') {
     lines.push('Link en la bio 👉 comparatech');
   } else {
-    lines.push(`👉 Ver en Mercado Libre: ${opts.link}`);
-    lines.push(`🔎 Compara en ComparaTech: ${productPageUrl(opts.siteUrl, product.slug, channel)}`);
+    lines.push(`${BUY_LINK_PREFIX} ${opts.link}`);
+    lines.push(`${SITE_LINK_PREFIX} ${productPageUrl(opts.siteUrl, product.slug, channel)}`);
   }
+
+  // Antes de los hashtags, para que no se pierda entre ellos.
+  lines.push('');
+  lines.push(DISCLOSURE);
 
   const tags = hashtags(product, channel);
   if (tags) {
     lines.push('');
     lines.push(tags);
   }
-
-  // Separada de los hashtags para que no se pierda entre ellos.
-  lines.push('');
-  lines.push(DISCLOSURE);
   return lines.join('\n');
 }
 

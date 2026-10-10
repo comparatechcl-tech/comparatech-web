@@ -41,6 +41,50 @@ mide menos de 16 caracteres los crons responden 401.
 `/api/daily-digest?preview=1` (con el mismo secreto) muestra el correo
 diario sin enviarlo.
 
+### Redes sociales
+
+Instagram, Facebook y TikTok se programan desde Metricool. El sitio no
+guarda ninguna clave de las redes: solo prepara qué publicar y anota lo que
+se programó.
+
+1. `node scripts/redes.mjs plan 2` pide a `/api/social/plan` los productos
+   elegidos (precio revisado hace menos de 6 horas, 20% o más de descuento
+   sobre el precio de lista o una baja comprobada, sin repetir en 14 días),
+   con el texto de cada red, la imagen y los ajustes exactos para Metricool
+   (en TikTok, la etiqueta de contenido comercial). También dice cuántas
+   publicaciones van en el mes: el plan gratis de Metricool publica 20 y
+   cada red cuenta como una.
+2. La imagen es la misma pieza del kit del admin, en JPG y en una dirección
+   pública y firmada (`/social/pieza/...`). El precio y la hora van dentro
+   de la dirección: la imagen dice siempre lo mismo que el texto, y nadie
+   puede armar una dirección con otro precio. El script baja cada imagen
+   antes de entregar el plan, porque Metricool no avisa si no pudo bajarla.
+3. Quien programa (el asistente conectado a Metricool) crea las
+   publicaciones y después corre `node scripts/redes.mjs registrar
+   _local/archivo.json`. Con eso `/hoy` (el link de la bio) muestra el
+   producto y la selección no lo repite.
+
+Reglas que el código hace cumplir:
+
+- Nada se programa con más de 48 horas de anticipación: el precio de la
+  imagen y del texto es el de hoy. El plan avisa de lo ya programado cuyo
+  producto se agotó o cambió de precio 3% o más
+  (`pendientes_con_problemas`), para retirarlo de Metricool y avisar con
+  `"retiradas"` en el mismo `registrar`.
+- El aviso de publicidad es la primera línea de cada texto, en palabras, y
+  va visible en la imagen. Un `#publicidad` entre los hashtags no basta
+  (SERNAC).
+- Las direcciones firmadas dependen de `CRON_SECRET` (mínimo 32
+  caracteres para firmar). Si se cambia ese secreto, las imágenes de lo que
+  esté programado dejan de servir: hay que volver a programarlo.
+
+Lo que el código no puede hacer y queda a mano: Instagram y Facebook piden
+la etiqueta "Colaboración pagada" en el contenido con links de afiliado, y
+solo se puede poner desde sus aplicaciones.
+
+El canal de Telegram sigue aparte y se publica solo
+(`/api/cron/social-telegram`).
+
 ### Admin
 
 `/admin` está protegido con Basic Auth: el navegador pide usuario y clave.
