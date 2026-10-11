@@ -1,4 +1,5 @@
 import { BadgeCheck, ShieldCheck, Store, Tag, Truck, Zap, type LucideIcon } from 'lucide-react';
+import { salesLabel, warrantyLabel } from '@/lib/format';
 import type { OfferInfo, Product } from '@/lib/types';
 
 /**
@@ -25,11 +26,6 @@ interface Chip {
  */
 function readOfferInfo(value: unknown): Partial<OfferInfo> | null {
   return value && typeof value === 'object' ? (value as Partial<OfferInfo>) : null;
-}
-
-/** "Garantía de fábrica: 2 años" queda igual; "12 meses" pasa a "Garantía: 12 meses". */
-function warrantyLabel(text: string): string {
-  return /^garant[ií]a/i.test(text) ? text : `Garantía: ${text}`;
 }
 
 function buildChips(product: Product): Chip[] {
@@ -63,7 +59,7 @@ function buildChips(product: Product): Chip[] {
   if (product.seller_reputation === 'verde' && product.seller_sales_count > 0) {
     chips.push({
       key: 'vendedor',
-      label: `Vendedor reputación verde · ${product.seller_sales_count.toLocaleString('es-CL')} ventas`,
+      label: `Vendedor reputación verde · ${salesLabel(product.seller_sales_count)}`,
       Icon: BadgeCheck,
     });
   }

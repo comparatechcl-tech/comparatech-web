@@ -20,6 +20,48 @@ export function reputationLabel(rep: string): string {
   return map[rep] ?? rep;
 }
 
+// Mercado Libre escribe los plazos siempre en plural: "1 años", "1 meses". El
+// "1" tiene que ser la cifra entera: "21 años" y "1,5 años" quedan como están.
+// Sin lookbehind, que los Safari anteriores a 16.4 no entienden.
+const ONE_UNIT_RE = /(^|[^\d.,])1(\s+)(años|meses|semanas|d[ií]as|horas|minutos)(?![a-záéíóúüñ\d])/gi;
+const SINGULAR_UNIT: Record<string, string> = {
+  años: 'año',
+  meses: 'mes',
+  semanas: 'semana',
+  días: 'día',
+  dias: 'día',
+  horas: 'hora',
+  minutos: 'minuto',
+};
+
+/**
+ * "1 años" pasa a "1 año". Para los textos que llegan de Mercado Libre y se
+ * muestran tal cual: garantía, especificaciones y descripción. Se corrige al
+ * mostrar; el dato guardado sigue siendo lo que informó Mercado Libre.
+ */
+export function singularizeUnits(text: string): string {
+  return text.replace(
+    ONE_UNIT_RE,
+    (_match, before: string, gap: string, unit: string) => `${before}1${gap}${SINGULAR_UNIT[unit.toLowerCase()]}`
+  );
+}
+
+/** "Garantía de fábrica: 2 años" queda igual; "12 meses" pasa a "Garantía: 12 meses". */
+export function warrantyLabel(text: string): string {
+  const fixed = singularizeUnits(text);
+  return /^garant[ií]a/i.test(fixed) ? fixed : `Garantía: ${fixed}`;
+}
+
+/** Valor de una especificación tal como se muestra en la ficha y el comparador. */
+export function specLabel(value: string | number): string {
+  return singularizeUnits(String(value));
+}
+
+/** Total de ventas del vendedor: "1 venta", "1.306 ventas". */
+export function salesLabel(count: number): string {
+  return count === 1 ? '1 venta' : `${count.toLocaleString('es-CL')} ventas`;
+}
+
 /**
  * "hace 12 minutos", "hace 3 horas", "hace 2 días".
  *

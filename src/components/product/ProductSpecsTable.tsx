@@ -1,5 +1,5 @@
 import { Product } from '@/lib/types';
-import { reputationLabel } from '@/lib/format';
+import { reputationLabel, salesLabel, specLabel } from '@/lib/format';
 
 /**
  * `hideSeller`: en la ficha de un producto en pausa no se muestra el
@@ -17,15 +17,14 @@ export function ProductSpecsTable({ product, hideSeller = false }: { product: Pr
           {entries.map(([key, value], i) => (
             <tr key={key} className={i % 2 === 0 ? 'bg-surface' : 'bg-surface2'}>
               <td className="px-4 py-2.5 text-muted">{key}</td>
-              <td className="px-4 py-2.5 text-right font-medium text-fg">{value}</td>
+              <td className="px-4 py-2.5 text-right font-medium text-fg">{specLabel(value)}</td>
             </tr>
           ))}
           {!hideSeller && (
             <tr className="bg-surface2">
               <td className="px-4 py-2.5 text-muted">Vendedor</td>
               <td className="px-4 py-2.5 text-right font-medium text-fg">
-                {reputationLabel(product.seller_reputation)} ·{' '}
-                {product.seller_sales_count.toLocaleString('es-CL')} ventas
+                {reputationLabel(product.seller_reputation)} · {salesLabel(product.seller_sales_count)}
               </td>
             </tr>
           )}

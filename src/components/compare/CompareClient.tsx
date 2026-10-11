@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { CheckCircle2 } from 'lucide-react';
-import { formatCLP } from '@/lib/format';
+import { formatCLP, specLabel } from '@/lib/format';
 import { AffiliateButton } from '@/components/product/AffiliateButton';
 import mlImageLoader from '@/lib/ml-image-loader';
 import {
@@ -489,7 +489,7 @@ function CompareTable({ pair: { a, b }, busy, stale }: { pair: Pair; busy: boole
                     >
                       <span className="inline-flex items-center gap-1.5">
                         {aWins && <CheckCircle2 size={13} className="shrink-0" />}
-                        {va}
+                        {specLabel(va)}
                       </span>
                     </td>
                     <th scope="row" className="px-3 py-2.5 text-center text-xs font-normal text-muted">
@@ -501,7 +501,7 @@ function CompareTable({ pair: { a, b }, busy, stale }: { pair: Pair; busy: boole
                       }`}
                     >
                       <span className="inline-flex items-center gap-1.5">
-                        {vb}
+                        {specLabel(vb)}
                         {bWins && <CheckCircle2 size={13} className="shrink-0" />}
                       </span>
                     </td>

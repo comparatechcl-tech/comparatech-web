@@ -90,6 +90,7 @@ export function DealsBrowser({
   const switchFailed = switching && status[dealsFilterKey(wanted)] === 'error';
   const waiting = switching && !switchFailed;
   const moreStatus = status[shownKey];
+  const nextBatch = Math.min(DEALS_PAGE, list.total - list.next);
 
   const chip = (active: boolean) =>
     `inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
@@ -181,7 +182,7 @@ export function DealsBrowser({
           >
             {moreStatus === 'loading'
               ? 'Cargando…'
-              : `Ver ${Math.min(DEALS_PAGE, list.total - list.next)} ofertas más`}
+              : `Ver ${nextBatch} ${nextBatch === 1 ? 'oferta' : 'ofertas'} más`}
           </button>
           {moreStatus === 'error' && (
             <p role="alert" className="text-xs text-muted">

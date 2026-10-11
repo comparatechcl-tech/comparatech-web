@@ -15,6 +15,7 @@
  * que se pueden reordenar y combinar en un texto propio sin inventar nada.
  */
 
+import { singularizeUnits } from '@/lib/format';
 import type { Product } from '@/lib/types';
 
 /**
@@ -127,9 +128,13 @@ export function fallbackDescription(product: Pick<Product, 'name' | 'brand' | 'i
   return `${subject}: precio actualizado, especificaciones y reputación del vendedor. Compara antes de comprar en Mercado Libre Chile.`;
 }
 
-/** Descripción efectiva de un producto — nunca vacía. */
+/**
+ * Descripción efectiva de un producto — nunca vacía. Las frases guardadas
+ * vienen de main_features, que a veces dice "Batería de 1 semanas".
+ */
 export function resolveDescription(
   product: Pick<Product, 'name' | 'brand' | 'description' | 'is_active'>
 ): string {
-  return product.description?.trim() || fallbackDescription(product);
+  const saved = product.description?.trim();
+  return saved ? singularizeUnits(saved) : fallbackDescription(product);
 }
