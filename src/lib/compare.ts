@@ -5,9 +5,11 @@
  * Sin I/O: lo usan componentes de cliente.
  */
 import { getAllCategories } from '@/lib/categories';
+import { changeSince, lowestPriceNote, type PriceChange, type PriceStats } from '@/lib/deals';
+import { reputationLabel, salesLabel, warrantyValue } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
 import { domainLabel, OTHER_TYPE_LABEL } from '@/lib/product-types';
-import type { Product } from '@/lib/types';
+import type { OfferInfo, Product } from '@/lib/types';
 
 /** Lo mínimo que el comparador necesita de cada producto para elegir. */
 export interface CompareCandidate {
@@ -33,6 +35,29 @@ export interface CompareDetail extends CompareCandidate {
   specs: Record<string, string | number>;
   /** Destino del botón de compra, ya resuelto con lib/outbound. */
   href: string;
+  offer: CompareOffer;
+}
+
+/**
+ * Lo que se sabe de la oferta, para las filas de precio y compra. Igual que
+ * en la ficha, cada dato sale de un campo que Mercado Libre informó o de
+ * nuestro propio registro de precios: lo que no consta queda en false o null.
+ */
+export interface CompareOffer {
+  /** Precio de lista que informa el vendedor; null si no supera al precio. */
+  list_price: number | null;
+  /** Última vez que se revisó el precio contra Mercado Libre. */
+  checked_at: string | null;
+  free_shipping: boolean;
+  is_full: boolean;
+  /** "Mercado Libre", o "Tienda oficial" o la reputación, con las ventas del vendedor. */
+  seller: string;
+  /** "De fábrica: 12 meses". null si la oferta no informa garantía. */
+  warranty: string | null;
+  /** Último cambio de precio que registramos (ver lib/deals). */
+  change: PriceChange | null;
+  /** La frase sobre el mínimo que el historial permite afirmar, o null. */
+  lowest: string | null;
 }
 
 /** Solo los campos para elegir: lo demás del producto no viaja. */
@@ -46,7 +71,38 @@ export function toCompareCandidate(product: CompareCandidate): CompareCandidate 
   };
 }
 
-export function toCompareDetail(product: Product): CompareDetail {
+function toCompareOffer(product: Product, stats: PriceStats | null, now: number): CompareOffer {
+  // offer_info es jsonb: cada campo se valida por separado (ver TrustChips).
+  const info: Partial<OfferInfo> =
+    product.offer_info && typeof product.offer_info === 'object' ? product.offer_info : {};
+  const list = product.original_price;
+  const sales = product.seller_sales_count > 0 ? ` · ${salesLabel(product.seller_sales_count)}` : '';
+
+  return {
+    list_price: typeof list === 'number' && list > product.price ? list : null,
+    checked_at: product.price_checked_at ?? null,
+    free_shipping: info.free_shipping === true,
+    is_full: info.is_full === true,
+    // Las ventas son del vendedor, igual que en la ficha. Mercado Libre no las necesita.
+    seller:
+      info.sold_by_ml === true
+        ? 'Mercado Libre'
+        : `${info.official_store === true ? 'Tienda oficial' : reputationLabel(product.seller_reputation)}${sales}`,
+    warranty: typeof info.warranty === 'string' && info.warranty.trim() ? warrantyValue(info.warranty) : null,
+    change: changeSince(stats, product.price, now),
+    lowest: lowestPriceNote(stats, product.price),
+  };
+}
+
+/**
+ * `stats` es el historial de precios del producto (lib/queries/price-history).
+ * Sin él la tabla se arma igual, solo que sin la fila de cambios de precio.
+ */
+export function toCompareDetail(
+  product: Product,
+  stats: PriceStats | null = null,
+  now: number = Date.now()
+): CompareDetail {
   return {
     ...toCompareCandidate(product),
     id: product.id,
@@ -54,6 +110,7 @@ export function toCompareDetail(product: Product): CompareDetail {
     image_url: product.image_url,
     specs: product.specs ?? {},
     href: buyUrl(product),
+    offer: toCompareOffer(product, stats, now),
   };
 }
 
@@ -318,4 +375,30 @@ export function betterSpec(key: string, a: SpecValue, b: SpecValue): Comparison 
   if (isEmpty(a) || isEmpty(b) || NEVER_BETTER.test(key)) return null;
   const rule = BETTER_RULES.find((r) => r.key.test(key));
   return rule ? rule.compare(String(a), String(b)) : null;
+}
+
+/** Los números del resumen que va sobre la tabla. */
+export interface CompareSummary {
+  /** El de menor precio; null si cuestan lo mismo. */
+  cheaper: Comparison;
+  /** Diferencia en pesos, y en % del precio más alto. */
+  diff: number;
+  pct: number;
+}
+
+/**
+ * Resumen de la comparación en datos, sin elegir por nadie: quién cuesta
+ * menos y por cuánto. No cuenta especificaciones "ganadas": solo unas pocas
+ * se pueden ordenar de mejor a peor, y un conteo parcial se leía como
+ * veredicto.
+ */
+export function compareSummary(a: Pick<CompareDetail, 'price'>, b: Pick<CompareDetail, 'price'>): CompareSummary {
+  const diff = Math.abs(a.price - b.price);
+  const highest = Math.max(a.price, b.price);
+  return {
+    cheaper: diff === 0 ? null : a.price < b.price ? 'a' : 'b',
+    diff,
+    // Tope en 99: el más barato siempre cuesta algo, aunque sea un mouse contra un notebook.
+    pct: highest > 0 ? Math.min(99, Math.round((diff / highest) * 100)) : 0,
+  };
 }

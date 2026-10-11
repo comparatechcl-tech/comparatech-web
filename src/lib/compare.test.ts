@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { priceStats } from '@/lib/deals';
 import type { Product } from '@/lib/types';
 import {
   betterSpec,
   compareListUrl,
   compareOptionsForB,
   compareProductUrl,
+  compareSummary,
   defaultComparePair,
   groupByCategory,
   groupByType,
@@ -148,14 +150,138 @@ describe('lo que viaja al navegador', () => {
     });
   });
 
-  it('para la tabla van las specs y el link de compra ya resuelto, nada más', () => {
+  it('para la tabla van las specs, la oferta y el link de compra ya resuelto, nada más', () => {
     const detail = toCompareDetail(product);
     expect(Object.keys(detail).sort()).toEqual(
-      ['category', 'href', 'id', 'image_url', 'ml_domain_id', 'name', 'price', 'seller_sales_count', 'slug', 'specs'].sort()
+      [
+        'category',
+        'href',
+        'id',
+        'image_url',
+        'ml_domain_id',
+        'name',
+        'offer',
+        'price',
+        'seller_sales_count',
+        'slug',
+        'specs',
+      ].sort()
     );
     expect(detail.specs).toEqual({ Potencia: '4,8 W', Color: 'Negro' });
     // El mismo destino que las tarjetas: el de lib/outbound, con la cuenta afiliada.
     expect(detail.href).toBe('https://www.mercadolibre.cl/p/MLC123?matt_word=comparatech&matt_tool=15629069');
+  });
+
+  it('la oferta lleva solo lo que Mercado Libre informó', () => {
+    // Sin offer_info ni precio de lista: nada se da por supuesto.
+    expect(toCompareDetail({ ...product, original_price: null }).offer).toEqual({
+      list_price: null,
+      checked_at: null,
+      free_shipping: false,
+      is_full: false,
+      seller: 'Reputación verde · 1.200 ventas',
+      warranty: null,
+      change: null,
+      lowest: null,
+    });
+
+    const full = toCompareDetail({
+      ...product,
+      original_price: product.price + 10_000,
+      price_checked_at: '2026-10-11T18:00:00.000Z',
+      offer_info: {
+        free_shipping: true,
+        is_full: true,
+        sold_by_ml: false,
+        official_store: true,
+        warranty: 'Garantía de fábrica: 1 años',
+        offers_count: 3,
+        is_lowest: true,
+      },
+    }).offer;
+    expect(full).toMatchObject({
+      list_price: product.price + 10_000,
+      checked_at: '2026-10-11T18:00:00.000Z',
+      free_shipping: true,
+      is_full: true,
+      seller: 'Tienda oficial · 1.200 ventas',
+      warranty: 'De fábrica: 1 año',
+    });
+  });
+
+  it('el envío gratis y Full son datos distintos', () => {
+    const info = { sold_by_ml: false, official_store: false, warranty: null, offers_count: 1, is_lowest: null };
+    expect(
+      toCompareDetail({ ...product, offer_info: { ...info, free_shipping: true, is_full: false } }).offer
+    ).toMatchObject({ free_shipping: true, is_full: false });
+    expect(
+      toCompareDetail({ ...product, offer_info: { ...info, free_shipping: false, is_full: true } }).offer
+    ).toMatchObject({ free_shipping: false, is_full: true });
+  });
+
+  it('un campo de offer_info que no es true no cuenta, y una garantía en blanco tampoco', () => {
+    const info = {
+      sold_by_ml: 'no',
+      official_store: 1,
+      free_shipping: 'false',
+      is_full: 1,
+      warranty: '  ',
+      offers_count: 1,
+      is_lowest: null,
+    };
+    expect(toCompareDetail({ ...product, offer_info: info as never }).offer).toMatchObject({
+      free_shipping: false,
+      is_full: false,
+      seller: 'Reputación verde · 1.200 ventas',
+      warranty: null,
+    });
+  });
+
+  it('un precio de lista igual o menor que el precio no es un precio de lista', () => {
+    expect(toCompareDetail({ ...product, original_price: product.price }).offer.list_price).toBeNull();
+    expect(toCompareDetail({ ...product, original_price: product.price - 1 }).offer.list_price).toBeNull();
+  });
+
+  it('el vendedor es Mercado Libre antes que tienda oficial, y las ventas van solo si hay', () => {
+    const info = { free_shipping: false, is_full: false, warranty: null, offers_count: 1, is_lowest: null };
+    expect(
+      toCompareDetail({ ...product, offer_info: { ...info, sold_by_ml: true, official_store: true } }).offer.seller
+    ).toBe('Mercado Libre');
+    expect(toCompareDetail({ ...product, seller_sales_count: 0 }).offer.seller).toBe('Reputación verde');
+    expect(
+      toCompareDetail({ ...product, seller_sales_count: 0, offer_info: { ...info, sold_by_ml: false, official_store: true } })
+        .offer.seller
+    ).toBe('Tienda oficial');
+    expect(toCompareDetail({ ...product, seller_sales_count: 1 }).offer.seller).toBe('Reputación verde · 1 venta');
+  });
+
+  it('con el historial dice el último cambio y si es el precio más bajo registrado', () => {
+    // Una fecha pasada: si `now` no llegara al historial, el cambio se vería como viejo.
+    const now = new Date('2026-01-20T12:00:00.000Z').getTime();
+    const at = (days: number) => new Date(now - days * 86_400_000).toISOString();
+    const dropped = priceStats(
+      [
+        { price: product.price + 5_000, observed_at: at(10) },
+        { price: product.price, observed_at: at(2) },
+      ],
+      now
+    );
+    expect(toCompareDetail(product, dropped, now).offer).toMatchObject({
+      change: { direction: 'down', amount: 5_000, since: at(2) },
+      lowest: 'Precio más bajo desde que lo seguimos (10 días)',
+    });
+
+    const rose = priceStats(
+      [
+        { price: product.price - 5_000, observed_at: at(10) },
+        { price: product.price, observed_at: at(2) },
+      ],
+      now
+    );
+    expect(toCompareDetail(product, rose, now).offer).toMatchObject({
+      change: { direction: 'up', amount: 5_000, since: at(2) },
+      lowest: null,
+    });
   });
 
   it('sin destino precalculado usa el link guardado, nunca uno fuera de la lista', () => {
@@ -239,5 +365,31 @@ describe('betterSpec', () => {
     expect(betterSpec('Tipo de batería', 'Ion de litio', 'Polímero')).toBeNull();
     expect(betterSpec('Clasificación IP', 'IP54', 'IPX7')).toBeNull();
     expect(betterSpec('Memoria RAM', undefined, '8 GB')).toBeNull();
+  });
+});
+
+describe('compareSummary', () => {
+  it('dice quién cuesta menos, por cuánto y qué porcentaje del más caro', () => {
+    const a = { price: 639_990 };
+    const b = { price: 799_990 };
+    expect(compareSummary(a, b)).toEqual({ cheaper: 'a', diff: 160_000, pct: 20 });
+    expect(compareSummary(b, a)).toEqual({ cheaper: 'b', diff: 160_000, pct: 20 });
+  });
+
+  it('con el mismo precio no hay más barato', () => {
+    expect(compareSummary({ price: 100 }, { price: 100 })).toEqual({ cheaper: null, diff: 0, pct: 0 });
+  });
+
+  it('el porcentaje se redondea al entero más cercano y nunca llega a 100', () => {
+    // $1.960 sobre $10.000 es 19,6%: va 20, no 19.
+    expect(compareSummary({ price: 8_040 }, { price: 10_000 }).pct).toBe(20);
+    // Un mouse de $3.049 contra un notebook de $759.990: 99,6% no es "100% menos".
+    expect(compareSummary({ price: 3_049 }, { price: 759_990 }).pct).toBe(99);
+  });
+
+  it('una diferencia chica no se redondea a un porcentaje que no existe', () => {
+    // $830 sobre $37.820 es 2%; $100 sobre $1.000.000 queda en 0 y la frase no lo muestra.
+    expect(compareSummary({ price: 36_990 }, { price: 37_820 })).toEqual({ cheaper: 'a', diff: 830, pct: 2 });
+    expect(compareSummary({ price: 999_900 }, { price: 1_000_000 }).pct).toBe(0);
   });
 });

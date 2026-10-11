@@ -52,6 +52,16 @@ export function warrantyLabel(text: string): string {
   return /^garant[ií]a/i.test(fixed) ? fixed : `Garantía: ${fixed}`;
 }
 
+/**
+ * La garantía para una fila que ya se llama "Garantía": "Garantía de
+ * fábrica: 12 meses" queda en "De fábrica: 12 meses".
+ */
+export function warrantyValue(text: string): string {
+  const fixed = singularizeUnits(text.trim());
+  const rest = fixed.replace(/^garant[ií]a\s*:?\s*/i, '');
+  return rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : fixed;
+}
+
 /** Valor de una especificación tal como se muestra en la ficha y el comparador. */
 export function specLabel(value: string | number): string {
   return singularizeUnits(String(value));
@@ -60,6 +70,23 @@ export function specLabel(value: string | number): string {
 /** Total de ventas del vendedor: "1 venta", "1.306 ventas". */
 export function salesLabel(count: number): string {
   return count === 1 ? '1 venta' : `${count.toLocaleString('es-CL')} ventas`;
+}
+
+/**
+ * "04/10", en hora de Chile: es la fecha que vio quien estaba mirando.
+ *
+ * Los ceros se ponen a mano: para es-CL, Intl entrega "4/10" aunque se pida
+ * dos dígitos, y que servidor y navegador escriban lo mismo no puede
+ * depender de la versión de sus datos de idioma.
+ */
+export function formatDayMonth(iso: string): string {
+  const parts = new Intl.DateTimeFormat('es-CL', {
+    day: 'numeric',
+    month: 'numeric',
+    timeZone: 'America/Santiago',
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => (parts.find((p) => p.type === type)?.value ?? '').padStart(2, '0');
+  return `${get('day')}/${get('month')}`;
 }
 
 /**

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { salesLabel, singularizeUnits, specLabel, warrantyLabel } from '@/lib/format';
+import {
+  formatDayMonth,
+  salesLabel,
+  singularizeUnits,
+  specLabel,
+  warrantyLabel,
+  warrantyValue,
+} from '@/lib/format';
 
 describe('singularizeUnits', () => {
   it('pasa a singular el plazo de una unidad, que Mercado Libre manda en plural', () => {
@@ -99,5 +106,41 @@ describe('salesLabel', () => {
     expect(salesLabel(2)).toBe('2 ventas');
     expect(salesLabel(1306)).toBe('1.306 ventas');
     expect(salesLabel(1000001)).toBe('1.000.001 ventas');
+  });
+});
+
+describe('warrantyValue', () => {
+  it('quita la palabra "Garantía", que ya está en el nombre de la fila', () => {
+    expect(warrantyValue('Garantía de fábrica: 12 meses')).toBe('De fábrica: 12 meses');
+    expect(warrantyValue('Garantía del vendedor: 30 días')).toBe('Del vendedor: 30 días');
+    expect(warrantyValue('Garantía de fábrica')).toBe('De fábrica');
+  });
+
+  it('corrige el singular y deja igual el texto que trae solo el plazo', () => {
+    expect(warrantyValue('Garantía de fábrica: 1 años')).toBe('De fábrica: 1 año');
+    expect(warrantyValue('6 meses')).toBe('6 meses');
+  });
+
+  it('acepta "garantia" sin tilde, espacios alrededor y los dos puntos pegados', () => {
+    expect(warrantyValue('garantia de fábrica: 12 meses')).toBe('De fábrica: 12 meses');
+    expect(warrantyValue('  Garantía del vendedor: 30 días ')).toBe('Del vendedor: 30 días');
+    expect(warrantyValue('Garantía: 12 meses')).toBe('12 meses');
+  });
+
+  it('si no queda nada después de "Garantía", devuelve el texto entero', () => {
+    expect(warrantyValue('Garantía')).toBe('Garantía');
+  });
+});
+
+describe('formatDayMonth', () => {
+  it('da el día y el mes en hora de Chile', () => {
+    expect(formatDayMonth('2026-10-10T15:00:00.000Z')).toBe('10/10');
+    // Las 02:00 UTC del 11 todavía son la noche del 10 en Santiago.
+    expect(formatDayMonth('2026-10-11T02:00:00.000Z')).toBe('10/10');
+  });
+
+  it('siempre con dos dígitos, también el día y el mes de una cifra', () => {
+    expect(formatDayMonth('2026-10-04T15:00:00.000Z')).toBe('04/10');
+    expect(formatDayMonth('2027-01-05T15:00:00.000Z')).toBe('05/01');
   });
 });

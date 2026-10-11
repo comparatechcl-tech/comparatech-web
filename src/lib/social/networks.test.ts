@@ -619,6 +619,7 @@ describe('readConfirmedDrops', () => {
             lastPrice: 90_000,
             previousPrice: 100_000,
             lastChangeAt,
+            lastPriceSeenRecently: false,
           },
         ],
       ])

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { dropSince, isLowestIn30Days, isLowestSinceTracked, priceStats, type PricePoint } from '@/lib/deals';
+import {
+  changeSince,
+  dropSince,
+  isLowestIn30Days,
+  isLowestSinceTracked,
+  lowestPriceNote,
+  priceStats,
+  type PricePoint,
+} from '@/lib/deals';
 
 const NOW = new Date('2026-10-04T12:00:00.000Z').getTime();
 const daysAgo = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
@@ -98,5 +106,89 @@ describe('dropSince', () => {
 
   it('nada sin historial', () => {
     expect(dropSince(null, 80, NOW)).toBeNull();
+  });
+});
+
+describe('changeSince', () => {
+  it('informa una baja con su monto y su fecha', () => {
+    const stats = priceStats([point(100_000, 40), point(89_990, 3)], NOW);
+    expect(changeSince(stats, 89_990, NOW)).toEqual({ direction: 'down', amount: 10_010, since: daysAgo(3) });
+  });
+
+  it('informa también una subida', () => {
+    const stats = priceStats([point(679_990, 10), point(689_990, 1)], NOW);
+    expect(changeSince(stats, 689_990, NOW)).toEqual({ direction: 'up', amount: 10_000, since: daysAgo(1) });
+  });
+
+  it('nada si el precio nunca cambió, aunque haya varios registros', () => {
+    const stats = priceStats([point(100, 20), point(100, 5)], NOW);
+    expect(changeSince(stats, 100, NOW)).toBeNull();
+  });
+
+  it('nada si el cambio tiene más de 30 días o el precio de hoy no es el último registrado', () => {
+    expect(changeSince(priceStats([point(80, 90), point(100, 45)], NOW), 100, NOW)).toBeNull();
+    expect(changeSince(priceStats([point(80, 40), point(100, 3)], NOW), 110, NOW)).toBeNull();
+    expect(changeSince(null, 100, NOW)).toBeNull();
+  });
+});
+
+describe('lowestPriceNote', () => {
+  it('con 30 días de historial usa la frase de los 30 días', () => {
+    const stats = priceStats([point(120_000, 45), point(99_990, 3)], NOW);
+    expect(lowestPriceNote(stats, 99_990)).toBe('El precio más bajo que registramos en los últimos 30 días');
+  });
+
+  it('con menos historial dice desde cuándo lo seguimos', () => {
+    const stats = priceStats([point(120_000, 10), point(99_990, 3)], NOW);
+    expect(lowestPriceNote(stats, 99_990)).toBe('Precio más bajo desde que lo seguimos (10 días)');
+  });
+
+  it('nada si no es el más bajo, si nunca se movió o si falta historial', () => {
+    expect(lowestPriceNote(priceStats([point(90_000, 10), point(99_990, 3)], NOW), 99_990)).toBeNull();
+    expect(lowestPriceNote(priceStats([point(99_990, 10)], NOW), 99_990)).toBeNull();
+    expect(lowestPriceNote(priceStats([point(120_000, 5), point(99_990, 3)], NOW), 99_990)).toBeNull();
+    expect(lowestPriceNote(null, 99_990)).toBeNull();
+  });
+});
+
+describe('un precio que va y vuelve no es una baja', () => {
+  it('no informa cambio cuando el precio alterna entre los mismos dos valores', () => {
+    // Dos vendedores turnándose la caja de compra: 58.384 y 55.260 cada pocas horas.
+    const stats = priceStats([point(58_384, 6), point(55_260, 5), point(58_384, 4), point(55_260, 1)], NOW);
+    expect(stats?.lastPriceSeenRecently).toBe(true);
+    expect(changeSince(stats, 55_260, NOW)).toBeNull();
+    expect(dropSince(stats, 55_260, NOW)).toBeNull();
+  });
+
+  it('tampoco cuando vuelve a subir al precio que tenía hace unos días', () => {
+    const stats = priceStats([point(100_000, 5), point(90_000, 3), point(100_000, 1)], NOW);
+    expect(changeSince(stats, 100_000, NOW)).toBeNull();
+  });
+
+  it('sí informa la baja a un precio que no regía desde hace más de una semana', () => {
+    // Estuvo a 90.000 hasta hace 20 días, después a 100.000, y ahora vuelve a bajar.
+    const stats = priceStats([point(90_000, 40), point(100_000, 20), point(90_000, 2)], NOW);
+    expect(stats?.lastPriceSeenRecently).toBe(false);
+    expect(dropSince(stats, 90_000, NOW)).toEqual({ amount: 10_000, since: daysAgo(2) });
+  });
+
+  it('y la baja a un precio nuevo, aunque antes haya habido vaivén', () => {
+    const stats = priceStats([point(100, 6), point(90, 5), point(100, 4), point(80, 1)], NOW);
+    expect(dropSince(stats, 80, NOW)).toEqual({ amount: 20, since: daysAgo(1) });
+  });
+});
+
+describe('un cambio mínimo no se informa', () => {
+  it('ni "bajó $1" ni "subió $1"', () => {
+    expect(changeSince(priceStats([point(19_990, 5), point(19_989, 1)], NOW), 19_989, NOW)).toBeNull();
+    expect(changeSince(priceStats([point(19_989, 5), point(19_990, 1)], NOW), 19_990, NOW)).toBeNull();
+  });
+
+  it('desde 1% sí', () => {
+    expect(changeSince(priceStats([point(10_000, 5), point(9_900, 1)], NOW), 9_900, NOW)).toMatchObject({
+      direction: 'down',
+      amount: 100,
+    });
+    expect(changeSince(priceStats([point(10_000, 5), point(9_901, 1)], NOW), 9_901, NOW)).toBeNull();
   });
 });

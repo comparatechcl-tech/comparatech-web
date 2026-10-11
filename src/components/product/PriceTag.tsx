@@ -23,7 +23,7 @@ export function PriceTag({
       <span className="font-heading text-xl font-bold text-fg">
         {formatCLP(price)}
       </span>
-      {originalPrice && discount && (
+      {originalPrice && discount ? (
         <>
           <span className="text-sm text-muted line-through">
             {formatCLP(originalPrice)}
@@ -34,7 +34,7 @@ export function PriceTag({
             </span>
           )}
         </>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -1,12 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getCatalogProducts } from '@/lib/queries/products';
+import { getPriceStats } from '@/lib/queries/price-history';
 import { parseCompareQuery, toCompareCandidate, toCompareDetail, type CompareList } from '@/lib/compare';
 
 /**
  * Los datos que /comparador pide a medida que se usan:
  *  - ?cat=audio   → los productos de esa categoría, con lo justo para
  *                   elegirlos en los selectores.
- *  - ?slug=...    → un producto con sus specs, para la tabla.
+ *  - ?slug=...    → un producto con sus specs y los datos de su oferta,
+ *                   para la tabla.
  *
  * Así la página no lleva el catálogo entero. Fuera de /api y con s-maxage
  * por lo mismo que /ofertas/lote: queda 5 minutos en el caché del CDN, y
@@ -36,7 +38,9 @@ export async function GET(request: NextRequest) {
     if (!product) {
       return NextResponse.json({ error: 'Producto no disponible' }, { status: 404, headers: REJECT_HEADERS });
     }
-    return NextResponse.json(toCompareDetail(product), { headers: CACHE_HEADERS });
+    // El historial sale en la misma respuesta: va al caché del CDN con ella.
+    const detail = toCompareDetail(product, await getPriceStats(product.id));
+    return NextResponse.json(detail, { headers: CACHE_HEADERS });
   }
 
   const items = catalog.filter((p) => p.category === query.category).map(toCompareCandidate);

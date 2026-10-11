@@ -1,10 +1,11 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { CheckCircle2 } from 'lucide-react';
-import { formatCLP, specLabel } from '@/lib/format';
+import Link from 'next/link';
+import { CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react';
+import { formatCLP, formatDayMonth, formatDiscountPct, formatTimeAgo, specLabel } from '@/lib/format';
 import { AffiliateButton } from '@/components/product/AffiliateButton';
 import mlImageLoader from '@/lib/ml-image-loader';
 import {
@@ -12,6 +13,7 @@ import {
   compareListUrl,
   compareOptionsForB,
   compareProductUrl,
+  compareSummary,
   defaultComparePair,
   groupByType,
   sharedSpecKeys,
@@ -19,6 +21,7 @@ import {
   type CompareCandidate,
   type CompareDetail,
   type CompareList,
+  type CompareOffer,
 } from '@/lib/compare';
 
 interface CompareProps {
@@ -170,7 +173,14 @@ function CompareView({
     if (res.status === 404 || res.status === 400) return null;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const detail = (await res.json()) as CompareDetail;
-    if (typeof detail.slug !== 'string' || typeof detail.specs !== 'object' || detail.specs === null) {
+    if (
+      typeof detail.slug !== 'string' ||
+      typeof detail.specs !== 'object' ||
+      detail.specs === null ||
+      typeof detail.offer !== 'object' ||
+      detail.offer === null ||
+      typeof detail.offer.seller !== 'string'
+    ) {
       throw new Error('respuesta inesperada');
     }
     cache.details.set(slug, detail);
@@ -409,18 +419,194 @@ function CompareView({
       <CompareTable pair={shown} busy={loading} stale={stale} />
 
       <p className="mt-3 text-xs text-muted">
-        Destacamos en cyan el precio más bajo y, cuando más es mejor (batería,
-        RAM, almacenamiento, potencia, autonomía y resistencia IP), el valor
-        más alto. Solo mostramos las especificaciones que tienen los dos
-        productos — revisa igual cuál característica te importa más antes de
-        decidir.
+        En cyan va el menor de los dos precios y el envío gratis cuando solo
+        uno lo tiene. También el valor más alto donde más es mejor: batería,
+        RAM, almacenamiento, potencia, autonomía y resistencia IP. El
+        descuento se calcula sobre el precio de lista que informa el vendedor.
+        Las bajas y subidas salen de nuestro propio registro de precios. Solo
+        mostramos las especificaciones que tienen los dos productos: revisa
+        cuál te importa más antes de decidir.
       </p>
     </div>
   );
 }
 
+/**
+ * "hace 12 minutos". Se calcula en el navegador, igual que PriceFreshness: la
+ * página viene de caché y un texto del servidor quedaría congelado.
+ */
+function TimeAgo({ iso }: { iso: string | null }) {
+  const [label, setLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    const update = () => setLabel(formatTimeAgo(iso));
+    update();
+    const timer = setInterval(update, 60_000);
+    return () => clearInterval(timer);
+  }, [iso]);
+
+  return <>{label ?? '—'}</>;
+}
+
+/**
+ * Lo que nuestro registro de precios permite decir: el último cambio (también
+ * si fue una subida) y si hoy tiene el precio más bajo desde que lo seguimos.
+ */
+function PriceHistoryCell({ offer: { change, lowest } }: { offer: CompareOffer }) {
+  if (!change && !lowest) return <>—</>;
+
+  const down = change?.direction === 'down';
+  return (
+    <span className="inline-flex flex-col items-center gap-0.5">
+      {change && (
+        <span
+          className={`inline-flex items-center gap-1 ${
+            down ? 'font-semibold text-emerald-700 dark:text-emerald-400' : ''
+          }`}
+        >
+          {down ? (
+            <TrendingDown size={13} className="shrink-0" aria-hidden />
+          ) : (
+            <TrendingUp size={13} className="shrink-0" aria-hidden />
+          )}
+          {down ? 'Bajó' : 'Subió'} {formatCLP(change.amount)} desde el {formatDayMonth(change.since)}
+        </span>
+      )}
+      {lowest && <span className="text-xs text-muted">{lowest}</span>}
+    </span>
+  );
+}
+
+function hasPriceHistory(offer: CompareOffer): boolean {
+  return Boolean(offer.change || offer.lowest);
+}
+
+/**
+ * Sin envío gratis ni Full no se pone una raya: frente a un "Gratis" se
+ * leería como "no tiene envío", y lo único que consta es que Mercado Libre
+ * no lo informó como gratis.
+ */
+function shippingLabel(offer: CompareOffer): string {
+  return (
+    [offer.free_shipping && 'Gratis', offer.is_full && 'Enviado con Full'].filter(Boolean).join(' · ') ||
+    'No informa envío gratis'
+  );
+}
+
+interface TableRow {
+  label: string;
+  a: ReactNode;
+  b: ReactNode;
+  winner?: 'a' | 'b' | null;
+}
+
+/**
+ * Filas de precio y compra. Las que dependen de un dato que ninguno de los
+ * dos tiene no se muestran: una fila con "—" a cada lado no compara nada.
+ */
+function offerRows(a: CompareOffer, b: CompareOffer): TableRow[] {
+  const rows: TableRow[] = [];
+
+  if (hasPriceHistory(a) || hasPriceHistory(b)) {
+    rows.push({ label: 'Cambios de precio', a: <PriceHistoryCell offer={a} />, b: <PriceHistoryCell offer={b} /> });
+  }
+  if (a.free_shipping || a.is_full || b.free_shipping || b.is_full) {
+    rows.push({
+      label: 'Envío',
+      a: shippingLabel(a),
+      b: shippingLabel(b),
+      winner: a.free_shipping === b.free_shipping ? null : a.free_shipping ? 'a' : 'b',
+    });
+  }
+  rows.push({ label: 'Vendedor', a: a.seller, b: b.seller });
+  if (a.warranty || b.warranty) {
+    rows.push({ label: 'Garantía', a: a.warranty ?? 'No informa garantía', b: b.warranty ?? 'No informa garantía' });
+  }
+  rows.push({ label: 'Precio revisado', a: <TimeAgo iso={a.checked_at} />, b: <TimeAgo iso={b.checked_at} /> });
+
+  return rows;
+}
+
+function SectionRow({ title }: { title: string }) {
+  return (
+    <tr className="bg-surface">
+      <th
+        colSpan={3}
+        scope="rowgroup"
+        className="border-t border-border px-4 pb-2 pt-4 text-left font-heading text-xs font-semibold uppercase tracking-wide text-muted"
+      >
+        {title}
+      </th>
+    </tr>
+  );
+}
+
+function ValueRow({ row: { label, a, b, winner }, striped }: { row: TableRow; striped: boolean }) {
+  const aWins = winner === 'a';
+  const bWins = winner === 'b';
+  return (
+    <tr className={striped ? 'bg-surface2' : 'bg-surface'}>
+      <td className={`px-2.5 py-2.5 text-center sm:px-4 ${aWins ? 'font-semibold text-accent' : 'text-fg'}`}>
+        <span className="inline-flex items-center gap-1.5">
+          {aWins && <CheckCircle2 size={13} className="shrink-0" />}
+          {a}
+        </span>
+      </td>
+      <th scope="row" className="px-2 py-2.5 text-center text-xs font-normal text-muted sm:px-3">
+        {label}
+      </th>
+      <td className={`px-2.5 py-2.5 text-center sm:px-4 ${bWins ? 'font-semibold text-accent' : 'text-fg'}`}>
+        <span className="inline-flex items-center gap-1.5">
+          {b}
+          {bWins && <CheckCircle2 size={13} className="shrink-0" />}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * La diferencia de precio en una frase. Nombra los productos por su lado y
+ * no por su nombre: los nombres de Mercado Libre son largos y, recortados,
+ * hay pares que quedan con el mismo ("Impresora Multifuncional HP Smart").
+ * No dice cuál conviene: eso depende de lo que le importe a quien compra.
+ */
+function CompareSummaryNote({ a, b }: { a: CompareDetail; b: CompareDetail }) {
+  const summary = compareSummary(a, b);
+  const [cheaper, other] = summary.cheaper === 'a' ? ['izquierda', 'derecha'] : ['derecha', 'izquierda'];
+  // "Izquierda" y "derecha" no le dicen nada a un lector de pantalla: ahí va el nombre.
+  const [cheaperName, otherName] = summary.cheaper === 'a' ? [a.name, b.name] : [b.name, a.name];
+
+  return (
+    <p className="border-t border-border bg-surface2 px-4 py-3 text-sm text-fg">
+      {summary.cheaper ? (
+        <>
+          El de la {cheaper}
+          <span className="sr-only"> ({cheaperName})</span> cuesta{' '}
+          <strong className="font-semibold">{formatCLP(summary.diff)} menos</strong> que el de la {other}
+          <span className="sr-only"> ({otherName})</span>
+          {summary.pct > 0 ? ` (${summary.pct}% menos)` : ''}.
+        </>
+      ) : (
+        'Los dos cuestan lo mismo.'
+      )}
+    </p>
+  );
+}
+
 function CompareTable({ pair: { a, b }, busy, stale }: { pair: Pair; busy: boolean; stale: boolean }) {
-  const specKeys = useMemo(() => (b ? sharedSpecKeys(a.specs, b.specs) : []), [a, b]);
+  const specRows = useMemo<TableRow[]>(
+    () =>
+      b
+        ? sharedSpecKeys(a.specs, b.specs).map((key) => ({
+            label: key,
+            a: specLabel(a.specs[key]),
+            b: specLabel(b.specs[key]),
+            winner: betterSpec(key, a.specs[key], b.specs[key]),
+          }))
+        : [],
+    [a, b]
+  );
 
   if (!b) {
     return (
@@ -438,81 +624,79 @@ function CompareTable({ pair: { a, b }, busy, stale }: { pair: Pair; busy: boole
       }`}
     >
       <div className="grid grid-cols-2 divide-x divide-border">
-        {[a, b].map((p) => (
-          <div key={p.id} className="flex flex-col items-center gap-3 bg-surface p-5 text-center sm:p-6">
-            <div className="relative h-20 w-20 overflow-hidden rounded-xl bg-white sm:h-28 sm:w-28">
-              <Image
-                loader={mlImageLoader}
-                src={p.image_url}
-                alt={p.name}
-                fill
-                sizes="112px"
-                className="object-contain"
+        {[a, b].map((p) => {
+          const discount = formatDiscountPct(p.price, p.offer.list_price);
+          return (
+            <div key={p.id} className="flex flex-col items-center gap-3 bg-surface p-5 text-center sm:p-6">
+              <div className="relative h-20 w-20 overflow-hidden rounded-xl bg-white sm:h-28 sm:w-28">
+                <Image
+                  loader={mlImageLoader}
+                  src={p.image_url}
+                  alt={p.name}
+                  fill
+                  sizes="112px"
+                  className="object-contain"
+                />
+              </div>
+              <Link
+                href={`/producto/${p.slug}`}
+                className="line-clamp-2 font-heading text-sm font-medium text-fg transition hover:text-accent"
+              >
+                {p.name}
+              </Link>
+              <div>
+                <p
+                  className={`font-heading text-lg font-bold sm:text-xl ${
+                    p.price <= Math.min(a.price, b.price) ? 'text-accent' : 'text-fg'
+                  }`}
+                >
+                  {formatCLP(p.price)}
+                </p>
+                {p.offer.list_price !== null && discount !== null && discount > 0 && (
+                  <p
+                    className="mt-0.5 text-xs text-muted"
+                    title="Descuento sobre el precio de lista informado en Mercado Libre"
+                  >
+                    Precio de lista <s>{formatCLP(p.offer.list_price)}</s> · -{discount}%
+                  </p>
+                )}
+              </div>
+              <AffiliateButton
+                href={p.href}
+                productId={p.id}
+                productName={p.name}
+                placement="comparador"
+                className="mt-auto w-full text-xs sm:text-sm"
               />
             </div>
-            <p className="line-clamp-2 font-heading text-sm font-medium text-fg">{p.name}</p>
-            <p
-              className={`font-heading text-lg font-bold sm:text-xl ${
-                p.price <= Math.min(a.price, b.price) ? 'text-accent' : 'text-fg'
-              }`}
-            >
-              {formatCLP(p.price)}
-            </p>
-            <AffiliateButton
-              href={p.href}
-              productId={p.id}
-              productName={p.name}
-              placement="comparador"
-              className="w-full text-xs sm:text-sm"
-            />
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {specKeys.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[420px] text-sm">
-            <tbody>
-              {specKeys.map((key, i) => {
-                const va = a.specs[key];
-                const vb = b.specs[key];
-                const winner = betterSpec(key, va, vb);
-                const aWins = winner === 'a';
-                const bWins = winner === 'b';
+      <CompareSummaryNote a={a} b={b} />
 
-                return (
-                  <tr key={key} className={i % 2 === 0 ? 'bg-surface2' : 'bg-surface'}>
-                    <td
-                      className={`px-4 py-2.5 text-center ${
-                        aWins ? 'font-semibold text-accent' : 'text-fg'
-                      }`}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        {aWins && <CheckCircle2 size={13} className="shrink-0" />}
-                        {specLabel(va)}
-                      </span>
-                    </td>
-                    <th scope="row" className="px-3 py-2.5 text-center text-xs font-normal text-muted">
-                      {key}
-                    </th>
-                    <td
-                      className={`px-4 py-2.5 text-center ${
-                        bWins ? 'font-semibold text-accent' : 'text-fg'
-                      }`}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        {specLabel(vb)}
-                        {bWins && <CheckCircle2 size={13} className="shrink-0" />}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+      {/* Sin ancho mínimo: en un teléfono los dos productos tienen que verse a la vez. */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <tbody>
+            <SectionRow title="Precio y compra" />
+            {offerRows(a.offer, b.offer).map((row, i) => (
+              <ValueRow key={row.label} row={row} striped={i % 2 === 0} />
+            ))}
+          </tbody>
+          {specRows.length > 0 && (
+            <tbody>
+              <SectionRow title="Especificaciones" />
+              {specRows.map((row, i) => (
+                <ValueRow key={row.label} row={row} striped={i % 2 === 0} />
+              ))}
             </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="bg-surface2 px-4 py-4 text-center text-sm text-muted">
+          )}
+        </table>
+      </div>
+
+      {specRows.length === 0 && (
+        <p className="border-t border-border bg-surface2 px-4 py-4 text-center text-sm text-muted">
           Estos dos productos no tienen especificaciones en común para comparar.
         </p>
       )}
