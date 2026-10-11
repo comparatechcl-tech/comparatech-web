@@ -3,6 +3,7 @@
  * Pide al sitio el plan de publicaciones para redes y anota lo programado.
  *
  *   node scripts/redes.mjs plan [cantidad]      → qué publicar (JSON)
+ *   node scripts/redes.mjs plan --producto <id> → el plan de ese producto (su historia, o volver a publicarlo)
  *   node scripts/redes.mjs registrar <archivo>  → anota lo programado en Metricool
  *
  * El archivo de `registrar` es { "publicaciones": [{ "product_id", "canal",
@@ -100,9 +101,13 @@ async function checkPiece(url) {
   }
 }
 
-async function plan(site, secret, count) {
-  const n = count ? `?n=${encodeURIComponent(count)}` : '';
-  const data = JSON.parse(await call(site, secret, `/api/social/plan${n}`));
+async function plan(site, secret, count, productId) {
+  const query = productId
+    ? `?producto=${encodeURIComponent(productId)}`
+    : count
+      ? `?n=${encodeURIComponent(count)}`
+      : '';
+  const data = JSON.parse(await call(site, secret, `/api/social/plan${query}`));
 
   // Solo se programa con imágenes servidas por el sitio en producción.
   const publishable = site === PRODUCTION && data.sitio === PRODUCTION;
@@ -123,6 +128,13 @@ async function plan(site, secret, count) {
     const problem = await checkPiece(item.pieza);
     item.pieza_ok = problem === null;
     if (problem) item.pieza_problema = problem;
+    if (item.historia) {
+      const storyProblem = String(item.historia).startsWith(`${PRODUCTION}/social/pieza/`)
+        ? await checkPiece(item.historia)
+        : 'la imagen no está en el sitio en producción';
+      item.historia_ok = storyProblem === null;
+      if (storyProblem) item.historia_problema = storyProblem;
+    }
   }
   return data;
 }
@@ -130,6 +142,8 @@ async function plan(site, secret, count) {
 const args = process.argv.slice(2);
 const siteFlag = args.indexOf('--sitio');
 const siteOverride = siteFlag >= 0 ? args.splice(siteFlag, 2)[1] : null;
+const productFlag = args.indexOf('--producto');
+const productId = productFlag >= 0 ? args.splice(productFlag, 2)[1] : null;
 const [command, value] = args;
 
 const env = readEnvFile();
@@ -138,7 +152,7 @@ if (!secret) fail('Falta CRON_SECRET en .env.local.');
 const site = resolveSite(siteOverride);
 
 if (command === 'plan') {
-  console.log(JSON.stringify(await plan(site, secret, value), null, 2));
+  console.log(JSON.stringify(await plan(site, secret, value, productId), null, 2));
 } else if (command === 'registrar' && value) {
   let body;
   try {

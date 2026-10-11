@@ -28,10 +28,17 @@ import {
  * Solo lee: no publica ni marca nada. Lo llama quien programa las
  * publicaciones en Metricool (ver lib/social/networks), con el mismo secreto
  * de los crons. ?n= pide otra cantidad de productos (1 a 12).
+ *
+ * ?producto=<id> arma el plan de ese producto y nada más, aunque ya se haya
+ * publicado o no llegue al descuento: sirve para sacar su historia después
+ * de la publicación, o para publicar algo elegido a mano. Igual tiene que
+ * estar a la venta y con el precio recién revisado.
  */
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** El mes siguiente a 'AAAA-MM'. */
 function nextMonthKey(month: string): string {
@@ -54,6 +61,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const wantedId = (req.nextUrl.searchParams.get('producto') ?? '').trim().toLowerCase();
+  if (wantedId && !UUID_RE.test(wantedId)) {
+    return NextResponse.json({ error: 'producto no es un id válido' }, { status: 400 });
+  }
   const asked = Number(req.nextUrl.searchParams.get('n'));
   const count = Number.isInteger(asked) && asked >= 1 ? Math.min(asked, PLAN_MAX) : NETWORK_RULES.maxPosts;
 
@@ -77,11 +88,17 @@ export async function GET(req: NextRequest) {
       readAffiliateSettings(admin),
     ]);
 
-    const picks = pickByRules(
-      rows,
-      { now, recentlyPosted: posted ?? new Set(), drops },
-      { ...NETWORK_RULES, maxPosts: count }
-    );
+    const picks = wantedId
+      ? pickByRules(
+          rows.filter((p) => p.id === wantedId),
+          { now, recentlyPosted: new Set(), drops },
+          { ...NETWORK_RULES, maxPosts: 1, minDiscount: 0, minDrop: 0 }
+        )
+      : pickByRules(
+          rows,
+          { now, recentlyPosted: posted ?? new Set(), drops },
+          { ...NETWORK_RULES, maxPosts: count }
+        );
     const seleccion = picks
       .map((pick) => buildPlanItem(pick, { now, siteUrl: SITE_URL, settings, key }))
       .filter((item): item is PlanItem => item !== null);
@@ -95,6 +112,9 @@ export async function GET(req: NextRequest) {
       // Metricool gratis: 20 al mes, y cada red cuenta como una publicación.
       programadas_este_mes: monthCount,
       falta_tabla_social_posts: posted === null,
+      ...(wantedId && seleccion.length === 0
+        ? { aviso: 'Ese producto no está a la venta o su precio no se revisó en las últimas 6 horas.' }
+        : {}),
       seleccion,
       pendientes_con_problemas: pendientes,
     });

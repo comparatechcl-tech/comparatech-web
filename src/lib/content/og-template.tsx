@@ -53,8 +53,14 @@ const COLORS = {
   yellow: '#FFE600',
 };
 
-/** Alto de la franja superior que Instagram cubre en una historia de 1080x1920. */
+/**
+ * Franjas que Instagram y Facebook cubren en una historia de 1080x1920:
+ * arriba la barra de avance y el nombre de la cuenta, abajo la caja para
+ * responder. Lo que quede ahí no se ve, y una historia no tiene texto aparte:
+ * el aviso de publicidad y la hora del precio tienen que caer entre las dos.
+ */
 const STORY_TOP_SAFE = 250;
+const STORY_BOTTOM_SAFE = 300;
 
 const PHOTO_TIMEOUT_MS = 6000;
 /** Una foto de producto pesa cientos de KB: más que esto no es una foto. */
@@ -107,7 +113,7 @@ interface Layout {
 
 const LAYOUTS: Record<OgFormat, Layout> = {
   feed: { pad: 64, photo: 640, name: 44, price: 120, small: 30, chip: 34, horizontal: false },
-  story: { pad: 72, photo: 700, name: 54, price: 150, small: 36, chip: 40, horizontal: false },
+  story: { pad: 72, photo: 620, name: 54, price: 150, small: 36, chip: 40, horizontal: false },
   pin: { pad: 60, photo: 760, name: 42, price: 112, small: 28, chip: 32, horizontal: false },
   og: { pad: 40, photo: 550, name: 34, price: 84, small: 22, chip: 26, horizontal: true },
 };
@@ -264,10 +270,8 @@ export function ProductOgTemplate({
         width,
         height,
         padding: L.pad,
-        // En una historia la app dibuja arriba la barra de avance, el nombre de
-        // la cuenta y los botones: lo que quede en esa franja no se ve, y ahí
-        // va el aviso de publicidad (una historia no tiene texto aparte).
         paddingTop: format === 'story' ? STORY_TOP_SAFE : L.pad,
+        paddingBottom: format === 'story' ? STORY_BOTTOM_SAFE : L.pad,
         background: COLORS.bg,
         color: COLORS.fg,
         gap: Math.round(L.pad * 0.5),

@@ -132,6 +132,8 @@ export interface PlanItem {
   link_compra: string;
   /** La pieza en JPG (1080x1350), en una dirección pública y firmada. */
   pieza: string;
+  /** La misma pieza en formato de historia (1080x1920). */
+  historia: string;
   /** La foto del producto tal como está en Mercado Libre, para armar un video. */
   foto: string;
   textos: Record<Network, string>;
@@ -141,7 +143,15 @@ export interface PlanItem {
    * estos ajustes depende cumplir las reglas de cada red.
    */
   metricool: Record<Network, Record<string, unknown>>;
+  /**
+   * Lo mismo para publicarla como historia. Una historia no lleva texto (ni
+   * link): el aviso de publicidad y la hora del precio van en la imagen.
+   */
+  metricool_historia: Record<StoryNetwork, Record<string, unknown>>;
 }
+
+/** Redes con historias que Metricool publica solo. */
+export type StoryNetwork = 'instagram' | 'facebook';
 
 const TIKTOK_TITLE_PREFIX = 'Publicidad: ';
 
@@ -226,6 +236,18 @@ function metricoolSettings(
   };
 }
 
+/** Los ajustes para publicar la pieza de historia. Sin `text`: Metricool la rechaza si lo lleva. */
+function metricoolStorySettings(image: string, alt: string): Record<StoryNetwork, Record<string, unknown>> {
+  const base = (network: StoryNetwork) => {
+    const { text: _noText, ...rest } = metricoolBase(network, '', image, alt);
+    return rest;
+  };
+  return {
+    instagram: { ...base('instagram'), instagramData: { type: 'STORY', isAiGenerated: false } },
+    facebook: { ...base('facebook'), facebookData: { type: 'STORY' } },
+  };
+}
+
 /**
  * Todo lo que hace falta para programar un producto. null si no se pudo
  * firmar la imagen (datos imposibles): sin imagen no hay publicación.
@@ -237,7 +259,8 @@ export function buildPlanItem(
   const p = pick.product;
   const site = opts.siteUrl.replace(/\/+$/, '');
   const feed = piecePath(snapshotOf(p, 'feed', opts.now), opts.key);
-  if (!feed) return null;
+  const story = piecePath(snapshotOf(p, 'story', opts.now), opts.key);
+  if (!feed || !story) return null;
 
   // El mismo destino que el botón del sitio.
   const link = resolveOutboundUrl(p, opts.settings);
@@ -248,6 +271,7 @@ export function buildPlanItem(
     tiktok: singleParagraph(caption('tiktok')),
   };
   const pieza = `${site}${feed}`;
+  const historia = `${site}${story}`;
 
   return {
     id: p.id,
@@ -267,9 +291,11 @@ export function buildPlanItem(
     ficha: `${site}/producto/${p.slug}`,
     link_compra: link,
     pieza,
+    historia,
     foto: mlPhotoJpg(p.image_url),
     textos,
     metricool: metricoolSettings(p, textos, pieza),
+    metricool_historia: metricoolStorySettings(historia, `${shortProductName(p.name)} a ${formatPrice(p.price)}`),
   };
 }
 

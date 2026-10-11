@@ -187,6 +187,23 @@ describe('buildPlanItem', () => {
     expect(item.metricool.facebook.facebookData).toEqual({ type: 'POST' });
   });
 
+  it('trae la historia: otra imagen firmada, sin texto y marcada como historia', () => {
+    expect(item.historia.startsWith(`https://sitio.test/social/pieza/${p.id}/story-80000-100000-`)).toBe(true);
+    const file = item.historia.split('/').pop()!;
+    expect(checkPiecePath(p.id, file, KEY, Math.floor(NOW.getTime() / 1000))).toMatchObject({
+      ok: true,
+      snapshot: { format: 'story', price: 80_000 },
+    });
+    for (const network of ['instagram', 'facebook'] as const) {
+      const info = item.metricool_historia[network];
+      expect(info).toMatchObject({ autoPublish: true, providers: [{ network }], media: [item.historia] });
+      // Una historia que se publica sola no puede llevar texto.
+      expect('text' in info).toBe(false);
+    }
+    expect(item.metricool_historia.instagram.instagramData).toEqual({ type: 'STORY', isAiGenerated: false });
+    expect(item.metricool_historia.facebook.facebookData).toEqual({ type: 'STORY' });
+  });
+
   it('en TikTok va marcado como contenido comercial, público y sin música automática', () => {
     expect(item.metricool.tiktok.tiktokData).toMatchObject({
       commercialContentThirdParty: true,
