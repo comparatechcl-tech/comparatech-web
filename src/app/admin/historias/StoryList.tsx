@@ -15,16 +15,20 @@ import { setRrssStatus } from '../productos/actions';
  * teléfono solo deja compartir un archivo si ya está listo cuando se toca
  * el botón (si hubiera que bajarlo en ese instante, el permiso del toque se
  * pierde y no se abre la hoja de compartir).
+ *
+ * La miniatura y "Guardar imagen" usan la dirección de la pieza y no una
+ * dirección blob: del archivo en memoria: la política de seguridad del sitio
+ * publicado (next.config.js) no deja mostrar imágenes blob:. Como la pieza
+ * ya se bajó, el navegador la saca de su caché y no se dibuja dos veces.
  */
 
-type Loaded = { file: File; url: string };
 type Status = 'cargando' | 'lista' | 'error';
 
 const BUTTON =
   'flex min-h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-fg transition hover:border-accent/50 disabled:opacity-50';
 
 export function StoryList({ items }: { items: StoryItem[] }) {
-  const loaded = useRef(new Map<string, Loaded>());
+  const loaded = useRef(new Map<string, File>());
   const [status, setStatus] = useState<Record<string, Status>>({});
   const [canShare, setCanShare] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -48,7 +52,7 @@ export function StoryList({ items }: { items: StoryItem[] }) {
           const blob = await res.blob();
           if (cancelled) return;
           const file = new File([blob], item.fileName, { type: 'image/jpeg' });
-          store.set(item.id, { file, url: URL.createObjectURL(blob) });
+          store.set(item.id, file);
           setStatus((s) => ({ ...s, [item.id]: 'lista' }));
           // En el computador no hay hoja de compartir con archivos: ahí queda "Guardar imagen".
           if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) setCanShare(true);
@@ -60,7 +64,6 @@ export function StoryList({ items }: { items: StoryItem[] }) {
 
     return () => {
       cancelled = true;
-      for (const entry of store.values()) URL.revokeObjectURL(entry.url);
       store.clear();
     };
   }, [items]);
@@ -82,11 +85,11 @@ export function StoryList({ items }: { items: StoryItem[] }) {
   }
 
   function share(item: StoryItem) {
-    const entry = loaded.current.get(item.id);
-    if (!entry) return;
+    const file = loaded.current.get(item.id);
+    if (!file) return;
     // Las dos cosas dentro del mismo toque: el link se pega después en el sticker.
     void copyLink(item);
-    navigator.share({ files: [entry.file] }).catch((err: unknown) => {
+    navigator.share({ files: [file] }).catch((err: unknown) => {
       // Cerrar la hoja de compartir no es un error.
       if (err instanceof Error && err.name === 'AbortError') return;
       fail(item.id, 'No se pudo abrir Compartir. Usa "Guardar imagen" y súbela desde Instagram.');
@@ -116,7 +119,6 @@ export function StoryList({ items }: { items: StoryItem[] }) {
     <ul className="mt-6 flex flex-col gap-4">
       {items.map((item) => {
         const state = status[item.id] ?? 'cargando';
-        const entry = loaded.current.get(item.id);
         const done = published.has(item.id);
         return (
           <li
@@ -124,9 +126,9 @@ export function StoryList({ items }: { items: StoryItem[] }) {
             className={`flex gap-4 rounded-xl border border-border bg-surface p-3 sm:p-4 ${done ? 'opacity-60' : ''}`}
           >
             <div className="relative aspect-[9/16] w-28 shrink-0 self-start overflow-hidden rounded-md bg-bg sm:w-36">
-              {state === 'lista' && entry ? (
-                // eslint-disable-next-line @next/next/no-img-element -- JPG ya descargado: es el mismo archivo que se comparte.
-                <img src={entry.url} alt={`Historia de ${item.name}`} className="h-full w-full object-cover" />
+              {state === 'lista' ? (
+                // eslint-disable-next-line @next/next/no-img-element -- JPG ya descargado: sale del caché del navegador.
+                <img src={item.image} alt={`Historia de ${item.name}`} className="h-full w-full object-cover" />
               ) : state === 'error' ? (
                 <p className="flex h-full items-center justify-center p-2 text-center text-[11px] text-muted">
                   No se pudo generar la imagen.
@@ -175,8 +177,8 @@ export function StoryList({ items }: { items: StoryItem[] }) {
                     {copied === item.id ? <Check size={15} className="text-accent" aria-hidden /> : <Copy size={15} aria-hidden />}
                     {copied === item.id ? 'Link copiado' : 'Copiar link'}
                   </button>
-                  {state === 'lista' && entry ? (
-                    <a href={entry.url} download={item.fileName} className={BUTTON}>
+                  {state === 'lista' ? (
+                    <a href={item.image} download={item.fileName} className={BUTTON}>
                       <Download size={15} aria-hidden /> Guardar imagen
                     </a>
                   ) : (
