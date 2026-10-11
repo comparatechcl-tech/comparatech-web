@@ -12,8 +12,10 @@ import { captionDiscount, chileDateTime, formatPrice, mlPhotoJpg } from '@/lib/c
  *   Nada de texto encima: tapar parte del producto o "decorar" la foto
  *   oficial confunde sobre lo que se compra.
  * - Descuento, precio de lista, envío gratis y Full aparecen solo si son ciertos.
- * - Siempre la hora del precio y el aviso 'Publicidad', arriba y bien
- *   visible: el SERNAC pide que no quede escondido ni en letra chica.
+ * - Siempre la hora del precio.
+ *
+ * La pieza no lleva la etiqueta "Publicidad": el dueño pidió sacarla (10/2026).
+ * El aviso de la comisión va en el texto del post (lib/content/captions).
  *
  * Usa la fuente que trae next/og (sin pedir fuentes a otro servidor), y sin
  * emojis, que next/og descarga aparte.
@@ -57,7 +59,7 @@ const COLORS = {
  * Franjas que Instagram y Facebook cubren en una historia de 1080x1920:
  * arriba la barra de avance y el nombre de la cuenta, abajo la caja para
  * responder. Lo que quede ahí no se ve, y una historia no tiene texto aparte:
- * el aviso de publicidad y la hora del precio tienen que caer entre las dos.
+ * la marca y la hora del precio tienen que caer entre las dos.
  */
 const STORY_TOP_SAFE = 250;
 const STORY_BOTTOM_SAFE = 300;
@@ -132,28 +134,6 @@ function Chip({ text, size, strong = false }: { text: string; size: number; stro
       }}
     >
       {text}
-    </div>
-  );
-}
-
-/**
- * El aviso de publicidad de la pieza. En la cabecera y con buen contraste:
- * abajo y en gris se perdía, y en las historias lo tapaba la app.
- */
-function AdTag({ size }: { size: number }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        padding: `${Math.round(size * 0.22)}px ${Math.round(size * 0.55)}px`,
-        borderRadius: Math.round(size * 0.35),
-        fontSize: size,
-        letterSpacing: 1,
-        background: COLORS.fg,
-        color: COLORS.ink,
-      }}
-    >
-      Publicidad
     </div>
   );
 }
@@ -279,7 +259,6 @@ export function ProductOgTemplate({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Wordmark size={Math.round(L.name * 1.05)} />
-        <AdTag size={L.small} />
       </div>
 
       {L.horizontal ? (
@@ -353,7 +332,6 @@ export function OffersOgTemplate({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Wordmark size={44} />
-        <AdTag size={22} />
       </div>
       <div style={{ display: 'flex', fontSize: 58, color: COLORS.fg, lineHeight: 1.1 }}>{headline}</div>
       <div style={{ display: 'flex', gap: 28, flex: 1, alignItems: 'center', justifyContent: 'center' }}>

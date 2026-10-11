@@ -91,8 +91,8 @@ export default async function HoyPage() {
         </p>
         {/* Arriba y legible: a esta página llega quien viene de un post, y el aviso no puede quedar al pie en letra chica. */}
         <p className="mt-2 max-w-2xl text-sm text-fg">
-          Publicidad · Los links a Mercado Libre son de afiliado: si compras, ComparaTech recibe una comisión sin
-          costo extra para ti.
+          Los links a Mercado Libre son de afiliado: si compras, ComparaTech recibe una comisión sin costo extra
+          para ti.
         </p>
         {telegram && (
           <a

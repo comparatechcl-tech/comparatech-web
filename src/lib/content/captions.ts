@@ -3,8 +3,7 @@
  *
  * Antes cada post se escribía a mano y por eso no se publicaba nada: con un
  * texto listo en un clic, publicar cuesta un par de minutos. Todos los
- * textos llevan lo que la ley y Mercado Libre exigen a un afiliado: que es
- * publicidad, que el link paga comisión y que el precio es el de una hora
+ * textos dicen que el link paga comisión y que el precio es el de una hora
  * concreta (en Mercado Libre cambia varias veces al día).
  *
  * Puro y sin I/O a propósito: lo usan el admin (cliente), el cron de
@@ -37,15 +36,14 @@ export interface CaptionOptions {
 }
 
 /**
- * El aviso de publicidad. No se edita sin revisar la ley del consumidor.
+ * El aviso de la comisión. Va en todos los textos, antes de los hashtags.
  *
- * Va en dos partes. AD_LABEL es la primera línea de todos los textos, en
- * palabras y no como hashtag: el SERNAC pide que la publicidad se
- * identifique de forma expresa, sin depender de abrir "ver más" y sin
- * mezclarse entre los hashtags (un #publicidad al final no basta).
- * DISCLOSURE explica la comisión y va antes de los hashtags.
+ * Los textos y las piezas no llevan la etiqueta "Publicidad": el dueño pidió
+ * sacarla de todo (10/2026). Esta frase es lo único que queda para decir que
+ * los links pagan comisión, que es lo que le piden a un afiliado tanto
+ * Mercado Libre como el SERNAC. No se quita ni se esconde entre los hashtags
+ * sin que él lo decida sabiendo eso.
  */
-export const AD_LABEL = 'Publicidad · link de afiliado';
 export const DISCLOSURE = 'Si compras con nuestro link, ComparaTech recibe una comisión sin costo extra para ti.';
 
 /** Comienzo de las dos líneas con link. Telegram las busca para sacarlas si el texto no cabe. */
@@ -216,7 +214,7 @@ export function productPageUrl(siteUrl: string, slug: string, channel: CaptionCh
 }
 
 export function buildCaption(product: CaptionProduct, channel: CaptionChannel, opts: CaptionOptions): string {
-  const lines: string[] = [AD_LABEL, pickHook(product, opts.now), shortProductName(product.name), priceLine(product)];
+  const lines: string[] = [pickHook(product, opts.now), shortProductName(product.name), priceLine(product)];
   if (product.offer_info?.free_shipping === true) lines.push('🚚 Envío gratis');
   lines.push(priceCheckedLine(product.price_checked_at));
   lines.push('');

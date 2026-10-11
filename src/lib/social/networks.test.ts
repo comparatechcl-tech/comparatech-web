@@ -6,7 +6,7 @@ vi.mock('@/lib/queries/price-history', () => ({ getPriceStatsMany: vi.fn(async (
 vi.mock('@/lib/settings', () => ({ readAffiliateSettings: vi.fn() }));
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { AD_LABEL, DISCLOSURE } from '@/lib/content/captions';
+import { DISCLOSURE } from '@/lib/content/captions';
 import { getPriceStatsMany } from '@/lib/queries/price-history';
 import { readConfirmedDrops } from '@/lib/social/drops';
 import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
@@ -121,9 +121,9 @@ describe('buildPlanItem', () => {
     expect(check).toMatchObject({ ok: true, snapshot: { price: 80_000, listPrice: 100_000, freeShipping: true } });
   });
 
-  it('cada red lleva su texto: empieza con el aviso de publicidad y trae la comisión y la hora del precio', () => {
+  it('cada red lleva su texto: sin la etiqueta "Publicidad", con la comisión y la hora del precio', () => {
     for (const text of Object.values(item.textos)) {
-      expect(text.startsWith(AD_LABEL)).toBe(true);
+      expect(text).not.toMatch(/publicidad/i);
       expect(text).toContain(DISCLOSURE);
       expect(text).toContain('$80.000');
       expect(text).toMatch(/Precio revisado el \d{2}\/\d{2} a las \d{2}:\d{2}/);
@@ -161,12 +161,13 @@ describe('buildPlanItem', () => {
     expect(singleParagraph('x'.repeat(50), 10)).toHaveLength(10);
   });
 
-  it('el título de TikTok empieza con "Publicidad" y cabe en 90 caracteres aunque el nombre sea largo', () => {
+  it('el título de TikTok cabe en 90 caracteres aunque el nombre sea largo, y no lleva etiqueta', () => {
     const long = product({ name: 'Televisor '.repeat(30) });
     const [longPick] = pickByRules([long], { now: NOW, recentlyPosted: new Set() }, NETWORK_RULES);
     const title = (buildPlanItem(longPick, build)!.metricool.tiktok.tiktokData as { title: string }).title;
     expect(title.length).toBeLessThanOrEqual(90);
-    expect(title.startsWith('Publicidad: ')).toBe(true);
+    expect(title).not.toMatch(/publicidad/i);
+    expect(title.startsWith('Televisor')).toBe(true);
     expect(title).toContain('$80.000');
   });
 

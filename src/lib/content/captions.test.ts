@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  AD_LABEL,
   DISCLOSURE,
   buildCaption,
   captionDiscount,
@@ -70,13 +69,19 @@ describe('buildCaption', () => {
     expect(late).toContain('el 04/10 a las 22:15');
   });
 
-  it('el aviso de publicidad es la primera línea, en palabras y no como hashtag', () => {
+  it('no lleva la etiqueta "Publicidad" (decisión del dueño) y parte con el gancho', () => {
     for (const channel of CHANNELS) {
       const text = buildCaption(base, channel, opts);
-      expect(text.split('\n')[0]).toBe(AD_LABEL);
-      expect(AD_LABEL).toMatch(/^Publicidad/);
-      expect(text).not.toContain('#publicidad');
+      expect(text).not.toMatch(/publicidad/i);
+      expect(text.split('\n')[0]).toBe(pickHook(base, opts.now));
     }
+  });
+
+  it('la frase de la comisión sigue en todos los textos', () => {
+    for (const channel of CHANNELS) {
+      expect(buildCaption(base, channel, opts)).toContain(DISCLOSURE);
+    }
+    expect(DISCLOSURE).toMatch(/comisión/);
   });
 
   it('la frase de la comisión va aparte y antes de los hashtags, nunca mezclada con ellos', () => {
@@ -228,7 +233,6 @@ describe('Telegram', async () => {
     const caption = telegramCaption(row({ name: 'Parlante <b>Pro</b> & Más' }), 'https://meli.la/abc', now);
     expect(caption).toContain('&lt;b&gt;Pro&lt;/b&gt; &amp; Más');
     expect(caption.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_MAX);
-    expect(caption.startsWith(AD_LABEL)).toBe(true);
     expect(caption).toContain(DISCLOSURE);
   });
 
@@ -237,7 +241,6 @@ describe('Telegram', async () => {
     const longLink = `https://articulo.mercadolibre.cl/MLC-1?${'x'.repeat(1300)}`;
     const caption = telegramCaption(row({}), longLink, now);
     expect(caption.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_MAX);
-    expect(caption.startsWith(AD_LABEL)).toBe(true);
     expect(caption).toContain('Precio revisado el');
     expect(caption).toContain(DISCLOSURE);
     // Ni un link a medias (perdería los parámetros de afiliado) ni el de la ficha.
@@ -261,9 +264,9 @@ describe('Telegram', async () => {
       const at = new Date(Date.UTC(2026, 9, day, 15));
       const full = buildCaption(plain, 'telegram', { now: at, siteUrl: 'https://sitio.test', link: longLink });
       const cut = telegramCaption(plain, longLink, at).split('\n');
-      // Línea 0: el aviso. Línea 1: el mismo gancho del texto completo.
-      expect(cut[1]).toBe(full.split('\n')[1]);
-      hooks.add(cut[1]);
+      // La primera línea es el mismo gancho del texto completo.
+      expect(cut[0]).toBe(full.split('\n')[0]);
+      hooks.add(cut[0]);
     }
     expect([...hooks]).toContain('🔎 Míralo antes de comprar');
   });

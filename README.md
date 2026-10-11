@@ -71,9 +71,11 @@ Reglas que el código hace cumplir:
   producto se agotó o cambió de precio 3% o más
   (`pendientes_con_problemas`), para retirarlo de Metricool y avisar con
   `"retiradas"` en el mismo `registrar`.
-- El aviso de publicidad es la primera línea de cada texto, en palabras, y
-  va visible en la imagen. Un `#publicidad` entre los hashtags no basta
-  (SERNAC).
+- Cada texto lleva la frase de la comisión ("Si compras con nuestro
+  link...") antes de los hashtags. La etiqueta "Publicidad" se sacó de los
+  textos y de las imágenes por decisión del dueño (octubre de 2026); el
+  SERNAC pide identificar la publicidad, así que esa frase no se quita sin
+  que él lo decida.
 - Las direcciones firmadas dependen de `CRON_SECRET` (mínimo 32
   caracteres para firmar). Si se cambia ese secreto, las imágenes de lo que
   esté programado dejan de servir: hay que volver a programarlo.

@@ -59,7 +59,7 @@ function escapeHtml(text: string): string {
 /**
  * Pie de foto en HTML, dentro del máximo de Telegram. Si no cabe, se saca
  * primero el link a la ficha (el botón ya lleva a la compra); el aviso de
- * publicidad no se corta nunca.
+ * la comisión no se corta nunca.
  */
 export function telegramCaption(product: CaptionProduct, link: string, now: Date): string {
   const text = buildCaption(product, 'telegram', { now, siteUrl: SITE_URL, link });

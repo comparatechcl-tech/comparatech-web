@@ -145,7 +145,7 @@ export interface PlanItem {
   metricool: Record<Network, Record<string, unknown>>;
   /**
    * Lo mismo para publicarla como historia. Una historia no lleva texto (ni
-   * link): el aviso de publicidad y la hora del precio van en la imagen.
+   * link): lo único que dice es lo que va en la imagen.
    */
   metricool_historia: Record<StoryNetwork, Record<string, unknown>>;
 }
@@ -153,12 +153,10 @@ export interface PlanItem {
 /** Redes con historias que Metricool publica solo. */
 export type StoryNetwork = 'instagram' | 'facebook';
 
-const TIKTOK_TITLE_PREFIX = 'Publicidad: ';
-
 function tiktokTitle(p: SocialProduct): string {
   const price = formatPrice(p.price);
-  const room = TIKTOK_TITLE_MAX - TIKTOK_TITLE_PREFIX.length - price.length - 3;
-  return `${TIKTOK_TITLE_PREFIX}${shortProductName(p.name, room)} a ${price}`.slice(0, TIKTOK_TITLE_MAX);
+  const room = TIKTOK_TITLE_MAX - price.length - 3;
+  return `${shortProductName(p.name, room)} a ${price}`.slice(0, TIKTOK_TITLE_MAX);
 }
 
 /**
