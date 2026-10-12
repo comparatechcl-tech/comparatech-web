@@ -52,6 +52,11 @@ export default async function HistoriasPage() {
       </div>
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
+        {/* La página no puede elegir la cuenta: Compartir abre la app con la última que se usó. */}
+        <li>
+          Antes de empezar, deja activa en Instagram la cuenta de <strong>ComparaTech</strong>: las historias salen
+          por la última cuenta que usaste en la app.
+        </li>
         <li>
           Toca <strong>Compartir</strong> en una oferta y elige Instagram, Historia. El link queda copiado.
         </li>
