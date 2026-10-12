@@ -2,9 +2,10 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
+import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { shortProductName } from '@/lib/text';
 import { readConfirmedDrops } from '@/lib/social/drops';
-import { NETWORK_RULES, postedOnNetworks } from '@/lib/social/networks';
+import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
 import {
   pickByRules,
@@ -22,6 +23,11 @@ import {
  * historia desde la app. Lo que sí se puede dejar listo es todo lo demás:
  * qué ofertas mostrar, la imagen con el precio del momento y el link de
  * afiliado para pegar en el sticker (ver /admin/historias).
+ *
+ * Las historias llevan su propia cuenta de "ya publicado", aparte de la del
+ * plan de publicaciones: una historia dura un día y lleva su link, así que
+ * no le quita productos al feed ni el feed a las historias. Se anotan en
+ * social_posts con STORY_MARK en `caption`.
  */
 
 export const STORY_RULES: PickRules & { repeatAfterDays: number } = {
@@ -29,6 +35,68 @@ export const STORY_RULES: PickRules & { repeatAfterDays: number } = {
   /** Se suben a mano y no gastan la cuota de Metricool: caben más que en el plan de publicaciones. */
   maxPosts: 8,
 };
+
+/**
+ * Cuánto tiene que bajar una oferta ya subida para volver a mostrarse antes
+ * de los 14 días. Lo mismo que hace rehacer un post programado
+ * (lib/social/networks): menos que esto no es noticia.
+ */
+export const STORY_REPOST_DROP = 0.03;
+
+/** Lo que se sabe de las historias recientes de un producto. */
+export interface StoryHistory {
+  /** El precio más bajo con que se subió. null si ninguna historia lo anotó. */
+  lowest: number | null;
+  /** Cuándo se subió la última. */
+  lastAt: string;
+}
+
+interface StoryRow {
+  product_id: string | null;
+  posted_price: number | null;
+  posted_at: string;
+}
+
+/** Las historias marcadas como publicadas desde `since`, por producto. Sin la tabla, ninguna. */
+export async function readStoryHistory(admin: SupabaseClient, since: Date): Promise<Map<string, StoryHistory>> {
+  const { data, error } = await admin
+    .from('social_posts')
+    .select('product_id, posted_price, posted_at')
+    .eq('channel', 'instagram')
+    .eq('caption', STORY_MARK)
+    .neq('status', 'error')
+    .gte('posted_at', since.toISOString())
+    .order('posted_at', { ascending: false })
+    .limit(2000);
+  if (error) {
+    if (isMissingSchemaError(error)) return new Map();
+    throw new Error(`No se pudo leer las historias publicadas: ${error.message}`);
+  }
+
+  const history = new Map<string, StoryHistory>();
+  // Vienen de la más nueva a la más antigua: la primera de cada producto es la última subida.
+  for (const row of (data ?? []) as StoryRow[]) {
+    if (!row.product_id) continue;
+    const price = row.posted_price && row.posted_price > 0 ? row.posted_price : null;
+    const known = history.get(row.product_id);
+    if (!known) history.set(row.product_id, { lowest: price, lastAt: row.posted_at });
+    else if (price !== null && (known.lowest === null || price < known.lowest)) known.lowest = price;
+  }
+  return history;
+}
+
+/**
+ * ¿Bajó lo suficiente desde sus historias como para subirla de nuevo? Puro.
+ *
+ * Se compara con el precio MÁS BAJO con que ya se subió, no con el último:
+ * muchos precios van y vienen entre los mismos dos valores (dos vendedores
+ * que se turnan), y comparando con el último esa oferta volvería a aparecer
+ * cada vez que el precio regresa al valor de siempre.
+ */
+export function droppedSinceStory(history: StoryHistory | undefined, price: number): boolean {
+  if (!history || history.lowest === null) return false;
+  return price <= history.lowest * (1 - STORY_REPOST_DROP);
+}
 
 export interface StoryItem {
   id: string;
@@ -42,6 +110,8 @@ export interface StoryItem {
   /** Baja confirmada por el historial (en %), para lo que no llega al descuento. */
   drop: number | null;
   checkedAt: string | null;
+  /** Si ya se subió en estos días y vuelve porque bajó: a cuánto se subió y cuándo. */
+  again: { price: number; at: string } | null;
   /** Ruta firmada de la pieza 9:16, sin dominio: sirve en producción y en local. */
   image: string;
   /** El mismo destino que el botón de compra del sitio. */
@@ -52,13 +122,14 @@ export interface StoryItem {
 /** Lo que hace falta para subir la historia de un producto. null si no se pudo firmar la imagen. Puro. */
 export function buildStoryItem(
   pick: TelegramPick<SocialProduct>,
-  opts: { now: Date; settings: AffiliateSettings; key: Buffer }
+  opts: { now: Date; settings: AffiliateSettings; key: Buffer; history?: StoryHistory }
 ): StoryItem | null {
   const p = pick.product;
   const image = piecePath(snapshotOf(p, 'story', opts.now), opts.key);
   if (!image) return null;
 
   const safeSlug = p.slug.toLowerCase().replace(/[^a-z0-9-]+/g, '').slice(0, 80) || 'producto';
+  const h = opts.history;
   return {
     id: p.id,
     slug: p.slug,
@@ -69,6 +140,7 @@ export function buildStoryItem(
     discount: pick.discount,
     drop: pick.drop === null ? null : Math.round(pick.drop),
     checkedAt: p.price_checked_at,
+    again: h && h.lowest !== null ? { price: h.lowest, at: h.lastAt } : null,
     image,
     link: resolveOutboundUrl(p, opts.settings),
     fileName: `comparatech-${safeSlug}-historia.jpg`,
@@ -76,10 +148,11 @@ export function buildStoryItem(
 }
 
 /**
- * Las ofertas de este momento para subir como historia: las mismas reglas
- * del plan de publicaciones (descuento sobre el precio de lista o baja
- * confirmada, precio recién revisado, nada repetido en 14 días), pero más
- * productos. Solo lee.
+ * Las ofertas de este momento para subir como historia: las reglas del plan
+ * de publicaciones (descuento sobre el precio de lista o baja confirmada,
+ * precio recién revisado, dos por categoría), con más productos. Lo que ya
+ * se subió como historia en los últimos 14 días no vuelve, salvo que haya
+ * bajado de precio: esas van primero. Solo lee.
  */
 export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buffer): Promise<StoryItem[]> {
   const freshSince = new Date(now.getTime() - STORY_RULES.maxPriceAgeMs).toISOString();
@@ -87,13 +160,20 @@ export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buff
   if (read.error) throw new Error(`No se pudo leer el catálogo: ${read.error}`);
 
   const since = new Date(now.getTime() - STORY_RULES.repeatAfterDays * 86_400_000);
-  const [posted, drops, settings] = await Promise.all([
-    postedOnNetworks(admin, since),
+  const [history, drops, settings] = await Promise.all([
+    readStoryHistory(admin, since),
     readConfirmedDrops(read.rows, now, STORY_RULES.minDiscount),
     readAffiliateSettings(admin),
   ]);
 
-  return pickByRules(read.rows, { now, recentlyPosted: posted ?? new Set(), drops }, STORY_RULES)
-    .map((pick) => buildStoryItem(pick, { now, settings, key }))
+  const alreadyPosted = new Set<string>();
+  for (const p of read.rows) {
+    if (history.has(p.id) && !droppedSinceStory(history.get(p.id), p.price)) alreadyPosted.add(p.id);
+  }
+
+  const items = pickByRules(read.rows, { now, recentlyPosted: alreadyPosted, drops }, STORY_RULES)
+    .map((pick) => buildStoryItem(pick, { now, settings, key, history: history.get(pick.product.id) }))
     .filter((item): item is StoryItem => item !== null);
+  // sort es estable: dentro de cada grupo se conserva el orden de la selección.
+  return items.sort((a, b) => Number(b.again !== null) - Number(a.again !== null));
 }

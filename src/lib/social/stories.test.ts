@@ -1,15 +1,29 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 // La lectura del historial va a Supabase: acá solo se prueba lo puro.
 vi.mock('@/lib/queries/price-history', () => ({ getPriceStatsMany: vi.fn(async () => new Map()) }));
 // lib/settings usa cache() de React, que solo existe dentro de Next.
 vi.mock('@/lib/settings', () => ({ readAffiliateSettings: vi.fn() }));
+// El catálogo se entrega ya leído; la selección es la de verdad.
+vi.mock('@/lib/social/telegram', async (original) => ({
+  ...(await original<typeof import('@/lib/social/telegram')>()),
+  readFreshSocialProducts: vi.fn(),
+}));
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { readAffiliateSettings } from '@/lib/settings';
 import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
-import { NETWORK_RULES } from '@/lib/social/networks';
-import { STORY_RULES, buildStoryItem } from '@/lib/social/stories';
-import { pickByRules, type SocialProduct } from '@/lib/social/telegram';
+import { NETWORK_RULES, STORY_MARK, postedOnNetworks } from '@/lib/social/networks';
+import {
+  STORY_REPOST_DROP,
+  STORY_RULES,
+  buildStoryItem,
+  droppedSinceStory,
+  readStoryHistory,
+  readStoryPicks,
+} from '@/lib/social/stories';
+import { pickByRules, readFreshSocialProducts, type SocialProduct } from '@/lib/social/telegram';
 
 const NOW = new Date('2026-10-12T15:00:00Z');
 const KEY = pieceKey({ CRON_SECRET: 'un-secreto-de-prueba-de-mas-de-32-caracteres' } as unknown as NodeJS.ProcessEnv)!;
@@ -48,6 +62,40 @@ function pickOne(p: SocialProduct, drops?: Map<string, number>) {
   return pick;
 }
 
+/** Una base de mentira: anota lo que se le pide y devuelve las filas dadas, sin filtrar. */
+function fakeAdmin(rows: unknown[], error: { code?: string; message: string } | null = null) {
+  const calls: unknown[][] = [];
+  const builder: Record<string, (...args: unknown[]) => unknown> = {};
+  for (const method of ['select', 'eq', 'neq', 'in', 'gte', 'order']) {
+    builder[method] = (...args) => {
+      calls.push([method, ...args]);
+      return builder;
+    };
+  }
+  builder.limit = (...args) => {
+    calls.push(['limit', ...args]);
+    return Promise.resolve({ data: error ? null : rows, error });
+  };
+  const admin = {
+    from: (table: string) => {
+      calls.push(['from', table]);
+      return builder;
+    },
+  } as unknown as SupabaseClient;
+  return { admin, calls };
+}
+
+const story = (productId: string, price: number | null, daysAgo: number) => ({
+  product_id: productId,
+  posted_price: price,
+  posted_at: new Date(NOW.getTime() - daysAgo * 86_400_000).toISOString(),
+});
+
+beforeEach(() => {
+  vi.mocked(readAffiliateSettings).mockResolvedValue(DIRECT);
+  vi.mocked(readFreshSocialProducts).mockReset();
+});
+
 describe('STORY_RULES', () => {
   it('usa las reglas del plan de publicaciones, con más productos', () => {
     expect(STORY_RULES.minDiscount).toBe(NETWORK_RULES.minDiscount);
@@ -55,20 +103,69 @@ describe('STORY_RULES', () => {
     expect(STORY_RULES.repeatAfterDays).toBe(NETWORK_RULES.repeatAfterDays);
     expect(STORY_RULES.maxPosts).toBeGreaterThan(NETWORK_RULES.maxPosts);
   });
+});
 
-  it('no pasa de ocho ni de dos por categoría', () => {
-    const rows = [
-      ...Array.from({ length: 5 }, () => product({ category: 'audio' })),
-      ...Array.from({ length: 5 }, () => product({ category: 'gaming' })),
-      ...Array.from({ length: 5 }, () => product({ category: 'hogar' })),
-      ...Array.from({ length: 5 }, () => product({ category: 'celulares' })),
-      ...Array.from({ length: 5 }, () => product({ category: 'computacion' })),
-    ];
-    const picks = pickByRules(rows, { now: NOW, recentlyPosted: new Set() }, STORY_RULES);
-    expect(picks).toHaveLength(8);
-    const perCategory = new Map<string, number>();
-    for (const pick of picks) perCategory.set(pick.product.category, (perCategory.get(pick.product.category) ?? 0) + 1);
-    expect(Math.max(...perCategory.values())).toBe(2);
+describe('droppedSinceStory', () => {
+  it('sin historias anteriores no hay nada con qué comparar', () => {
+    expect(droppedSinceStory(undefined, 80_000)).toBe(false);
+  });
+
+  it('vuelve solo si bajó 3% o más respecto del precio más bajo con que se subió', () => {
+    const history = { lowest: 100_000, lastAt: NOW.toISOString() };
+    expect(STORY_REPOST_DROP).toBe(0.03);
+    expect(droppedSinceStory(history, 100_000)).toBe(false);
+    expect(droppedSinceStory(history, 97_001)).toBe(false);
+    expect(droppedSinceStory(history, 97_000)).toBe(true);
+    expect(droppedSinceStory(history, 120_000)).toBe(false);
+  });
+
+  it('una historia sin precio anotado no permite decir que bajó', () => {
+    expect(droppedSinceStory({ lowest: null, lastAt: NOW.toISOString() }, 1)).toBe(false);
+  });
+});
+
+describe('readStoryHistory', () => {
+  it('pide solo las historias vigentes y junta el precio más bajo y la última fecha', async () => {
+    const since = new Date(NOW.getTime() - 14 * 86_400_000);
+    // De la más nueva a la más antigua, como las entrega la consulta.
+    const { admin, calls } = fakeAdmin([
+      story('a', 95_000, 1),
+      story('b', null, 2),
+      story('a', 90_000, 5),
+      story('a', 110_000, 9),
+      story('b', 50_000, 10),
+      { product_id: null, posted_price: 1, posted_at: NOW.toISOString() },
+    ]);
+    const history = await readStoryHistory(admin, since);
+
+    expect(history.get('a')).toEqual({ lowest: 90_000, lastAt: story('a', 0, 1).posted_at });
+    expect(history.get('b')).toEqual({ lowest: 50_000, lastAt: story('b', 0, 2).posted_at });
+    expect(history.size).toBe(2);
+
+    expect(calls).toContainEqual(['from', 'social_posts']);
+    expect(calls).toContainEqual(['eq', 'channel', 'instagram']);
+    expect(calls).toContainEqual(['eq', 'caption', STORY_MARK]);
+    expect(calls).toContainEqual(['neq', 'status', 'error']);
+    expect(calls).toContainEqual(['gte', 'posted_at', since.toISOString()]);
+  });
+
+  it('sin la tabla no hay historias; con otro error, falla', async () => {
+    const missing = fakeAdmin([], { code: '42P01', message: 'no existe' });
+    expect((await readStoryHistory(missing.admin, NOW)).size).toBe(0);
+    const broken = fakeAdmin([], { code: '500', message: 'se cayó' });
+    await expect(readStoryHistory(broken.admin, NOW)).rejects.toThrow('se cayó');
+  });
+});
+
+describe('postedOnNetworks', () => {
+  it('no cuenta las historias subidas a mano: no le quitan productos al plan de publicaciones', async () => {
+    const { admin } = fakeAdmin([
+      { product_id: 'feed-metricool', caption: 'Texto del post' },
+      { product_id: 'marcado-a-mano', caption: null },
+      { product_id: 'solo-historia', caption: STORY_MARK },
+    ]);
+    const posted = await postedOnNetworks(admin, NOW);
+    expect([...(posted ?? [])].sort()).toEqual(['feed-metricool', 'marcado-a-mano']);
   });
 });
 
@@ -98,13 +195,19 @@ describe('buildStoryItem', () => {
 
   it('muestra el descuento y el precio de lista solo cuando hay rebaja', () => {
     const withList = buildStoryItem(pickOne(product()), { now: NOW, settings: DIRECT, key: KEY })!;
-    expect(withList).toMatchObject({ discount: 20, listPrice: 100_000, drop: null });
+    expect(withList).toMatchObject({ discount: 20, listPrice: 100_000, drop: null, again: null });
 
     // Sin precio de lista entra solo por la baja que confirma el historial.
     const p = product({ original_price: null });
     const byDrop = buildStoryItem(pickOne(p, new Map([[p.id, 7.6]])), { now: NOW, settings: DIRECT, key: KEY })!;
     expect(byDrop).toMatchObject({ discount: 0, listPrice: null, drop: 8 });
     expect(byDrop.image).toContain('/story-80000-0-');
+  });
+
+  it('si ya se subió, dice a cuánto y cuándo', () => {
+    const history = { lowest: 90_000, lastAt: '2026-10-09T12:00:00.000Z' };
+    const item = buildStoryItem(pickOne(product()), { now: NOW, settings: DIRECT, key: KEY, history })!;
+    expect(item.again).toEqual({ price: 90_000, at: '2026-10-09T12:00:00.000Z' });
   });
 
   it('acorta el nombre y arma un nombre de archivo sin caracteres raros', () => {
@@ -118,5 +221,47 @@ describe('buildStoryItem', () => {
     const pick = pickOne(product());
     const broken = { ...pick, product: { ...pick.product, price: 0 } };
     expect(buildStoryItem(broken, { now: NOW, settings: DIRECT, key: KEY })).toBeNull();
+  });
+});
+
+describe('readStoryPicks', () => {
+  const categories = ['audio', 'gaming', 'hogar', 'celulares', 'computacion'];
+
+  it('entrega hasta ocho, dos por categoría como máximo', async () => {
+    const rows = categories.flatMap((category) => Array.from({ length: 5 }, () => product({ category })));
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows, error: null });
+
+    const items = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    expect(items).toHaveLength(8);
+    const perCategory = new Map<string, number>();
+    for (const item of items) {
+      const category = rows.find((p) => p.id === item.id)!.category;
+      perCategory.set(category, (perCategory.get(category) ?? 0) + 1);
+    }
+    expect(Math.max(...perCategory.values())).toBe(2);
+  });
+
+  it('no repite una historia ya subida, salvo que haya bajado; esas van primero', async () => {
+    const posted = product({ category: 'audio' }); // 80.000, subida a 80.000: no vuelve
+    const cheaper = product({ category: 'gaming' }); // 80.000, subida a 90.000: vuelve
+    const backToUsual = product({ category: 'hogar' }); // subida a 80.000 y a 95.000: sigue en su precio más bajo
+    const fresh = product({ category: 'celulares' });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [fresh, posted, cheaper, backToUsual], error: null });
+    const { admin } = fakeAdmin([
+      story(posted.id, 80_000, 2),
+      story(cheaper.id, 90_000, 3),
+      story(backToUsual.id, 95_000, 1),
+      story(backToUsual.id, 80_000, 4),
+    ]);
+
+    const items = await readStoryPicks(admin, NOW, KEY);
+    expect(items.map((item) => item.id)).toEqual([cheaper.id, fresh.id]);
+    expect(items[0].again).toMatchObject({ price: 90_000 });
+    expect(items[1].again).toBeNull();
+  });
+
+  it('si el catálogo no se pudo leer, falla en vez de mostrar una lista vacía', async () => {
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [], error: 'sin conexión' });
+    await expect(readStoryPicks(fakeAdmin([]).admin, NOW, KEY)).rejects.toThrow('sin conexión');
   });
 });

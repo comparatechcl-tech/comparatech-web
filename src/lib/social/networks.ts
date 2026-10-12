@@ -53,6 +53,13 @@ export const NETWORK_RULES: PickRules & { repeatAfterDays: number } = {
   repeatAfterDays: 14,
 };
 
+/**
+ * Marca (en `caption`) de las historias subidas a mano desde /admin/historias.
+ * Van en el canal 'instagram' porque la tabla no admite otro sin una
+ * migración, pero llevan su propia cuenta: ver lib/social/stories.
+ */
+export const STORY_MARK = 'historia';
+
 /** Tope de productos por plan: más que esto no se alcanza a programar con cuidado. */
 export const PLAN_MAX = 12;
 
@@ -73,12 +80,15 @@ const TIKTOK_TEXT_MAX = 2000;
 /**
  * Productos que ya salieron (o están programados) en estas redes desde
  * `since`. null si la tabla social_posts todavía no existe.
+ *
+ * Sin las historias subidas a mano: duran un día y llevan su propio link,
+ * así que no le quitan productos al plan de publicaciones (ni al revés).
  */
 export async function postedOnNetworks(admin: SupabaseClient, since: Date): Promise<Set<string> | null> {
   const ids = new Set<string>();
   const { data, error } = await admin
     .from('social_posts')
-    .select('product_id')
+    .select('product_id, caption')
     .in('channel', [...RECORD_CHANNELS])
     .neq('status', 'error')
     .gte('posted_at', since.toISOString())
@@ -88,7 +98,10 @@ export async function postedOnNetworks(admin: SupabaseClient, since: Date): Prom
     if (isMissingSchemaError(error)) return null;
     throw new Error(`No se pudo leer social_posts: ${error.message}`);
   }
-  for (const row of (data ?? []) as { product_id: string | null }[]) {
+  for (const row of (data ?? []) as { product_id: string | null; caption: string | null }[]) {
+    // Se descartan acá y no en la consulta: un "distinto de" en la base
+    // dejaría fuera también las filas sin texto, que son casi todas.
+    if (row.caption === STORY_MARK) continue;
     if (row.product_id) ids.add(row.product_id);
   }
   return ids;

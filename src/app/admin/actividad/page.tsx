@@ -94,6 +94,9 @@ function describe(row: AdminEventRow): string {
     case 'eliminar_producto':
       return `eliminó un producto${row.target ? ` · ${row.target}` : ''}`;
     case 'marcar_rrss':
+      // Las historias subidas a mano (/admin/historias) se anotan con la misma acción.
+      if (after?.historia === 'publicada') return `marcó una historia como publicada${row.target ? ` · ${row.target}` : ''}`;
+      if (after?.historia === 'deshecha') return `deshizo la marca de una historia${row.target ? ` · ${row.target}` : ''}`;
       return `cambió el estado en redes de un producto${row.target ? ` · ${row.target}` : ''}`;
     case 'reporte_afiliados':
       return `anotó el reporte de Mercado Libre${row.target ? ` de la semana del ${row.target}` : ''}`;
