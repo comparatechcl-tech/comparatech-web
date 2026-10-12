@@ -1,5 +1,5 @@
 // Lee los anchos de avance de Inter (los WOFF de src/lib/content/fonts) para armar las tablas W600 y W800
-// que la plantilla de la historia (src/lib/content/story-template.tsx) usa al medir textos.
+// que la plantilla de las piezas de oferta (src/lib/content/offer-template.tsx) usa al medir textos.
 // Uso: node scripts/piezas/medir-fuente.mjs  -> imprime, por peso, los anchos en milésimas de em.
 import fs from 'node:fs';
 import path from 'node:path';

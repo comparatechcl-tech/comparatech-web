@@ -2,7 +2,7 @@ import { ImageResponse } from 'next/og';
 import { shortProductName } from '@/lib/text';
 import { captionDiscount, chileDateTime, formatPrice, mlPhotoJpg } from '@/lib/content/captions';
 import { interFonts, type OgFont } from '@/lib/content/og-fonts';
-import { StoryTemplate } from '@/lib/content/story-template';
+import { OfferTemplate } from '@/lib/content/offer-template';
 
 /**
  * Plantilla de las imágenes de producto: el kit para redes del admin
@@ -19,10 +19,12 @@ import { StoryTemplate } from '@/lib/content/story-template';
  * La pieza no lleva la etiqueta "Publicidad": el dueño pidió sacarla (10/2026).
  * El aviso de la comisión va en el texto del post (lib/content/captions).
  *
- * Usa la fuente que trae next/og (sin pedir fuentes a otro servidor), y sin
- * emojis, que next/og descarga aparte. La historia es la excepción: tiene su
- * propio diseño (lib/content/story-template) y usa Inter, que va en el
- * repositorio; quien la dibuje tiene que pasar las fuentes de ogFonts().
+ * La historia y la publicación del feed tienen su propio diseño
+ * (lib/content/offer-template) y usan Inter, que va en el repositorio: quien
+ * las dibuje tiene que pasar las fuentes de ogFonts(). El pin y la vista
+ * previa de links siguen con la plantilla de este archivo y la fuente que
+ * trae next/og. Ninguna pide fuentes a otro servidor ni lleva emojis, que
+ * next/og descarga aparte.
  */
 
 export type OgFormat = 'feed' | 'story' | 'pin' | 'og';
@@ -108,9 +110,8 @@ interface Layout {
   horizontal: boolean;
 }
 
-/** La historia no está: la dibuja lib/content/story-template. */
-const LAYOUTS: Record<Exclude<OgFormat, 'story'>, Layout> = {
-  feed: { pad: 64, photo: 640, name: 44, price: 120, small: 30, chip: 34, horizontal: false },
+/** La historia y el feed no están: los dibuja lib/content/offer-template. */
+const LAYOUTS: Record<Exclude<OgFormat, 'story' | 'feed'>, Layout> = {
   pin: { pad: 60, photo: 760, name: 42, price: 112, small: 28, chip: 32, horizontal: false },
   og: { pad: 40, photo: 550, name: 34, price: 84, small: 22, chip: 26, horizontal: true },
 };
@@ -174,7 +175,7 @@ export function ProductOgTemplate({
   format: OgFormat;
   photo: string | null;
 }) {
-  if (format === 'story') return <StoryTemplate product={product} photo={photo} />;
+  if (format === 'story' || format === 'feed') return <OfferTemplate product={product} photo={photo} format={format} />;
 
   const L = LAYOUTS[format];
   const { width, height } = OG_SIZES[format];
@@ -346,10 +347,10 @@ export function OffersOgTemplate({
 
 /**
  * Las fuentes que hay que entregarle a next/og para cada formato: Inter para
- * la historia; para el resto nada, y next/og usa la suya.
+ * la historia y el feed; para el resto nada, y next/og usa la suya.
  */
 export async function ogFonts(format: OgFormat): Promise<OgFont[] | undefined> {
-  return format === 'story' ? interFonts() : undefined;
+  return format === 'story' || format === 'feed' ? interFonts() : undefined;
 }
 
 /** PNG de un producto en el formato pedido. */

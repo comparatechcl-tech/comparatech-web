@@ -1,18 +1,17 @@
 /* eslint-disable @next/next/no-img-element -- esto lo dibuja next/og, que solo entiende <img> */
 /**
- * Historia de Instagram (1080x1920): una sola tarjeta con la foto, la franja
- * del descuento y el bloque del precio. La dibuja next/og igual que el resto
- * de las piezas (lib/content/og-template), con las mismas reglas: la foto de
- * Mercado Libre entera y sin nada encima, descuento y etiquetas solo si son
- * ciertos, y siempre la hora del precio.
+ * La pieza de una oferta para redes, en sus dos formatos: la historia
+ * (1080x1920) y la publicación del feed (1080x1350). Es la misma tarjeta en
+ * los dos: la foto, la franja del descuento y el bloque del precio, bajo una
+ * cabecera con la marca y la hora del precio. La dibuja next/og igual que el
+ * resto de las piezas (lib/content/og-template), con las mismas reglas: la
+ * foto de Mercado Libre entera y sin nada encima, descuento y etiquetas solo
+ * si son ciertos, y siempre la hora del precio.
  *
  * El alto se reparte con cuentas, no con suerte: el nombre se mide con los
  * anchos reales de Inter para saber si va en uno o dos renglones (y dónde
  * cortarlo), y la foto se queda con todo lo que sobra. La tarjeta termina
- * siempre en el mismo punto, así que bajo ella queda libre el lugar del
- * sticker de enlace que se pone a mano en Instagram (ver /admin/historias).
- * Ese lugar no lleva texto ni flechas: la misma imagen se publica a veces
- * sin sticker y tiene que verse terminada.
+ * siempre en el mismo punto de cada formato (ver FRAMES).
  *
  * Se dibuja a pedido en un servidor chico, y tres cosas le salen caras al
  * dibujante: las sombras difuminadas, los recortes (overflow con esquinas
@@ -56,14 +55,36 @@ export function textWidth(text: string, table: number[], size: number, letterSpa
   return (thousandths / 1000) * size + letterSpacing * count;
 }
 
-// Reparto vertical. Instagram tapa los primeros 250 px y los últimos 300: se ve de y=250 a y=1620.
+export type OfferFormat = 'story' | 'feed';
+
+/** Lo único que cambia de un formato a otro: el alto, y dónde empieza y dónde termina el contenido. */
+interface Frame {
+  height: number;
+  /** Dónde empieza la cabecera. */
+  top: number;
+  /** Dónde termina la tarjeta. */
+  cardBottom: number;
+  /** Luz bajo la tarjeta, para cuando queda espacio libre debajo. */
+  glow: boolean;
+}
+
+const FRAMES: Record<OfferFormat, Frame> = {
+  // Instagram tapa los primeros 250 px y los últimos 300 de una historia: se ve de y=250 a y=1620. La
+  // tarjeta termina en 1420 y deja 200 px vacíos para el sticker de enlace que se pone a mano en la app
+  // (ver /admin/historias). Ese lugar no lleva texto ni flechas: la misma imagen se publica a veces sin
+  // sticker y tiene que verse terminada; para eso está la luz.
+  story: { height: 1920, top: 270, cardBottom: 1420, glow: true },
+  // La publicación del feed se ve entera: el contenido llega de margen a margen. Arriba son 66 y no 72
+  // porque la tinta de la cabecera empieza unos px más abajo que su caja.
+  feed: { height: 1350, top: 66, cardBottom: 1278, glow: false },
+};
+
+// Reparto vertical.
 const MARGIN = 72;
 const CONTENT_W = 1080 - MARGIN * 2; // 936
-const HEADER_TOP = 270;
 const HEADER_H = 72;
 const TITLE_GAP = 20; // de la cabecera a la marca del producto
 const CARD_GAP = 32; // del nombre a la tarjeta
-const CARD_BOTTOM = 1420; // de aquí a y=1620 quedan 200 px vacíos para el sticker del enlace
 const RADIUS = 44;
 const HAIRLINE = 2; // filete cian que rodea la tarjeta
 const INNER_W = CONTENT_W - HAIRLINE * 2; // ancho de las piezas de la tarjeta
@@ -74,7 +95,7 @@ const RULE_H = 8; // sin descuento, la franja queda en un filete cian grueso
 const PANEL_H = 172; // bloque del precio...
 const PANEL_CHIPS_H = 232; // ...y con la fila de etiquetas
 
-// Nombre: solo dos tamaños, y casi iguales, para que las historias de un mismo día se vean como una serie.
+// Nombre: solo dos tamaños, y casi iguales, para que las piezas de un mismo día se vean como una serie.
 const NAME_SPACING = -0.5;
 const ONE_LINE = { size: 52, line: 60 };
 const TWO_LINES = { size: 50, line: 56 };
@@ -149,7 +170,16 @@ function Chip({ text, icon }: { text: string; icon: string }) {
   );
 }
 
-export function StoryTemplate({ product, photo }: { product: OgProduct; photo: string | null }) {
+export function OfferTemplate({
+  product,
+  photo,
+  format,
+}: {
+  product: OgProduct;
+  photo: string | null;
+  format: OfferFormat;
+}) {
+  const frame = FRAMES[format];
   const discount = captionDiscount(product);
   const hasList = discount > 0 && !!product.original_price;
   const checked = chileDateTime(product.price_checked_at);
@@ -171,8 +201,8 @@ export function StoryTemplate({ product, photo }: { product: OgProduct; photo: s
   const priceEm = textWidth(digits, W800, 1) + PRICE_TRACK * digits.length + 0.39;
   const priceSize = Math.min(PRICE_MAX, Math.floor((INNER_W - CARD_PAD * 2) / priceEm));
 
-  // La tarjeta empieza donde termina el nombre y acaba siempre en CARD_BOTTOM; la foto ocupa lo que quede.
-  const cardH = CARD_BOTTOM - (HEADER_TOP + HEADER_H + TITLE_GAP + titleH + CARD_GAP);
+  // La tarjeta empieza donde termina el nombre y acaba siempre en el mismo punto; la foto ocupa lo que quede.
+  const cardH = frame.cardBottom - (frame.top + HEADER_H + TITLE_GAP + titleH + CARD_GAP);
   const bandH = hasList ? BAND_H : RULE_H;
   const panelH = hasChips ? PANEL_CHIPS_H : PANEL_H;
   const photoH = cardH - HAIRLINE * 2 - bandH - panelH;
@@ -193,8 +223,8 @@ export function StoryTemplate({ product, photo }: { product: OgProduct; photo: s
         flexDirection: 'column',
         position: 'relative',
         width: 1080,
-        height: 1920,
-        paddingTop: HEADER_TOP,
+        height: frame.height,
+        paddingTop: frame.top,
         paddingLeft: MARGIN,
         paddingRight: MARGIN,
         fontFamily: 'Inter',
@@ -204,8 +234,8 @@ export function StoryTemplate({ product, photo }: { product: OgProduct; photo: s
     >
       {/* Luz desde arriba, pareja de lado a lado. Llega hasta donde empieza la tarjeta: más abajo no se vería. */}
       <div style={{ display: 'flex', position: 'absolute', left: 0, top: 0, width: 1080, height: 600, backgroundImage: 'linear-gradient(180deg, #0D1B36 0%, #070B14 100%)' }} />
-      {/* Luz bajo la tarjeta: la pieza se ve terminada aunque no lleve el sticker del enlace */}
-      <div style={{ display: 'flex', position: 'absolute', left: 0, top: CARD_BOTTOM - 70, width: 1080, height: 400, backgroundImage: 'radial-gradient(ellipse at 50% 22%, rgba(0,212,255,0.2) 0%, rgba(0,212,255,0) 68%)' }} />
+      {/* Luz bajo la tarjeta: la historia se ve terminada aunque no lleve el sticker del enlace */}
+      {frame.glow ? <div style={{ display: 'flex', position: 'absolute', left: 0, top: frame.cardBottom - 70, width: 1080, height: 400, backgroundImage: 'radial-gradient(ellipse at 50% 22%, rgba(0,212,255,0.2) 0%, rgba(0,212,255,0) 68%)' }} /> : null}
 
       {/* Marca a la izquierda, datos del precio a la derecha */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: HEADER_H, flexShrink: 0 }}>

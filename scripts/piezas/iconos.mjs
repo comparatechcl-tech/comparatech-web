@@ -1,5 +1,5 @@
 // Convierte el logo y los dos íconos de las etiquetas a PNG y los imprime como constantes para pegar al final
-// de src/lib/content/story-template.tsx.
+// de src/lib/content/offer-template.tsx.
 //   node scripts/piezas/iconos.mjs   -> imprime LOGO_PNG, ICON_SHIPPING e ICON_FULL
 //
 // Por qué PNG y no <svg> en línea: medido al diseñar la historia, cada <svg> en línea le sumaba al dibujo cerca
