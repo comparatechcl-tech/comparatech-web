@@ -1,6 +1,13 @@
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { pieceKey } from '@/lib/social/piece-url';
-import { STORY_REPOST_DROP, STORY_RULES, readStoryPicks, type StoryItem } from '@/lib/social/stories';
+import {
+  STORY_REPOST_DROP,
+  STORY_RULES,
+  readPostedStories,
+  readStoryPicks,
+  type PostedStory,
+  type StoryItem,
+} from '@/lib/social/stories';
 import { StoryList } from './StoryList';
 
 export const dynamic = 'force-dynamic';
@@ -21,12 +28,13 @@ export default async function HistoriasPage() {
   const now = new Date();
 
   let items: StoryItem[] = [];
+  let posted: PostedStory[] = [];
   let error: string | null = null;
   if (!admin) error = 'Supabase admin no configurado';
   else if (!key) error = 'CRON_SECRET falta o tiene menos de 32 caracteres: no se pueden firmar las imágenes';
   else {
     try {
-      items = await readStoryPicks(admin, now, key);
+      [items, posted] = await Promise.all([readStoryPicks(admin, now, key), readPostedStories(admin, now, key)]);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
@@ -85,9 +93,14 @@ export default async function HistoriasPage() {
         </p>
       )}
 
-      {items.length > 0 && (
+      {(items.length > 0 || posted.length > 0) && (
         <>
-          <StoryList items={items} maxPriceAgeMs={STORY_RULES.maxPriceAgeMs} renderedAt={now.getTime()} />
+          <StoryList
+            items={items}
+            posted={posted}
+            maxPriceAgeMs={STORY_RULES.maxPriceAgeMs}
+            renderedAt={now.getTime()}
+          />
           <p className="mt-6 text-xs text-muted">
             Hasta {STORY_RULES.maxPosts} ofertas, dos por categoría como máximo y primero las que más comisión dejan.
             Una historia que ya subiste no vuelve en {STORY_RULES.repeatAfterDays} días, salvo que el producto baje{' '}

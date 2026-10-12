@@ -20,6 +20,7 @@ import {
   STORY_RULES,
   buildStoryItem,
   droppedSinceStory,
+  readPostedStories,
   readStoryHistory,
   readStoryPicks,
 } from '@/lib/social/stories';
@@ -263,5 +264,64 @@ describe('readStoryPicks', () => {
   it('si el catálogo no se pudo leer, falla en vez de mostrar una lista vacía', async () => {
     vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [], error: 'sin conexión' });
     await expect(readStoryPicks(fakeAdmin([]).admin, NOW, KEY)).rejects.toThrow('sin conexión');
+  });
+});
+
+describe('readPostedStories', () => {
+  /** Una base de mentira con dos tablas: devuelve las filas de la tabla pedida, sin filtrar, y anota los pedidos. */
+  function fakeTables(tables: Record<string, unknown[]>, errors: Record<string, { code?: string; message: string }> = {}) {
+    const asked: string[] = [];
+    const admin = {
+      from: (table: string) => {
+        asked.push(table);
+        const result = errors[table] ? { data: null, error: errors[table] } : { data: tables[table] ?? [], error: null };
+        const builder: Record<string, unknown> = {};
+        for (const method of ['select', 'eq', 'neq', 'in', 'gte', 'order', 'limit']) builder[method] = () => builder;
+        builder.then = (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve);
+        return builder;
+      },
+    } as unknown as SupabaseClient;
+    return { admin, asked };
+  }
+
+  const mark = (id: number, productId: string, price: number | null, hoursAgo: number) => ({
+    id,
+    product_id: productId,
+    posted_price: price,
+    posted_at: new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString(),
+  });
+
+  it('entrega la última marca de cada producto que sigue a la venta, con lo necesario para compartirla de nuevo', async () => {
+    const a = product({ price: 75_000 });
+    const b = product();
+    const gone = product({ is_active: false });
+    // De la más nueva a la más antigua, como las entrega la consulta.
+    const { admin } = fakeTables({
+      social_posts: [mark(30, b.id, 80_000, 1), mark(20, gone.id, 80_000, 2), mark(11, a.id, 80_000, 3), mark(10, a.id, 90_000, 20)],
+      products: [a, b, gone],
+    });
+
+    const stories = await readPostedStories(admin, NOW, KEY);
+    expect(stories.map((st) => [st.id, st.postId])).toEqual([
+      [b.id, 30],
+      [a.id, 11],
+    ]);
+    // La imagen y el precio son los de ahora; el precio con que se subió queda aparte.
+    expect(stories[1]).toMatchObject({ price: 75_000, postedPrice: 80_000, postedAt: mark(11, a.id, 0, 3).posted_at, again: null });
+    expect(stories[1].image).toContain(`/social/pieza/${a.id}/story-75000-100000-`);
+    expect(stories[1].link).toBe('https://www.mercadolibre.cl/p/MLC123?matt_word=comparatech&matt_tool=12345');
+  });
+
+  it('sin marcas no lee los productos', async () => {
+    const { admin, asked } = fakeTables({ social_posts: [], products: [product()] });
+    expect(await readPostedStories(admin, NOW, KEY)).toEqual([]);
+    expect(asked).toEqual(['social_posts']);
+  });
+
+  it('sin la tabla no hay historias; con otro error, falla', async () => {
+    const missing = fakeTables({}, { social_posts: { code: '42P01', message: 'no existe' } });
+    expect(await readPostedStories(missing.admin, NOW, KEY)).toEqual([]);
+    const broken = fakeTables({}, { social_posts: { code: '500', message: 'se cayó' } });
+    await expect(readPostedStories(broken.admin, NOW, KEY)).rejects.toThrow('se cayó');
   });
 });

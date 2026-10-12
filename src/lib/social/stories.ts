@@ -1,5 +1,6 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { captionDiscount } from '@/lib/content/captions';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
@@ -8,8 +9,10 @@ import { readConfirmedDrops } from '@/lib/social/drops';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
 import {
+  isOnSale,
   pickByRules,
   readFreshSocialProducts,
+  selectSocialProducts,
   type PickRules,
   type SocialProduct,
   type TelegramPick,
@@ -176,4 +179,72 @@ export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buff
     .filter((item): item is StoryItem => item !== null);
   // sort es estable: dentro de cada grupo se conserva el orden de la selección.
   return items.sort((a, b) => Number(b.again !== null) - Number(a.again !== null));
+}
+
+/** Lo que dura una historia en Instagram. Lo marcado en ese rato sigue a mano para subirlo a otras redes. */
+export const STORY_LIFETIME_MS = 24 * 3600_000;
+
+/** Una historia ya marcada como publicada, con lo necesario para compartirla de nuevo o deshacer la marca. */
+export interface PostedStory extends StoryItem {
+  postId: number;
+  postedAt: string;
+  /** El precio con que se subió. La imagen que se entrega ahora lleva el precio de ahora. */
+  postedPrice: number | null;
+}
+
+interface PostedRow {
+  id: number;
+  product_id: string | null;
+  posted_price: number | null;
+  posted_at: string;
+}
+
+/**
+ * Las historias marcadas en las últimas 24 horas, de la más nueva a la más
+ * antigua: la misma historia se sube a mano en cada red, así que después de
+ * Instagram hay que tenerla a mano para las demás. Una por producto (la
+ * última marca), y solo de lo que sigue a la venta. Solo lee.
+ */
+export async function readPostedStories(admin: SupabaseClient, now: Date, key: Buffer): Promise<PostedStory[]> {
+  const since = new Date(now.getTime() - STORY_LIFETIME_MS);
+  const { data, error } = await admin
+    .from('social_posts')
+    .select('id, product_id, posted_price, posted_at')
+    .eq('channel', 'instagram')
+    .eq('caption', STORY_MARK)
+    .eq('status', 'publicado')
+    .gte('posted_at', since.toISOString())
+    .order('posted_at', { ascending: false })
+    .limit(60);
+  if (error) {
+    if (isMissingSchemaError(error)) return [];
+    throw new Error(`No se pudo leer las historias publicadas: ${error.message}`);
+  }
+
+  const latest = new Map<string, PostedRow>();
+  for (const row of (data ?? []) as PostedRow[]) {
+    if (row.product_id && !latest.has(row.product_id)) latest.set(row.product_id, row);
+  }
+  if (latest.size === 0) return [];
+
+  const ids = [...latest.keys()];
+  const [read, settings] = await Promise.all([
+    selectSocialProducts((columns) => admin.from('products').select(columns).in('id', ids)),
+    readAffiliateSettings(admin),
+  ]);
+  if (read.error) throw new Error(`No se pudo leer los productos: ${read.error}`);
+  const onSale = new Map(read.rows.filter((p) => isOnSale(p)).map((p) => [p.id, p]));
+
+  const stories: PostedStory[] = [];
+  for (const [productId, row] of latest) {
+    const product = onSale.get(productId);
+    if (!product) continue;
+    const item = buildStoryItem(
+      { product, discount: captionDiscount(product), drop: null, commission: 0, reason: '' },
+      { now, settings, key }
+    );
+    if (!item) continue;
+    stories.push({ ...item, postId: row.id, postedAt: row.posted_at, postedPrice: row.posted_price });
+  }
+  return stories;
 }

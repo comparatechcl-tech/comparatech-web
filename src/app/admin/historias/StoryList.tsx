@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { Check, Copy, Download, Loader2, Share2, TrendingDown } from 'lucide-react';
+import { Check, Copy, Download, Loader2, Share2, TrendingDown, Undo2 } from 'lucide-react';
 import { formatPrice } from '@/lib/content/captions';
 import { formatDayMonth } from '@/lib/format';
-import type { StoryItem } from '@/lib/social/stories';
+import type { PostedStory, StoryItem } from '@/lib/social/stories';
 import { markStoryPublished, undoStoryPublished } from './actions';
 
 /**
  * Las historias del día, pensadas para el teléfono: compartir la imagen
- * directo a Instagram con el link ya copiado, y marcar lo publicado.
+ * directo a Instagram con el link ya copiado, marcar lo publicado, y tener
+ * a mano lo que ya se subió para llevarlo a otras redes.
  *
  * Las imágenes se bajan de a una y se guardan en memoria. De a una, porque
  * cada pieza la dibuja el servidor en el momento; en memoria, porque el
@@ -47,25 +48,37 @@ const RELOAD_HINT = 'Revisa tu conexión; si sigue igual, toca Actualizar, arrib
 const BUTTON =
   'flex min-h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-fg transition hover:border-accent/50 disabled:opacity-50';
 
+const timeFmt = new Intl.DateTimeFormat('es-CL', {
+  timeZone: 'America/Santiago',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
 export function StoryList({
   items: initial,
+  posted: initialPosted,
   maxPriceAgeMs,
   renderedAt,
 }: {
   items: StoryItem[];
+  /** Historias ya marcadas que siguen vigentes en Instagram, para subirlas a otras redes. */
+  posted: PostedStory[];
   maxPriceAgeMs: number;
   /** Cuándo armó la lista el servidor: identifica esta carga de la página. */
   renderedAt: number;
 }) {
-  // Copia local: la lista no cambia sola mientras se trabaja con ella. Para
-  // traer ofertas y precios nuevos está "Actualizar", que recarga la página.
+  // Copias locales: las listas no cambian solas mientras se trabaja con ellas.
+  // Para traer ofertas y precios nuevos está "Actualizar", que recarga la página.
   const [items] = useState(initial);
+  const [posted, setPosted] = useState(initialPosted);
   // La edad de la lista se mide con el reloj de este teléfono, no contra la hora del servidor.
   const [openedAt] = useState(() => {
     const seen = firstSeen.get(renderedAt) ?? Date.now();
     firstSeen.set(renderedAt, seen);
     return seen;
   });
+  /** Archivos y estado por dirección de la pieza: una oferta y su copia ya publicada comparten imagen. */
   const files = useRef(new Map<string, File>());
   const lastShare = useRef(0);
   const lastMark = useRef(0);
@@ -73,7 +86,7 @@ export function StoryList({
   /** null hasta saber si este aparato puede compartir archivos. */
   const [canShare, setCanShare] = useState<boolean | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  /** Historias marcadas: id del producto → id de la marca, para poder deshacerla. */
+  /** Ofertas marcadas en esta visita: id del producto → id de la marca, para poder deshacerla. */
   const [published, setPublished] = useState<Record<string, number>>(() => {
     const known: Record<string, number> = {};
     for (const item of initial) {
@@ -102,7 +115,9 @@ export function StoryList({
     const store = files.current;
 
     (async () => {
-      for (const item of items) {
+      // Primero las ofertas, que son lo que se viene a subir; después lo ya publicado.
+      for (const item of [...items, ...initialPosted]) {
+        if (store.has(item.image)) continue;
         let file: File | null = null;
         // Dos intentos: en el teléfono una descarga se corta fácil al pasar a otra app.
         for (let attempt = 0; attempt < 2 && !file && !cancelled; attempt++) {
@@ -116,11 +131,11 @@ export function StoryList({
         }
         if (cancelled) return;
         if (!file) {
-          setStatus((s) => ({ ...s, [item.id]: 'error' }));
+          setStatus((s) => ({ ...s, [item.image]: 'error' }));
           continue;
         }
-        store.set(item.id, file);
-        setStatus((s) => ({ ...s, [item.id]: 'lista' }));
+        store.set(item.image, file);
+        setStatus((s) => ({ ...s, [item.image]: 'lista' }));
       }
     })();
 
@@ -128,50 +143,50 @@ export function StoryList({
       cancelled = true;
       store.clear();
     };
-  }, [items]);
+  }, [items, initialPosted]);
 
-  const fail = (id: string, message: string) => setErrors((e) => ({ ...e, [id]: message }));
-  const clear = (id: string) => setErrors(({ [id]: _gone, ...rest }) => rest);
+  const fail = (key: string, message: string) => setErrors((e) => ({ ...e, [key]: message }));
+  const clear = (key: string) => setErrors(({ [key]: _gone, ...rest }) => rest);
 
   /** Una pestaña que quedó abierta lleva los precios de cuando se cargó. */
-  function tooOld(item: StoryItem): boolean {
+  function tooOld(key: string, item: StoryItem): boolean {
     const oldPrice = item.checkedAt ? Date.now() - new Date(item.checkedAt).getTime() > maxPriceAgeMs : false;
     const oldList = Date.now() - openedAt > MAX_LIST_AGE_MS;
     if (!oldPrice && !oldList) return false;
-    fail(item.id, 'Esta lista ya tiene más de una hora y el precio puede haber cambiado. Toca Actualizar, arriba.');
+    fail(key, 'Esta lista ya tiene más de una hora y el precio puede haber cambiado. Toca Actualizar, arriba.');
     return true;
   }
 
-  async function copyLink(item: StoryItem) {
+  async function copyLink(key: string, item: StoryItem) {
     try {
       await navigator.clipboard.writeText(item.link);
-      setCopied(item.id);
+      setCopied(key);
       // Solo se borra el aviso de la copia: otro aviso (precio antiguo, Compartir) sigue a la vista.
       setErrors((e) => {
-        if (e[item.id] !== COPY_ERROR) return e;
-        const { [item.id]: _gone, ...rest } = e;
+        if (e[key] !== COPY_ERROR) return e;
+        const { [key]: _gone, ...rest } = e;
         return rest;
       });
-      setTimeout(() => setCopied((c) => (c === item.id ? null : c)), 2500);
+      setTimeout(() => setCopied((c) => (c === key ? null : c)), 2500);
     } catch {
-      fail(item.id, COPY_ERROR);
+      fail(key, COPY_ERROR);
     }
   }
 
-  function share(item: StoryItem) {
-    const file = files.current.get(item.id);
-    if (!file || tooOld(item)) return;
+  function share(key: string, item: StoryItem) {
+    const file = files.current.get(item.image);
+    if (!file || tooOld(key, item)) return;
     // Un doble toque no vuelve a pedir Compartir: el navegador rechaza el segundo y quedaría un error falso.
     if (Date.now() - lastShare.current < 1500) return;
     lastShare.current = Date.now();
-    // Las dos cosas dentro del mismo toque: el link se pega después en el sticker.
-    void copyLink(item);
+    // Las dos cosas dentro del mismo toque: el link se pega después en el sticker (o en el texto, en WhatsApp).
+    void copyLink(key, item);
     navigator.share({ files: [file] }).catch((err: unknown) => {
       // Cerrar la hoja de compartir no es un error.
       if (err instanceof Error && err.name === 'AbortError') return;
       fail(
-        item.id,
-        'No se pudo abrir Compartir. Mantén el dedo sobre la imagen, elige "Guardar en Fotos" y súbela desde Instagram.'
+        key,
+        'No se pudo abrir Compartir. Mantén el dedo sobre la imagen, elige "Guardar en Fotos" y súbela desde la app.'
       );
     });
   }
@@ -198,36 +213,44 @@ export function StoryList({
     });
   }
 
-  function undo(item: StoryItem) {
-    const postId = published[item.id];
-    // "Deshacer" queda donde estaba "Ya la publiqué": un segundo toque seguido no debe deshacer.
-    if (!postId || Date.now() - lastMark.current < 1000) return;
-    setBusy(item.id);
-    clear(item.id);
+  /** Deshace una marca. `after` corre solo si se deshizo. */
+  function undo(key: string, postId: number, after: () => void) {
+    setBusy(key);
+    clear(key);
     startTransition(async () => {
       try {
         const result = await undoStoryPublished(postId);
         if (!result.ok) {
-          fail(item.id, result.error);
+          fail(key, result.error);
           return;
         }
-        marks.delete(item.image);
-        setPublished(({ [item.id]: _gone, ...rest }) => rest);
+        after();
       } catch {
-        fail(item.id, `No se pudo deshacer. ${RELOAD_HINT}`);
+        fail(key, `No se pudo deshacer. ${RELOAD_HINT}`);
       } finally {
         setBusy(null);
       }
     });
   }
 
-  function card(item: StoryItem) {
-    const state = status[item.id] ?? 'cargando';
-    const done = item.id in published;
-    return (
-      <li key={item.id} className="flex gap-4 rounded-xl border border-border bg-surface p-3 sm:p-4">
+  function undoOffer(item: StoryItem) {
+    const postId = published[item.id];
+    // "Deshacer" queda donde estaba "Ya la publiqué": un segundo toque seguido no debe deshacer.
+    if (!postId || Date.now() - lastMark.current < 1000) return;
+    undo(item.id, postId, () => {
+      marks.delete(item.image);
+      setPublished(({ [item.id]: _gone, ...rest }) => rest);
+    });
+  }
+
+  /** Miniatura, nombre y precio: lo que comparten una oferta y una historia ya publicada. */
+  function summary(item: StoryItem, dimmed: boolean) {
+    const state = status[item.image] ?? 'cargando';
+    return {
+      state,
+      thumb: (
         <div
-          className={`relative aspect-[9/16] w-28 shrink-0 self-start overflow-hidden rounded-md bg-bg sm:w-36 ${done ? 'opacity-60' : ''}`}
+          className={`relative aspect-[9/16] w-28 shrink-0 self-start overflow-hidden rounded-md bg-bg sm:w-36 ${dimmed ? 'opacity-60' : ''}`}
         >
           {state === 'lista' ? (
             // eslint-disable-next-line @next/next/no-img-element -- JPG ya descargado: sale del caché del navegador.
@@ -242,23 +265,89 @@ export function StoryList({
             </div>
           )}
         </div>
+      ),
+      heading: (
+        <>
+          {/* Hay nombres que parten por el código del modelo: la marca dice de qué se trata. */}
+          {item.brand && <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{item.brand}</p>}
+          <p className="text-sm font-semibold leading-snug text-fg">{item.name}</p>
+          <p className="mt-1 text-sm text-fg">
+            <strong className="font-heading text-lg">{formatPrice(item.price)}</strong>
+            {item.listPrice !== null && (
+              <span className="ml-2 text-xs text-muted">
+                lista <s>{formatPrice(item.listPrice)}</s> · -{item.discount}%
+              </span>
+            )}
+            {item.listPrice === null && item.drop !== null && (
+              <span className="ml-2 text-xs text-muted">bajó {item.drop}% según el historial</span>
+            )}
+          </p>
+        </>
+      ),
+    };
+  }
 
+  /** Compartir, copiar el link y guardar la imagen: iguales en las dos listas. */
+  function shareButtons(key: string, item: StoryItem, state: Status) {
+    return (
+      <>
+        {canShare && (
+          <button
+            onClick={() => share(key, item)}
+            disabled={state !== 'lista'}
+            className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-ink transition hover:bg-accent/90 disabled:opacity-50 sm:col-span-2"
+          >
+            <Share2 size={15} aria-hidden />{' '}
+            {state === 'lista' ? 'Compartir' : state === 'error' ? 'Sin imagen' : 'Preparando…'}
+          </button>
+        )}
+        <button onClick={() => void copyLink(key, item)} className={BUTTON}>
+          {copied === key ? <Check size={15} className="text-accent" aria-hidden /> : <Copy size={15} aria-hidden />}
+          {copied === key ? 'Link copiado' : 'Copiar link'}
+        </button>
+        {state === 'lista' ? (
+          <a
+            href={item.image}
+            download={item.fileName}
+            onClick={(e) => {
+              if (tooOld(key, item)) e.preventDefault();
+            }}
+            className={BUTTON}
+          >
+            <Download size={15} aria-hidden /> Guardar imagen
+          </a>
+        ) : (
+          <button disabled className={BUTTON}>
+            <Download size={15} aria-hidden /> Guardar imagen
+          </button>
+        )}
+      </>
+    );
+  }
+
+  function footer(key: string, item: StoryItem) {
+    return (
+      <>
+        {/* Completo y seleccionable: es el respaldo si el teléfono no deja copiar con el botón. */}
+        <p className="select-all break-all text-[11px] text-muted" aria-label="Link de afiliado">
+          {item.link}
+        </p>
+        <p role="status" aria-live="polite" className="text-xs text-red-400">
+          {errors[key] ?? ''}
+        </p>
+      </>
+    );
+  }
+
+  function offerCard(item: StoryItem) {
+    const done = item.id in published;
+    const { state, thumb, heading } = summary(item, done);
+    return (
+      <li key={item.id} className="flex gap-4 rounded-xl border border-border bg-surface p-3 sm:p-4">
+        {thumb}
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div>
-            {/* Hay nombres que parten por el código del modelo: la marca dice de qué se trata. */}
-            {item.brand && <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{item.brand}</p>}
-            <p className="text-sm font-semibold leading-snug text-fg">{item.name}</p>
-            <p className="mt-1 text-sm text-fg">
-              <strong className="font-heading text-lg">{formatPrice(item.price)}</strong>
-              {item.listPrice !== null && (
-                <span className="ml-2 text-xs text-muted">
-                  lista <s>{formatPrice(item.listPrice)}</s> · -{item.discount}%
-                </span>
-              )}
-              {item.listPrice === null && item.drop !== null && (
-                <span className="ml-2 text-xs text-muted">bajó {item.drop}% según el historial</span>
-              )}
-            </p>
+            {heading}
             {item.again && (
               <p className="mt-1 flex items-start gap-1.5 text-xs text-accent">
                 <TrendingDown size={14} className="mt-0.5 shrink-0" aria-hidden />
@@ -272,39 +361,10 @@ export function StoryList({
 
           {/* La misma grilla antes y después de marcar: si la tarjeta cambiara de alto, las de abajo se correrían bajo el dedo. */}
           <div className="grid gap-2 sm:grid-cols-2">
-            {canShare && (
-              <button
-                onClick={() => share(item)}
-                disabled={state !== 'lista'}
-                className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-ink transition hover:bg-accent/90 disabled:opacity-50 sm:col-span-2"
-              >
-                <Share2 size={15} aria-hidden />{' '}
-                {state === 'lista' ? 'Compartir' : state === 'error' ? 'Sin imagen' : 'Preparando…'}
-              </button>
-            )}
-            <button onClick={() => void copyLink(item)} className={BUTTON}>
-              {copied === item.id ? <Check size={15} className="text-accent" aria-hidden /> : <Copy size={15} aria-hidden />}
-              {copied === item.id ? 'Link copiado' : 'Copiar link'}
-            </button>
-            {state === 'lista' ? (
-              <a
-                href={item.image}
-                download={item.fileName}
-                onClick={(e) => {
-                  if (tooOld(item)) e.preventDefault();
-                }}
-                className={BUTTON}
-              >
-                <Download size={15} aria-hidden /> Guardar imagen
-              </a>
-            ) : (
-              <button disabled className={BUTTON}>
-                <Download size={15} aria-hidden /> Guardar imagen
-              </button>
-            )}
+            {shareButtons(item.id, item, state)}
             {done ? (
               <button
-                onClick={() => undo(item)}
+                onClick={() => undoOffer(item)}
                 disabled={busy !== null}
                 className={`${BUTTON} border-accent/50 text-accent sm:col-span-2`}
               >
@@ -316,14 +376,39 @@ export function StoryList({
               </button>
             )}
           </div>
+          {footer(item.id, item)}
+        </div>
+      </li>
+    );
+  }
 
-          {/* Completo y seleccionable: es el respaldo si el teléfono no deja copiar con el botón. */}
-          <p className="select-all break-all text-[11px] text-muted" aria-label="Link de afiliado">
-            {item.link}
-          </p>
-          <p role="status" aria-live="polite" className="text-xs text-red-400">
-            {errors[item.id] ?? ''}
-          </p>
+  function postedCard(item: PostedStory) {
+    const key = `publicada-${item.postId}`;
+    const { state, thumb, heading } = summary(item, false);
+    return (
+      <li key={key} className="flex gap-4 rounded-xl border border-border bg-surface p-3 sm:p-4">
+        {thumb}
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div>
+            {heading}
+            <p className="mt-1 text-xs text-muted">
+              Subida el {formatDayMonth(item.postedAt)} a las {timeFmt.format(new Date(item.postedAt))}
+              {item.postedPrice !== null && item.postedPrice !== Math.round(item.price)
+                ? `, a ${formatPrice(item.postedPrice)}. El precio cambió: la imagen lleva el de ahora.`
+                : '.'}
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {shareButtons(key, item, state)}
+            <button
+              onClick={() => undo(key, item.postId, () => setPosted((list) => list.filter((p) => p.postId !== item.postId)))}
+              disabled={busy !== null}
+              className={`${BUTTON} sm:col-span-2`}
+            >
+              <Undo2 size={15} aria-hidden /> {busy === key ? 'Deshaciendo…' : 'No la publiqué: deshacer'}
+            </button>
+          </div>
+          {footer(key, item)}
         </div>
       </li>
     );
@@ -344,14 +429,29 @@ export function StoryList({
       {again.length > 0 && (
         <section>
           <h2 className="font-heading text-lg font-semibold text-fg">Bajaron desde que las subiste</h2>
-          <ul className="mt-3 flex flex-col gap-4">{again.map(card)}</ul>
+          <ul className="mt-3 flex flex-col gap-4">{again.map(offerCard)}</ul>
         </section>
       )}
 
       {fresh.length > 0 && (
         <section>
-          {again.length > 0 && <h2 className="font-heading text-lg font-semibold text-fg">Ofertas de ahora</h2>}
-          <ul className={`flex flex-col gap-4 ${again.length > 0 ? 'mt-3' : ''}`}>{fresh.map(card)}</ul>
+          {(again.length > 0 || posted.length > 0) && (
+            <h2 className="font-heading text-lg font-semibold text-fg">Ofertas de ahora</h2>
+          )}
+          <ul className={`flex flex-col gap-4 ${again.length > 0 || posted.length > 0 ? 'mt-3' : ''}`}>
+            {fresh.map(offerCard)}
+          </ul>
+        </section>
+      )}
+
+      {posted.length > 0 && (
+        <section>
+          <h2 className="font-heading text-lg font-semibold text-fg">Ya publicadas (últimas 24 horas)</h2>
+          <p className="mt-1 text-sm text-muted">
+            Para llevarlas a otra red: comparte la misma imagen y pega el link. En WhatsApp el link se puede tocar si
+            va en el texto.
+          </p>
+          <ul className="mt-3 flex flex-col gap-4">{posted.map(postedCard)}</ul>
         </section>
       )}
     </div>
