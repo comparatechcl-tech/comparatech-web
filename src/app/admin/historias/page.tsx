@@ -82,7 +82,7 @@ export default async function HistoriasPage() {
 
       {items.length > 0 && (
         <>
-          <StoryList items={items} maxPriceAgeMs={STORY_RULES.maxPriceAgeMs} />
+          <StoryList items={items} maxPriceAgeMs={STORY_RULES.maxPriceAgeMs} renderedAt={now.getTime()} />
           <p className="mt-6 text-xs text-muted">
             Hasta {STORY_RULES.maxPosts} ofertas, dos por categoría como máximo y primero las que más comisión dejan.
             Una historia que ya subiste no vuelve en {STORY_RULES.repeatAfterDays} días, salvo que el producto baje{' '}

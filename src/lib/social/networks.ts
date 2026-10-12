@@ -582,13 +582,16 @@ export async function retirePosts(admin: SupabaseClient, items: Retirement[], no
   for (const productId of products) {
     const { data, error } = await admin
       .from('social_posts')
-      .select('channel, posted_at')
+      .select('channel, posted_at, caption')
       .eq('product_id', productId)
       .neq('status', 'error')
       .order('posted_at', { ascending: false })
-      .limit(1);
+      .limit(20);
     if (error) throw new Error(`No se pudo leer social_posts: ${error.message}`);
-    const last = ((data ?? []) as { channel: string; posted_at: string }[])[0];
+    // Una historia subida a mano no cuenta como publicación del producto (ver STORY_MARK).
+    const last = ((data ?? []) as { channel: string; posted_at: string; caption: string | null }[]).find(
+      (row) => row.caption !== STORY_MARK
+    );
     const patch = last
       ? { rrss_status: 'publicado', rrss_published_at: last.posted_at, rrss_channel: last.channel }
       : { rrss_status: 'sin_usar', rrss_published_at: null, rrss_channel: null };

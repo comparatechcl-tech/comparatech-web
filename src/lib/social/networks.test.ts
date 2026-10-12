@@ -15,6 +15,7 @@ import {
   NETWORK_RULES,
   RECORDS_MAX,
   SCHEDULE_AHEAD_MS,
+  STORY_MARK,
   buildPlanItem,
   parsePostRecords,
   parseRetirements,
@@ -503,6 +504,24 @@ describe('registerPosts', () => {
     expect(stamp(db, A)).toEqual({ status: 'publicado', at: '2026-10-11T21:00:00.000Z', channel: 'tiktok' });
     // Retirar dos veces lo mismo no cuenta dos veces.
     expect(await retirePosts(db.admin, [{ channel: 'instagram', externalId: 'u-1' }], NOW)).toBe(0);
+  });
+
+  it('al retirar la única publicación, una historia subida a mano no deja el producto como publicado', async () => {
+    const db = fakeDb({ products: [onSale(A)] });
+    await registerPosts(db.admin, [record({ externalId: 'u-1' })], NOW);
+    db.tables.social_posts.push({
+      id: 99,
+      product_id: A,
+      channel: 'instagram',
+      external_id: null,
+      caption: STORY_MARK,
+      status: 'publicado',
+      posted_at: '2026-10-11T23:00:00.000Z',
+    });
+
+    await retirePosts(db.admin, [{ channel: 'instagram', externalId: 'u-1' }], NOW);
+    expect(stamp(db, A)).toEqual({ status: 'sin_usar', at: null, channel: null });
+    expect(db.tables.social_posts.find((row) => row.id === 99)).toMatchObject({ status: 'publicado' });
   });
 
   it('retirar no toca filas de otro canal aunque compartan el id', async () => {

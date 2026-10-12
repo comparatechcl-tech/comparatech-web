@@ -5,6 +5,7 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { requireAdmin } from '@/lib/admin-auth';
 import { logAdminEvent } from '@/lib/admin-audit';
 import { STORY_MARK } from '@/lib/social/networks';
+import { STORY_RULES } from '@/lib/social/stories';
 import { isOnSale, selectSocialProducts } from '@/lib/social/telegram';
 
 /**
@@ -22,10 +23,16 @@ type MarkResult = { ok: true; postId: number } | { ok: false; error: string };
 type UndoResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Anota que la historia de un producto ya se subió, con el precio de ahora:
- * así no vuelve a ofrecerse en 14 días, salvo que baje de precio.
+ * Anota que la historia de un producto ya se subió: así no vuelve a
+ * ofrecerse en 14 días, salvo que baje de precio.
+ *
+ * `shownPrice` es el precio que llevaba la imagen compartida. Es el que se
+ * anota, y no el de la base en este instante: la lista de la página no se
+ * actualiza sola y el precio pudo cambiar entre que se cargó y este toque.
+ * Opcional, para que una pestaña abierta con la versión anterior siga
+ * funcionando.
  */
-export async function markStoryPublished(productId: string): Promise<MarkResult> {
+export async function markStoryPublished(productId: string, shownPrice?: number): Promise<MarkResult> {
   const actor = await requireAdmin();
   if (typeof productId !== 'string' || !UUID_RE.test(productId)) return { ok: false, error: 'Producto no válido' };
 
@@ -37,12 +44,37 @@ export async function markStoryPublished(productId: string): Promise<MarkResult>
   const product = read.rows[0];
   if (!isOnSale(product)) return { ok: false, error: 'Ese producto ya no está a la venta en el sitio.' };
 
+  const price = Math.round(
+    typeof shownPrice === 'number' && Number.isFinite(shownPrice) && shownPrice > 0 && shownPrice <= 2_147_483_647
+      ? shownPrice
+      : product.price
+  );
+
+  // Un segundo toque sobre la misma historia (la respuesta del primero se
+  // perdió, o hay otra pestaña abierta) no la anota dos veces: con dos filas,
+  // "Deshacer" anularía una sola y la oferta seguiría escondida.
+  const since = new Date(Date.now() - STORY_RULES.repeatAfterDays * 86_400_000).toISOString();
+  const previous = await admin
+    .from('social_posts')
+    .select('id')
+    .eq('product_id', product.id)
+    .eq('channel', 'instagram')
+    .eq('caption', STORY_MARK)
+    .eq('status', 'publicado')
+    .eq('posted_price', price)
+    .gte('posted_at', since)
+    .order('posted_at', { ascending: false })
+    .limit(1);
+  const already = ((previous.data ?? []) as { id: number }[])[0];
+  // Si esta lectura falla se anota igual: es peor perder la marca que repetirla.
+  if (!previous.error && already) return { ok: true, postId: already.id };
+
   const { data, error } = await admin
     .from('social_posts')
     .insert({
       product_id: product.id,
       channel: 'instagram',
-      posted_price: Math.round(product.price),
+      posted_price: price,
       caption: STORY_MARK,
       status: 'publicado',
     })
@@ -59,7 +91,7 @@ export async function markStoryPublished(productId: string): Promise<MarkResult>
     actor,
     action: 'marcar_rrss',
     target: product.id,
-    after: { historia: 'publicada', precio: Math.round(product.price) },
+    after: { historia: 'publicada', precio: price },
   });
   return { ok: true, postId: (data as { id: number }).id };
 }

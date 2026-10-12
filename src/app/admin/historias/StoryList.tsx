@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { Check, Copy, Download, Loader2, Share2, TrendingDown, Undo2 } from 'lucide-react';
+import { Check, Copy, Download, Loader2, Share2, TrendingDown } from 'lucide-react';
 import { formatPrice } from '@/lib/content/captions';
 import { formatDayMonth } from '@/lib/format';
 import type { StoryItem } from '@/lib/social/stories';
@@ -25,23 +25,77 @@ import { markStoryPublished, undoStoryPublished } from './actions';
 
 type Status = 'cargando' | 'lista' | 'error';
 
+/**
+ * Lo marcado en esta sesión (dirección de la pieza → id de la marca) y la
+ * hora en que cada lista se vio por primera vez (hora del servidor en que
+ * se armó → hora de este teléfono).
+ *
+ * Fuera del componente a propósito: al ir a otra pestaña del admin y volver
+ * con "atrás", Next muestra la misma lista sin pedirla de nuevo y monta el
+ * componente desde cero. Sin esto, lo ya marcado volvería como pendiente
+ * (sin "Deshacer") y una lista vieja parecería recién cargada.
+ */
+const marks = new Map<string, number>();
+const firstSeen = new Map<number, number>();
+
+/** Pasado este rato hay que recargar: los precios se revisan cada media hora. */
+const MAX_LIST_AGE_MS = 60 * 60_000;
+
+const COPY_ERROR = 'El teléfono no dejó copiar el link. Mantén el dedo sobre el link de abajo y elige Copiar.';
+const RELOAD_HINT = 'Revisa tu conexión; si sigue igual, toca Actualizar, arriba.';
+
 const BUTTON =
   'flex min-h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-fg transition hover:border-accent/50 disabled:opacity-50';
 
-export function StoryList({ items: initial, maxPriceAgeMs }: { items: StoryItem[]; maxPriceAgeMs: number }) {
+export function StoryList({
+  items: initial,
+  maxPriceAgeMs,
+  renderedAt,
+}: {
+  items: StoryItem[];
+  maxPriceAgeMs: number;
+  /** Cuándo armó la lista el servidor: identifica esta carga de la página. */
+  renderedAt: number;
+}) {
   // Copia local: la lista no cambia sola mientras se trabaja con ella. Para
   // traer ofertas y precios nuevos está "Actualizar", que recarga la página.
   const [items] = useState(initial);
+  // La edad de la lista se mide con el reloj de este teléfono, no contra la hora del servidor.
+  const [openedAt] = useState(() => {
+    const seen = firstSeen.get(renderedAt) ?? Date.now();
+    firstSeen.set(renderedAt, seen);
+    return seen;
+  });
   const files = useRef(new Map<string, File>());
   const lastShare = useRef(0);
+  const lastMark = useRef(0);
   const [status, setStatus] = useState<Record<string, Status>>({});
-  const [canShare, setCanShare] = useState(false);
+  /** null hasta saber si este aparato puede compartir archivos. */
+  const [canShare, setCanShare] = useState<boolean | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  /** Historias marcadas en esta visita: id del producto → id de la marca, para poder deshacerla. */
-  const [published, setPublished] = useState<Record<string, number>>({});
+  /** Historias marcadas: id del producto → id de la marca, para poder deshacerla. */
+  const [published, setPublished] = useState<Record<string, number>>(() => {
+    const known: Record<string, number> = {};
+    for (const item of initial) {
+      const postId = marks.get(item.image);
+      if (postId) known[item.id] = postId;
+    }
+    return known;
+  });
   const [busy, setBusy] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    // Solo con pantalla táctil: el computador también "comparte" archivos,
+    // pero su panel no llega a Instagram.
+    const probe = new File([''], 'historia.jpg', { type: 'image/jpeg' });
+    setCanShare(
+      typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: [probe] }) &&
+        window.matchMedia('(pointer: coarse)').matches
+    );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,8 +121,6 @@ export function StoryList({ items: initial, maxPriceAgeMs }: { items: StoryItem[
         }
         store.set(item.id, file);
         setStatus((s) => ({ ...s, [item.id]: 'lista' }));
-        // En el computador no hay hoja de compartir con archivos: ahí queda "Guardar imagen".
-        if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) setCanShare(true);
       }
     })();
 
@@ -81,11 +133,12 @@ export function StoryList({ items: initial, maxPriceAgeMs }: { items: StoryItem[
   const fail = (id: string, message: string) => setErrors((e) => ({ ...e, [id]: message }));
   const clear = (id: string) => setErrors(({ [id]: _gone, ...rest }) => rest);
 
-  /** Una pestaña que quedó abierta lleva el precio de cuando se cargó. */
+  /** Una pestaña que quedó abierta lleva los precios de cuando se cargó. */
   function tooOld(item: StoryItem): boolean {
-    if (!item.checkedAt) return false;
-    if (Date.now() - new Date(item.checkedAt).getTime() <= maxPriceAgeMs) return false;
-    fail(item.id, 'Este precio ya es antiguo. Toca Actualizar, arriba, y vuelve a intentarlo.');
+    const oldPrice = item.checkedAt ? Date.now() - new Date(item.checkedAt).getTime() > maxPriceAgeMs : false;
+    const oldList = Date.now() - openedAt > MAX_LIST_AGE_MS;
+    if (!oldPrice && !oldList) return false;
+    fail(item.id, 'Esta lista ya tiene más de una hora y el precio puede haber cambiado. Toca Actualizar, arriba.');
     return true;
   }
 
@@ -93,10 +146,15 @@ export function StoryList({ items: initial, maxPriceAgeMs }: { items: StoryItem[
     try {
       await navigator.clipboard.writeText(item.link);
       setCopied(item.id);
-      clear(item.id);
+      // Solo se borra el aviso de la copia: otro aviso (precio antiguo, Compartir) sigue a la vista.
+      setErrors((e) => {
+        if (e[item.id] !== COPY_ERROR) return e;
+        const { [item.id]: _gone, ...rest } = e;
+        return rest;
+      });
       setTimeout(() => setCopied((c) => (c === item.id ? null : c)), 2500);
     } catch {
-      fail(item.id, 'El teléfono no dejó copiar el link. Mantén el dedo sobre el link de abajo y elige Copiar.');
+      fail(item.id, COPY_ERROR);
     }
   }
 
@@ -123,11 +181,17 @@ export function StoryList({ items: initial, maxPriceAgeMs }: { items: StoryItem[
     clear(item.id);
     startTransition(async () => {
       try {
-        const result = await markStoryPublished(item.id);
-        if (!result.ok) fail(item.id, result.error);
-        else setPublished((p) => ({ ...p, [item.id]: result.postId }));
+        // Con el precio de la tarjeta, que es el que lleva la imagen compartida.
+        const result = await markStoryPublished(item.id, item.price);
+        if (!result.ok) {
+          fail(item.id, result.error);
+          return;
+        }
+        marks.set(item.image, result.postId);
+        lastMark.current = Date.now();
+        setPublished((p) => ({ ...p, [item.id]: result.postId }));
       } catch {
-        fail(item.id, 'No se pudo guardar. Revisa tu conexión.');
+        fail(item.id, `No se pudo guardar. ${RELOAD_HINT}`);
       } finally {
         setBusy(null);
       }
@@ -136,16 +200,21 @@ export function StoryList({ items: initial, maxPriceAgeMs }: { items: StoryItem[
 
   function undo(item: StoryItem) {
     const postId = published[item.id];
-    if (!postId) return;
+    // "Deshacer" queda donde estaba "Ya la publiqué": un segundo toque seguido no debe deshacer.
+    if (!postId || Date.now() - lastMark.current < 1000) return;
     setBusy(item.id);
     clear(item.id);
     startTransition(async () => {
       try {
         const result = await undoStoryPublished(postId);
-        if (!result.ok) fail(item.id, result.error);
-        else setPublished(({ [item.id]: _gone, ...rest }) => rest);
+        if (!result.ok) {
+          fail(item.id, result.error);
+          return;
+        }
+        marks.delete(item.image);
+        setPublished(({ [item.id]: _gone, ...rest }) => rest);
       } catch {
-        fail(item.id, 'No se pudo deshacer. Revisa tu conexión.');
+        fail(item.id, `No se pudo deshacer. ${RELOAD_HINT}`);
       } finally {
         setBusy(null);
       }
@@ -201,45 +270,52 @@ export function StoryList({ items: initial, maxPriceAgeMs }: { items: StoryItem[
             )}
           </div>
 
-          {done ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <p className="flex items-center gap-1.5 text-sm font-medium text-accent">
-                <Check size={15} aria-hidden /> Publicada
-              </p>
-              <button onClick={() => undo(item)} disabled={busy !== null} className={BUTTON}>
-                <Undo2 size={15} aria-hidden /> {busy === item.id ? 'Deshaciendo…' : 'Deshacer'}
+          {/* La misma grilla antes y después de marcar: si la tarjeta cambiara de alto, las de abajo se correrían bajo el dedo. */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            {canShare && (
+              <button
+                onClick={() => share(item)}
+                disabled={state !== 'lista'}
+                className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-ink transition hover:bg-accent/90 disabled:opacity-50 sm:col-span-2"
+              >
+                <Share2 size={15} aria-hidden />{' '}
+                {state === 'lista' ? 'Compartir' : state === 'error' ? 'Sin imagen' : 'Preparando…'}
               </button>
-            </div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {canShare && (
-                <button
-                  onClick={() => share(item)}
-                  disabled={state !== 'lista'}
-                  className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-ink transition hover:bg-accent/90 disabled:opacity-50 sm:col-span-2"
-                >
-                  <Share2 size={15} aria-hidden />{' '}
-                  {state === 'lista' ? 'Compartir' : state === 'error' ? 'Sin imagen' : 'Preparando…'}
-                </button>
-              )}
-              <button onClick={() => void copyLink(item)} className={BUTTON}>
-                {copied === item.id ? <Check size={15} className="text-accent" aria-hidden /> : <Copy size={15} aria-hidden />}
-                {copied === item.id ? 'Link copiado' : 'Copiar link'}
+            )}
+            <button onClick={() => void copyLink(item)} className={BUTTON}>
+              {copied === item.id ? <Check size={15} className="text-accent" aria-hidden /> : <Copy size={15} aria-hidden />}
+              {copied === item.id ? 'Link copiado' : 'Copiar link'}
+            </button>
+            {state === 'lista' ? (
+              <a
+                href={item.image}
+                download={item.fileName}
+                onClick={(e) => {
+                  if (tooOld(item)) e.preventDefault();
+                }}
+                className={BUTTON}
+              >
+                <Download size={15} aria-hidden /> Guardar imagen
+              </a>
+            ) : (
+              <button disabled className={BUTTON}>
+                <Download size={15} aria-hidden /> Guardar imagen
               </button>
-              {state === 'lista' ? (
-                <a href={item.image} download={item.fileName} className={BUTTON}>
-                  <Download size={15} aria-hidden /> Guardar imagen
-                </a>
-              ) : (
-                <button disabled className={BUTTON}>
-                  <Download size={15} aria-hidden /> Guardar imagen
-                </button>
-              )}
+            )}
+            {done ? (
+              <button
+                onClick={() => undo(item)}
+                disabled={busy !== null}
+                className={`${BUTTON} border-accent/50 text-accent sm:col-span-2`}
+              >
+                <Check size={15} aria-hidden /> {busy === item.id ? 'Deshaciendo…' : 'Publicada · Deshacer'}
+              </button>
+            ) : (
               <button onClick={() => markPublished(item)} disabled={busy !== null} className={`${BUTTON} sm:col-span-2`}>
                 {busy === item.id ? 'Guardando…' : 'Ya la publiqué'}
               </button>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Completo y seleccionable: es el respaldo si el teléfono no deja copiar con el botón. */}
           <p className="select-all break-all text-[11px] text-muted" aria-label="Link de afiliado">
@@ -255,14 +331,13 @@ export function StoryList({ items: initial, maxPriceAgeMs }: { items: StoryItem[
 
   const again = items.filter((item) => item.again);
   const fresh = items.filter((item) => !item.again);
-  const someReady = Object.values(status).includes('lista');
 
   return (
     <div className="mt-6 flex flex-col gap-6">
-      {someReady && !canShare && (
+      {canShare === false && (
         <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted">
-          El botón <strong className="text-fg">Compartir</strong> aparece al abrir esta página en el teléfono. Acá en el
-          computador puedes guardar la imagen y copiar el link.
+          El botón <strong className="text-fg">Compartir</strong> aparece en el teléfono, con Safari o Chrome. Si no lo
+          ves, guarda la imagen y copia el link.
         </p>
       )}
 
