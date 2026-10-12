@@ -1,6 +1,8 @@
 import { ImageResponse } from 'next/og';
 import { shortProductName } from '@/lib/text';
 import { captionDiscount, chileDateTime, formatPrice, mlPhotoJpg } from '@/lib/content/captions';
+import { interFonts, type OgFont } from '@/lib/content/og-fonts';
+import { StoryTemplate } from '@/lib/content/story-template';
 
 /**
  * Plantilla de las imágenes de producto: el kit para redes del admin
@@ -18,7 +20,9 @@ import { captionDiscount, chileDateTime, formatPrice, mlPhotoJpg } from '@/lib/c
  * El aviso de la comisión va en el texto del post (lib/content/captions).
  *
  * Usa la fuente que trae next/og (sin pedir fuentes a otro servidor), y sin
- * emojis, que next/og descarga aparte.
+ * emojis, que next/og descarga aparte. La historia es la excepción: tiene su
+ * propio diseño (lib/content/story-template) y usa Inter, que va en el
+ * repositorio; quien la dibuje tiene que pasar las fuentes de ogFonts().
  */
 
 export type OgFormat = 'feed' | 'story' | 'pin' | 'og';
@@ -54,15 +58,6 @@ const COLORS = {
   muted: '#94A3B8',
   yellow: '#FFE600',
 };
-
-/**
- * Franjas que Instagram y Facebook cubren en una historia de 1080x1920:
- * arriba la barra de avance y el nombre de la cuenta, abajo la caja para
- * responder. Lo que quede ahí no se ve, y una historia no tiene texto aparte:
- * la marca y la hora del precio tienen que caer entre las dos.
- */
-const STORY_TOP_SAFE = 250;
-const STORY_BOTTOM_SAFE = 300;
 
 const PHOTO_TIMEOUT_MS = 6000;
 /** Una foto de producto pesa cientos de KB: más que esto no es una foto. */
@@ -113,9 +108,9 @@ interface Layout {
   horizontal: boolean;
 }
 
-const LAYOUTS: Record<OgFormat, Layout> = {
+/** La historia no está: la dibuja lib/content/story-template. */
+const LAYOUTS: Record<Exclude<OgFormat, 'story'>, Layout> = {
   feed: { pad: 64, photo: 640, name: 44, price: 120, small: 30, chip: 34, horizontal: false },
-  story: { pad: 72, photo: 620, name: 54, price: 150, small: 36, chip: 40, horizontal: false },
   pin: { pad: 60, photo: 760, name: 42, price: 112, small: 28, chip: 32, horizontal: false },
   og: { pad: 40, photo: 550, name: 34, price: 84, small: 22, chip: 26, horizontal: true },
 };
@@ -179,6 +174,8 @@ export function ProductOgTemplate({
   format: OgFormat;
   photo: string | null;
 }) {
+  if (format === 'story') return <StoryTemplate product={product} photo={photo} />;
+
   const L = LAYOUTS[format];
   const { width, height } = OG_SIZES[format];
   const discount = captionDiscount(product);
@@ -250,8 +247,6 @@ export function ProductOgTemplate({
         width,
         height,
         padding: L.pad,
-        paddingTop: format === 'story' ? STORY_TOP_SAFE : L.pad,
-        paddingBottom: format === 'story' ? STORY_BOTTOM_SAFE : L.pad,
         background: COLORS.bg,
         color: COLORS.fg,
         gap: Math.round(L.pad * 0.5),
@@ -349,6 +344,14 @@ export function OffersOgTemplate({
   );
 }
 
+/**
+ * Las fuentes que hay que entregarle a next/og para cada formato: Inter para
+ * la historia; para el resto nada, y next/og usa la suya.
+ */
+export async function ogFonts(format: OgFormat): Promise<OgFont[] | undefined> {
+  return format === 'story' ? interFonts() : undefined;
+}
+
 /** PNG de un producto en el formato pedido. */
 export async function productImageResponse(
   product: OgProduct,
@@ -360,6 +363,7 @@ export async function productImageResponse(
   const photo = await loadPhoto(product.image_url, format === 'og' ? 'O' : 'F');
   return new ImageResponse(<ProductOgTemplate product={product} format={format} photo={photo} />, {
     ...OG_SIZES[format],
+    fonts: await ogFonts(format),
     headers: init.headers,
   });
 }

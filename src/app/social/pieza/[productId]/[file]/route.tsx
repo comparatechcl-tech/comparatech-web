@@ -2,7 +2,7 @@ import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
 import { getSupabase } from '@/lib/supabase/client';
 import { pngToJpeg } from '@/lib/content/jpeg';
-import { OG_SIZES, ProductOgTemplate, loadPhoto, type OgProduct } from '@/lib/content/og-template';
+import { OG_SIZES, ProductOgTemplate, loadPhoto, ogFonts, type OgProduct } from '@/lib/content/og-template';
 import { checkPiecePath, pieceKey, piecePath, type PieceSnapshot } from '@/lib/social/piece-url';
 
 /**
@@ -86,7 +86,10 @@ async function draw(s: PieceSnapshot): Promise<Drawn> {
   };
 
   try {
-    const png = new ImageResponse(<ProductOgTemplate product={product} format={s.format} photo={photo} />, OG_SIZES[s.format]);
+    const png = new ImageResponse(<ProductOgTemplate product={product} format={s.format} photo={photo} />, {
+      ...OG_SIZES[s.format],
+      fonts: await ogFonts(s.format),
+    });
     return { jpeg: await pngToJpeg(await png.arrayBuffer(), BACKGROUND) };
   } catch (err) {
     console.error('[social/pieza] no se pudo dibujar la pieza:', err instanceof Error ? err.message : err);

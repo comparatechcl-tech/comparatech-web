@@ -2,6 +2,10 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // tsconfig.json deja el JSX sin transformar para Next. En los tests lo
+  // transforma esbuild, con el runtime automático (como Next): sin esto, un
+  // test que dibuja una pieza falla con "React is not defined".
+  esbuild: { jsx: 'automatic' },
   resolve: {
     alias: {
       // El mismo alias de tsconfig.json, para que los tests importen igual

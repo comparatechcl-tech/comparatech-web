@@ -56,6 +56,13 @@ const nextConfig = {
   // No anunciar con qué está hecho el sitio: solo ayuda a quien busca
   // versiones con vulnerabilidades conocidas.
   poweredByHeader: false,
+  // Las piezas de historia se dibujan con fuentes que se leen del disco
+  // (lib/content/og-fonts): hay que decir con qué rutas viajan, o en Vercel
+  // el archivo no existe y la imagen falla.
+  outputFileTracingIncludes: {
+    '/social/pieza/[productId]/[file]': ['./src/lib/content/fonts/*.woff'],
+    '/admin/kit/[productId]': ['./src/lib/content/fonts/*.woff'],
+  },
   images: {
     remotePatterns: [
       // Imágenes reales de fichas de Mercado Libre (CDN oficial). ML sirve
