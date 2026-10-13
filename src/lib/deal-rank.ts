@@ -29,7 +29,12 @@ export const MIN_DROP_PCT = 3;
 
 export type DealTier = 'hot' | 'deal' | null;
 
-type Priced = { price: number; original_price: number | null };
+type Priced = {
+  price: number;
+  original_price: number | null;
+  /** Cuándo se agregó al sitio: dice si el primer registro del historial es su precio de partida. */
+  created_at?: string | null;
+};
 
 /** Descuento sobre el precio de lista, en % entero. 0 si no hay rebaja. */
 export function discountOf(product: Priced): number {
@@ -63,7 +68,7 @@ export function confirmedDrop(
   stats: PriceStats | null | undefined,
   now: number = Date.now()
 ): ConfirmedDrop | null {
-  const drop = dropSince(stats ?? null, product.price, now);
+  const drop = dropSince(stats ?? null, product.price, now, product.original_price, product.created_at);
   if (!drop) return null;
   const pct = (drop.amount / (product.price + drop.amount)) * 100;
   if (pct < MIN_DROP_PCT) return null;

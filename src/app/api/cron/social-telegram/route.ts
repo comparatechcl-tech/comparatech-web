@@ -16,10 +16,11 @@ import {
   type SocialProduct,
   type TelegramPick,
 } from '@/lib/social/telegram';
-import { readConfirmedDrops } from '@/lib/social/drops';
+import { countUnreadHistory, readInterestEvidence } from '@/lib/social/drops';
 
 /**
- * Publica en el canal de Telegram las mejores ofertas del momento (3 a 5).
+ * Publica en el canal de Telegram las ofertas del momento que más pueden
+ * interesar (hasta 5; ver pickForTelegram).
  *
  * ?dry=1 devuelve la selección sin publicar nada, para revisarla antes de
  * encender el bot (funciona aunque falte el token).
@@ -71,19 +72,6 @@ async function recentlyPosted(
   return ids;
 }
 
-/**
- * Bajas de precio confirmadas por el historial propio (en %), solo para los
- * que no llegan al descuento mínimo: a los demás no les hace falta.
- *
- * Antes leía price_history acá mismo con un tope de 5.000 filas, pero
- * Supabase corta cada respuesta en 1.000: con el catálogo actual llegaban
- * solo los registros más antiguos y ninguna baja se reconocía. Ahora usa la
- * lectura por tandas de las páginas del sitio.
- */
-function historyDrops(rows: SocialProduct[], now: Date): Promise<Map<string, number>> {
-  return readConfirmedDrops(rows, now, TELEGRAM_RULES.minDiscount);
-}
-
 function describe(pick: TelegramPick<SocialProduct>) {
   return {
     id: pick.product.id,
@@ -93,7 +81,9 @@ function describe(pick: TelegramPick<SocialProduct>) {
     descuento: pick.discount,
     baja_historial: pick.drop === null ? null : Math.round(pick.drop),
     comision_estimada: pick.commission,
-    motivo: pick.reason,
+    puntos: pick.score.points,
+    motivo: pick.score.reason,
+    aviso: pick.score.warning,
   };
 }
 
@@ -120,8 +110,10 @@ export async function GET(req: NextRequest) {
     if (read.error) throw new Error(`No se pudo leer el catálogo: ${read.error}`);
 
     const posted = await recentlyPosted(admin, read.rows, now);
-    const drops = await historyDrops(read.rows, now);
-    const picks = pickForTelegram(read.rows, { now, recentlyPosted: posted ?? new Set(), drops });
+    // El historial de precios de todo lo que puede salir: el puntaje de
+    // interés lo necesita también para lo que trae un buen descuento de lista.
+    const evidence = await readInterestEvidence(read.rows, now, posted ?? undefined);
+    const picks = pickForTelegram(read.rows, { now, recentlyPosted: posted ?? new Set(), evidence });
 
     if (dry) {
       return NextResponse.json({
@@ -131,6 +123,8 @@ export async function GET(req: NextRequest) {
         falta_canal: !process.env.TELEGRAM_CHANNEL_ID?.trim(),
         falta_tabla_social_posts: posted === null,
         con_precio_fresco: read.rows.length,
+        // Productos cuyo historial de precios no se pudo leer ahora: no se publican.
+        historial_sin_leer: countUnreadHistory(evidence),
         seleccion: picks.map(describe),
         aviso:
           picks.length < TELEGRAM_RULES.minPosts
@@ -192,13 +186,24 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Un día sin nada que publicar es normal. Si además no se pudo leer el
+    // historial de precios, no es un día sin ofertas: es una falla, y tiene
+    // que verse en la bitácora.
+    const unreadHistory = countUnreadHistory(evidence);
+    const blind = published.length === 0 && errors.length === 0 && unreadHistory > 0;
     const summary = {
-      ok: errors.length === 0 || published.length > 0,
+      ok: (errors.length === 0 || published.length > 0) && !blind,
       publicados: published.length,
       errores: errors,
+      historial_sin_leer: unreadHistory,
       seleccion: published,
     };
-    await run.finish(summary.ok, summary, errors.length ? errors.map((e) => e.error).join(' | ') : undefined);
+    const failure = blind
+      ? `No se pudo leer el historial de precios de ${unreadHistory} productos: no se publicó nada`
+      : errors.length
+        ? errors.map((e) => e.error).join(' | ')
+        : undefined;
+    await run.finish(summary.ok, summary, failure);
     return NextResponse.json(summary, { status: summary.ok ? 200 : 502 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

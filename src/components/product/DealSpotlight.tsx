@@ -12,14 +12,19 @@ import mlImageLoader from '@/lib/ml-image-loader';
 import { discountOf, type ConfirmedDrop } from '@/lib/deal-rank';
 import { AffiliateButton } from './AffiliateButton';
 import { DealBadge, DropChip } from './DealBadge';
+import { PriceFreshness } from './PriceFreshness';
 
 /**
- * La mejor oferta del momento, en el encabezado de la portada.
+ * La oferta destacada, en el encabezado de la portada. Cuál es lo decide
+ * lib/home-deals, y cambia con la hora.
  *
  * Ese espacio lo ocupaba una ilustración: linda, pero no vendía nada, y en
  * un notebook empujaba la primera oferta fuera del primer pantallazo. Ahora
  * lo primero que se ve al entrar es un producto real con su precio y su
  * botón de compra.
+ *
+ * Dice además hace cuánto se revisó el precio: es lo primero que se ve al
+ * entrar, y un precio sin fecha se toma por el de este minuto.
  */
 export function DealSpotlight({
   product,
@@ -98,6 +103,13 @@ export function DealSpotlight({
       <p className="mt-3 text-[11px] leading-snug text-muted">
         Descuento sobre el precio de lista informado en Mercado Libre.
       </p>
+      {product.price_checked_at && (
+        // PriceFreshness se escribe recién en el navegador: el alto se
+        // reserva para que la tarjeta no salte cuando aparece.
+        <div className="flow-root min-h-[1.375rem]">
+          <PriceFreshness checkedAt={product.price_checked_at} />
+        </div>
+      )}
     </div>
   );
 }

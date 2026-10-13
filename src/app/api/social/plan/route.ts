@@ -4,7 +4,7 @@ import { isCronAuthorized } from '@/lib/cron-auth';
 import { chileDateKey, chileDayStart } from '@/lib/clicks';
 import { readAffiliateSettings } from '@/lib/settings';
 import { SITE_URL } from '@/lib/site';
-import { readConfirmedDrops } from '@/lib/social/drops';
+import { countUnreadHistory, readInterestEvidence } from '@/lib/social/drops';
 import { pieceKey } from '@/lib/social/piece-url';
 import { pickByRules, readFreshSocialProducts } from '@/lib/social/telegram';
 import {
@@ -19,7 +19,9 @@ import {
 
 /**
  * Qué publicar en Instagram, Facebook y TikTok: los productos elegidos, con
- * el texto de cada red y la imagen en una dirección pública.
+ * el texto de cada red y la imagen en una dirección pública. Vienen en orden
+ * de interés (lib/social/interest), cada uno con sus puntos, el motivo y, si
+ * hay algo que mirar a mano, un aviso.
  *
  * También avisa de lo que ya está programado y dejó de calzar con el sitio
  * (el producto se agotó o cambió de precio), para retirarlo de Metricool
@@ -30,9 +32,10 @@ import {
  * de los crons. ?n= pide otra cantidad de productos (1 a 12).
  *
  * ?producto=<id> arma el plan de ese producto y nada más, aunque ya se haya
- * publicado o no llegue al descuento: sirve para sacar su historia después
- * de la publicación, o para publicar algo elegido a mano. Igual tiene que
- * estar a la venta y con el precio recién revisado.
+ * publicado, no llegue al descuento o el puntaje no lo hubiera elegido: sirve
+ * para sacar su historia después de la publicación, o para publicar algo
+ * elegido a mano (ahí el aviso es lo que hay que leer). Igual tiene que estar
+ * a la venta y con el precio recién revisado.
  */
 
 export const maxDuration = 60;
@@ -80,23 +83,27 @@ export async function GET(req: NextRequest) {
     const month = chileDateKey(now).slice(0, 7);
     const monthStart = chileDayStart(`${month}-01`);
     const nextMonthStart = chileDayStart(`${nextMonthKey(month)}-01`);
-    const [posted, drops, monthCount, pendientes, settings] = await Promise.all([
+    const [posted, monthCount, pendientes, settings] = await Promise.all([
       postedOnNetworks(admin, since),
-      readConfirmedDrops(rows, now, NETWORK_RULES.minDiscount),
       countPostsBetween(admin, monthStart, nextMonthStart),
       readPendingIssues(admin, now),
       readAffiliateSettings(admin),
     ]);
 
-    const picks = wantedId
+    // El historial se lee solo de lo que puede salir: el producto pedido, o
+    // todo lo que no se publicó hace poco.
+    const wanted = wantedId ? rows.filter((p) => p.id === wantedId) : null;
+    const evidence = await readInterestEvidence(wanted ?? rows, now, wanted ? undefined : posted ?? undefined);
+
+    const picks = wanted
       ? pickByRules(
-          rows.filter((p) => p.id === wantedId),
-          { now, recentlyPosted: new Set(), drops },
-          { ...NETWORK_RULES, maxPosts: 1, minDiscount: 0, minDrop: 0 }
+          wanted,
+          { now, recentlyPosted: new Set(), evidence },
+          { ...NETWORK_RULES, maxPosts: 1, minDiscount: 0, minDrop: 0, anyScore: true }
         )
       : pickByRules(
           rows,
-          { now, recentlyPosted: posted ?? new Set(), drops },
+          { now, recentlyPosted: posted ?? new Set(), evidence },
           { ...NETWORK_RULES, maxPosts: count }
         );
     const seleccion = picks
@@ -112,6 +119,8 @@ export async function GET(req: NextRequest) {
       // Metricool gratis: 20 al mes, y cada red cuenta como una publicación.
       programadas_este_mes: monthCount,
       falta_tabla_social_posts: posted === null,
+      // Productos cuyo historial de precios no se pudo leer ahora: no se proponen (salvo pedidos por su id).
+      historial_sin_leer: countUnreadHistory(evidence),
       ...(wantedId && seleccion.length === 0
         ? { aviso: 'Ese producto no está a la venta o su precio no se revisó en las últimas 6 horas.' }
         : {}),

@@ -6,6 +6,7 @@ import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import type { AffiliateSettings } from '@/lib/settings';
 import { shortProductName } from '@/lib/text';
+import { MIN_INTEREST_POINTS } from '@/lib/social/interest';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
 import {
   TELEGRAM_RULES,
@@ -50,6 +51,8 @@ export const NETWORK_RULES: PickRules & { repeatAfterDays: number } = {
   minDiscount: MIN_DEAL_DISCOUNT,
   minDrop: TELEGRAM_RULES.minDrop,
   maxPriceAgeMs: TELEGRAM_RULES.maxPriceAgeMs,
+  /** Lo programado sale solo y ya no se puede corregir: lo que trae un aviso en el puntaje no se propone. */
+  cleanOnly: true,
   repeatAfterDays: 14,
 };
 
@@ -137,7 +140,19 @@ export interface PlanItem {
   descuento: number;
   baja_historial: number | null;
   comision_estimada: number;
+  /** Puntaje de interés (lib/social/interest): la selección viene ordenada por él. */
+  puntos: number;
+  /** Qué es y por qué queda donde queda. */
   motivo: string;
+  /** Lo que conviene mirar a mano antes de programarlo, o null. */
+  aviso: string | null;
+  /**
+   * Por qué el puntaje no lo publicaría (está excluido o no llega al piso
+   * de interés). En el plan normal es siempre null, porque eso no llega;
+   * solo trae texto cuando el producto se pidió por su id, para que quien
+   * lo eligió a mano lo lea antes de programarlo.
+   */
+  no_publicar: string | null;
   precio_revisado: string | null;
   /** Después de esta hora el precio ya no se puede dar por vigente: no programar más allá. */
   programar_antes_de: string;
@@ -296,7 +311,14 @@ export function buildPlanItem(
     descuento: pick.discount,
     baja_historial: pick.drop === null ? null : Math.round(pick.drop),
     comision_estimada: pick.commission,
-    motivo: pick.reason,
+    puntos: pick.score.points,
+    motivo: pick.score.reason,
+    aviso: pick.score.warning,
+    no_publicar:
+      pick.score.excluded ??
+      (pick.score.points < MIN_INTEREST_POINTS
+        ? `no llega al piso de interés (${String(pick.score.points).replace('.', ',')} de ${MIN_INTEREST_POINTS} puntos)`
+        : null),
     precio_revisado: p.price_checked_at,
     programar_antes_de: new Date(opts.now.getTime() + SCHEDULE_AHEAD_MS).toISOString(),
     ficha: `${site}/producto/${p.slug}`,

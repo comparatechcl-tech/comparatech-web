@@ -89,7 +89,7 @@ function toCompareOffer(product: Product, stats: PriceStats | null, now: number)
         ? 'Mercado Libre'
         : `${info.official_store === true ? 'Tienda oficial' : reputationLabel(product.seller_reputation)}${sales}`,
     warranty: typeof info.warranty === 'string' && info.warranty.trim() ? warrantyValue(info.warranty) : null,
-    change: changeSince(stats, product.price, now),
+    change: changeSince(stats, product.price, now, product.original_price, product.created_at),
     lowest: lowestPriceNote(stats, product.price),
   };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatDayMonth,
+  formatTimeAgo,
   salesLabel,
   singularizeUnits,
   specLabel,
@@ -142,5 +143,26 @@ describe('formatDayMonth', () => {
   it('siempre con dos dígitos, también el día y el mes de una cifra', () => {
     expect(formatDayMonth('2026-10-04T15:00:00.000Z')).toBe('04/10');
     expect(formatDayMonth('2027-01-05T15:00:00.000Z')).toBe('05/01');
+  });
+});
+
+describe('formatTimeAgo', () => {
+  const now = new Date('2026-10-12T20:00:00Z').getTime();
+  const inMinutes = (minutes: number) => new Date(now + minutes * 60_000).toISOString();
+
+  it('dice hace cuánto fue', () => {
+    expect(formatTimeAgo(inMinutes(-26), now)).toBe('hace 26 minutos');
+    expect(formatTimeAgo(inMinutes(-0.5), now)).toBe('recién');
+    expect(formatTimeAgo(null, now)).toBeNull();
+  });
+
+  it('un reloj atrasado por pocos minutos no promete nada: dice "recién"', () => {
+    expect(formatTimeAgo(inMinutes(2), now)).toBe('recién');
+    expect(formatTimeAgo(inMinutes(5), now)).toBe('recién');
+  });
+
+  it('una fecha muy adelantada está mala: no se dice nada', () => {
+    expect(formatTimeAgo(inMinutes(6), now)).toBeNull();
+    expect(formatTimeAgo('2027-01-01T00:00:00Z', now)).toBeNull();
   });
 });

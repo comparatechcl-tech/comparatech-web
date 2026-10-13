@@ -15,7 +15,19 @@ import { formatCLP, formatDayMonth } from '@/lib/format';
  * precio que acompaña.
  */
 
-export async function PriceHistoryNote({ productId, price }: { productId: string; price: number }) {
+export async function PriceHistoryNote({
+  productId,
+  price,
+  listPrice,
+  createdAt,
+}: {
+  productId: string;
+  price: number;
+  /** El precio de lista de hoy: la baja no se mide contra algo más alto (ver changeSince). */
+  listPrice?: number | null;
+  /** Cuándo se agregó el producto: dice si el primer registro del historial es su precio de partida. */
+  createdAt?: string | null;
+}) {
   const stats = await getPriceStatsCached(productId);
   if (!stats) return null;
 
@@ -24,7 +36,7 @@ export async function PriceHistoryNote({ productId, price }: { productId: string
   const lowest = lowestPriceNote(stats, price);
   if (lowest) lines.push(lowest);
 
-  const drop = dropSince(stats, price);
+  const drop = dropSince(stats, price, Date.now(), listPrice, createdAt);
   if (drop) lines.push(`Bajó ${formatCLP(drop.amount)} desde el ${formatDayMonth(drop.since)}`);
 
   if (lines.length === 0) return null;

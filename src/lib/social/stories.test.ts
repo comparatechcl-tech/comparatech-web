@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 // La lectura del historial va a Supabase: acá solo se prueba lo puro.
-vi.mock('@/lib/queries/price-history', () => ({ getPriceStatsMany: vi.fn(async () => new Map()) }));
+vi.mock('@/lib/queries/price-history', () => {
+  const getPriceStatsMany = vi.fn(async (_ids: string[]) => new Map());
+  // La lectura que avisa lo que no pudo leer se arma sobre la misma de mentira: acá se lee todo.
+  const getPriceStatsManyChecked = async (ids: string[]) => ({ stats: await getPriceStatsMany(ids), unread: new Set<string>() });
+  return { getPriceStatsMany, getPriceStatsManyChecked };
+});
 // lib/settings usa cache() de React, que solo existe dentro de Next.
 vi.mock('@/lib/settings', () => ({ readAffiliateSettings: vi.fn() }));
 // El catálogo se entrega ya leído; la selección es la de verdad.
@@ -12,7 +17,10 @@ vi.mock('@/lib/social/telegram', async (original) => ({
 }));
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { PriceStats } from '@/lib/deals';
+import { getPriceStatsMany } from '@/lib/queries/price-history';
 import { readAffiliateSettings } from '@/lib/settings';
+import { MIN_INTEREST_POINTS, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
 import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
 import { NETWORK_RULES, STORY_MARK, postedOnNetworks } from '@/lib/social/networks';
 import {
@@ -58,9 +66,63 @@ function product(over: Partial<SocialProduct> = {}): SocialProduct {
   };
 }
 
-function pickOne(p: SocialProduct, drops?: Map<string, number>) {
-  const [pick] = pickByRules([p], { now: NOW, recentlyPosted: new Set(), drops }, STORY_RULES);
+/**
+ * Una oferta que cualquier canal publicaría: audífonos de marca conocida, de
+ * tienda oficial y con 40% de lista. Queda muy por encima del piso de interés.
+ */
+function strong(over: Partial<SocialProduct> = {}): SocialProduct {
+  return product({
+    name: 'Audífonos Bluetooth JBL Tune 520BT Negro',
+    brand: 'JBL',
+    price: 60_000,
+    original_price: 100_000,
+    seller_sales_count: 50_000,
+    ml_root_category: 'MLC1000',
+    offer_info: { free_shipping: true, is_full: false, official_store: true, sold_by_ml: false, is_lowest: true } as SocialProduct['offer_info'],
+    ...over,
+  });
+}
+
+/** La selección de un producto solo, sin piso de interés ni avisos: para probar cómo se arma la historia. */
+function pickOne(p: SocialProduct, evidence?: Map<string, InterestEvidence>) {
+  const [pick] = pickByRules([p], { now: NOW, recentlyPosted: new Set(), evidence }, { ...STORY_RULES, anyScore: true });
   return pick;
+}
+
+/** Lo que el historial dice de un producto cuyo precio de hoy rige desde hace dos días. */
+function stats(price: number, over: Partial<PriceStats> = {}): PriceStats {
+  return {
+    min30: price,
+    median30: price,
+    max30: price,
+    minTracked: price,
+    maxTracked: price,
+    daysTracked: 20,
+    lastPrice: price,
+    previousPrice: null,
+    lastChangeAt: null,
+    lastPriceSeenRecently: false,
+    changesLast48h: 0,
+    previousIsFirstRecord: false,
+    lastPriceNearRecent: false,
+    ...over,
+    // Salvo que el test diga otra cosa: el mínimo se sostuvo y el precio anterior era el habitual.
+    min30Held: over.min30Held ?? over.min30 ?? price,
+    usualPriceBefore: 'usualPriceBefore' in over ? over.usualPriceBefore ?? null : over.previousPrice ?? null,
+    firstSeenAt: over.firstSeenAt ?? new Date(NOW.getTime() - 20 * 86_400_000).toISOString(),
+    trackedBeforeChangeMs:
+      'trackedBeforeChangeMs' in over ? over.trackedBeforeChangeMs ?? null : (over.previousPrice ?? null) === null ? null : 18 * 86_400_000,
+  };
+}
+
+/** El mismo historial, con una baja desde `previous` hace dos días. */
+function droppedFrom(price: number, previous: number): PriceStats {
+  return stats(price, {
+    max30: previous,
+    maxTracked: previous,
+    previousPrice: previous,
+    lastChangeAt: new Date(NOW.getTime() - 2 * 86_400_000).toISOString(),
+  });
 }
 
 /** Una base de mentira: anota lo que se le pide y devuelve las filas dadas, sin filtrar. */
@@ -95,6 +157,8 @@ const story = (productId: string, price: number | null, daysAgo: number) => ({
 beforeEach(() => {
   vi.mocked(readAffiliateSettings).mockResolvedValue(DIRECT);
   vi.mocked(readFreshSocialProducts).mockReset();
+  vi.mocked(getPriceStatsMany).mockReset();
+  vi.mocked(getPriceStatsMany).mockResolvedValue(new Map());
 });
 
 describe('STORY_RULES', () => {
@@ -103,6 +167,11 @@ describe('STORY_RULES', () => {
     expect(STORY_RULES.maxPriceAgeMs).toBe(NETWORK_RULES.maxPriceAgeMs);
     expect(STORY_RULES.repeatAfterDays).toBe(NETWORK_RULES.repeatAfterDays);
     expect(STORY_RULES.maxPosts).toBeGreaterThan(NETWORK_RULES.maxPosts);
+  });
+
+  it('no esconde lo que trae un aviso: el dueño lo ve en la tarjeta y decide', () => {
+    expect(NETWORK_RULES.cleanOnly).toBe(true);
+    expect(STORY_RULES.cleanOnly).toBe(false);
   });
 });
 
@@ -200,9 +269,37 @@ describe('buildStoryItem', () => {
 
     // Sin precio de lista entra solo por la baja que confirma el historial.
     const p = product({ original_price: null });
-    const byDrop = buildStoryItem(pickOne(p, new Map([[p.id, 7.6]])), { now: NOW, settings: DIRECT, key: KEY })!;
+    const evidence = new Map([[p.id, { drop: { pct: 7.6, amount: 6_600 }, min30: 80_000, daysTracked: 12 }]]);
+    const byDrop = buildStoryItem(pickOne(p, evidence), { now: NOW, settings: DIRECT, key: KEY })!;
     expect(byDrop).toMatchObject({ discount: 0, listPrice: null, drop: 8 });
     expect(byDrop.image).toContain('/story-80000-0-');
+  });
+
+  it('lleva el motivo, el aviso y los puntos del puntaje de interés', () => {
+    const pick = pickOne(strong());
+    const item = buildStoryItem(pick, { now: NOW, settings: DIRECT, key: KEY })!;
+    expect(item.reason).toBe(pick.score.reason);
+    expect(item.reason.length).toBeGreaterThan(10);
+    expect(item.warning).toBeNull();
+    expect(item.points).toBe(pick.score.points);
+
+    const score: InterestScore = {
+      ...pick.score,
+      points: 58.5,
+      reason: 'Audífonos JBL, 40% por debajo del precio de lista',
+      warning: 'hace poco estuvo a $55.000',
+    };
+    expect(buildStoryItem({ ...pick, score }, { now: NOW, settings: DIRECT, key: KEY })).toMatchObject({
+      points: 58.5,
+      reason: 'Audífonos JBL, 40% por debajo del precio de lista',
+      warning: 'hace poco estuvo a $55.000',
+    });
+  });
+
+  it('una historia ya publicada no lleva motivo ni aviso', () => {
+    const p = product();
+    const item = buildStoryItem({ product: p, discount: 20, drop: null, score: null }, { now: NOW, settings: DIRECT, key: KEY })!;
+    expect(item).toMatchObject({ id: p.id, discount: 20, reason: '', warning: null, points: 0 });
   });
 
   it('si ya se subió, dice a cuánto y cuándo', () => {
@@ -229,7 +326,7 @@ describe('readStoryPicks', () => {
   const categories = ['audio', 'gaming', 'hogar', 'celulares', 'computacion'];
 
   it('entrega hasta ocho, dos por categoría como máximo', async () => {
-    const rows = categories.flatMap((category) => Array.from({ length: 5 }, () => product({ category })));
+    const rows = categories.flatMap((category) => Array.from({ length: 5 }, () => strong({ category })));
     vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows, error: null });
 
     const items = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
@@ -243,22 +340,136 @@ describe('readStoryPicks', () => {
   });
 
   it('no repite una historia ya subida, salvo que haya bajado; esas van primero', async () => {
-    const posted = product({ category: 'audio' }); // 80.000, subida a 80.000: no vuelve
-    const cheaper = product({ category: 'gaming' }); // 80.000, subida a 90.000: vuelve
-    const backToUsual = product({ category: 'hogar' }); // subida a 80.000 y a 95.000: sigue en su precio más bajo
-    const fresh = product({ category: 'celulares' });
+    const posted = strong({ category: 'audio' }); // 60.000, subida a 60.000: no vuelve
+    const cheaper = strong({ category: 'gaming' }); // 60.000, subida a 70.000: vuelve
+    const backToUsual = strong({ category: 'hogar' }); // subida a 60.000 y a 75.000: sigue en su precio más bajo
+    const fresh = strong({ category: 'celulares' });
     vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [fresh, posted, cheaper, backToUsual], error: null });
     const { admin } = fakeAdmin([
-      story(posted.id, 80_000, 2),
-      story(cheaper.id, 90_000, 3),
-      story(backToUsual.id, 95_000, 1),
-      story(backToUsual.id, 80_000, 4),
+      story(posted.id, 60_000, 2),
+      story(cheaper.id, 70_000, 3),
+      story(backToUsual.id, 75_000, 1),
+      story(backToUsual.id, 60_000, 4),
     ]);
 
     const items = await readStoryPicks(admin, NOW, KEY);
     expect(items.map((item) => item.id)).toEqual([cheaper.id, fresh.id]);
-    expect(items[0].again).toMatchObject({ price: 90_000 });
+    expect(items[0].again).toMatchObject({ price: 70_000 });
     expect(items[1].again).toBeNull();
+  });
+
+  it('lee el historial de todo lo que puede salir, también de lo que ya trae descuento de lista', async () => {
+    const posted = strong({ category: 'audio' });
+    const deal = strong({ category: 'gaming' });
+    const flat = strong({ category: 'hogar', original_price: null });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [posted, deal, flat], error: null });
+
+    await readStoryPicks(fakeAdmin([story(posted.id, 60_000, 2)]).admin, NOW, KEY);
+    expect(vi.mocked(getPriceStatsMany)).toHaveBeenCalledTimes(1);
+    // Lo que ya se subió y no bajó no puede salir: su historial no se lee.
+    expect(vi.mocked(getPriceStatsMany)).toHaveBeenLastCalledWith([deal.id, flat.id]);
+  });
+
+  it('después de las que bajaron, van en orden de interés y no de comisión', async () => {
+    // Tres veces la misma oferta. Lo único que cambia es lo que el sitio vio:
+    // una bajó $20.000 hace dos días y las otras no se movieron.
+    const steady = strong({ category: 'audio' });
+    const dropped = strong({ category: 'gaming' });
+    const again = strong({ category: 'hogar' });
+    // Lo que más comisión deja de la lista, con una oferta chica y un precio que pocos pagan.
+    const fridge = strong({
+      name: 'Refrigerador Side by Side 578 lt Samsung',
+      brand: 'Samsung',
+      category: 'electrodomesticos',
+      price: 899_990,
+      original_price: 1_124_990,
+    });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [fridge, steady, dropped, again], error: null });
+    vi.mocked(getPriceStatsMany).mockResolvedValue(
+      new Map([
+        [fridge.id, stats(899_990)],
+        [steady.id, stats(60_000)],
+        [dropped.id, droppedFrom(60_000, 80_000)],
+        [again.id, stats(60_000)],
+      ])
+    );
+
+    const items = await readStoryPicks(fakeAdmin([story(again.id, 70_000, 3)]).admin, NOW, KEY);
+    const order = items.map((item) => item.id);
+    expect(order.filter((id) => id !== fridge.id)).toEqual([again.id, dropped.id, steady.id]);
+    // Por comisión el refrigerador iba primero. Ahora va al final, si es que llega al piso de interés.
+    expect([-1, order.length - 1]).toContain(order.indexOf(fridge.id));
+
+    const byId = new Map(items.map((item) => [item.id, item]));
+    expect(byId.get(dropped.id)?.drop).toBe(25);
+    expect(byId.get(dropped.id)!.points).toBeGreaterThan(byId.get(steady.id)!.points);
+    for (const item of items) {
+      expect(item.points).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
+      expect(item.reason.length).toBeGreaterThan(10);
+    }
+  });
+
+  it('lo que el sitio vio mucho más barato hace poco no se muestra, aunque traiga descuento de lista', async () => {
+    const honest = strong({ category: 'audio' });
+    const inflated = strong({ category: 'gaming' });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [inflated, honest], error: null });
+    vi.mocked(getPriceStatsMany).mockResolvedValue(
+      new Map([
+        [honest.id, stats(60_000)],
+        // Hace diez días estuvo a $40.000: hoy cuesta la mitad más.
+        [inflated.id, stats(60_000, { min30: 40_000, minTracked: 40_000 })],
+      ])
+    );
+
+    const items = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    expect(items.map((item) => item.id)).toEqual([honest.id]);
+  });
+
+  it('lo que interesa poco no se muestra, aunque sobren cupos', async () => {
+    const cable = product({
+      name: 'Cable Usb Tipo C 2 Metros Carga Rápida',
+      brand: 'Genérica',
+      category: 'electronica',
+      price: 3_990,
+      original_price: 9_990,
+      seller_sales_count: 800,
+      offer_info: { free_shipping: false, is_full: false },
+    });
+    const fine = strong();
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [cable, fine], error: null });
+    const items = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    expect(items.map((item) => item.id)).toEqual([fine.id]);
+  });
+
+  it('una oferta con algo que mirar se muestra igual, con su aviso', async () => {
+    // Una consola que bajó de verdad, pero de un vendedor casi sin ventas.
+    const doubtful = strong({
+      name: 'Consola PlayStation 5 Slim Digital 1TB Blanco',
+      brand: 'Sony',
+      category: 'gaming',
+      price: 449_990,
+      original_price: null,
+      seller_sales_count: 4,
+      offer_info: { free_shipping: true, is_full: true, official_store: false, is_lowest: true } as SocialProduct['offer_info'],
+    });
+    const fine = strong();
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [doubtful, fine], error: null });
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([[doubtful.id, droppedFrom(449_990, 599_990)]]));
+
+    const items = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    const byId = new Map(items.map((item) => [item.id, item]));
+    expect(byId.get(doubtful.id)?.warning).toEqual(expect.any(String));
+    expect(byId.get(fine.id)?.warning).toBeNull();
+  });
+
+  it('si el historial no se pudo leer, igual muestra las ofertas de lista', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fine = strong();
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [fine], error: null });
+    vi.mocked(getPriceStatsMany).mockRejectedValue(new Error('sin conexión'));
+    const items = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    expect(items.map((item) => item.id)).toEqual([fine.id]);
+    warn.mockRestore();
   });
 
   it('si el catálogo no se pudo leer, falla en vez de mostrar una lista vacía', async () => {
@@ -308,6 +519,9 @@ describe('readPostedStories', () => {
     ]);
     // La imagen y el precio son los de ahora; el precio con que se subió queda aparte.
     expect(stories[1]).toMatchObject({ price: 75_000, postedPrice: 80_000, postedAt: mark(11, a.id, 0, 3).posted_at, again: null });
+    // Ya se decidió subirlas: no llevan motivo ni aviso, y no leen el historial de precios.
+    expect(stories[1]).toMatchObject({ reason: '', warning: null });
+    expect(vi.mocked(getPriceStatsMany)).not.toHaveBeenCalled();
     expect(stories[1].image).toContain(`/social/pieza/${a.id}/story-75000-100000-`);
     expect(stories[1].link).toBe('https://www.mercadolibre.cl/p/MLC123?matt_word=comparatech&matt_tool=12345');
   });

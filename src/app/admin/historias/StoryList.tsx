@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { Check, Copy, Download, Loader2, Share2, TrendingDown, Undo2 } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Download, Loader2, Share2, TrendingDown, Undo2 } from 'lucide-react';
 import { formatPrice } from '@/lib/content/captions';
 import { formatDayMonth } from '@/lib/format';
 import type { PostedStory, StoryItem } from '@/lib/social/stories';
@@ -348,6 +348,14 @@ export function StoryList({
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div>
             {heading}
+            {/* Por qué se propone y qué mirar antes de subirla. No cambian al marcar: la tarjeta conserva su alto. */}
+            {item.reason && <p className="mt-1 text-xs leading-snug text-muted">{item.reason}.</p>}
+            {item.warning && (
+              <p className="mt-1 flex items-start gap-1.5 text-xs font-medium text-amber-400">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
+                <span>Ojo: {item.warning}.</span>
+              </p>
+            )}
             {item.again && (
               <p className="mt-1 flex items-start gap-1.5 text-xs text-accent">
                 <TrendingDown size={14} className="mt-0.5 shrink-0" aria-hidden />

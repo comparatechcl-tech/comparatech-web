@@ -1,16 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-// La lectura del historial va a Supabase: acá solo se prueba lo puro.
-vi.mock('@/lib/queries/price-history', () => ({ getPriceStatsMany: vi.fn(async () => new Map()) }));
 // lib/settings usa cache() de React, que solo existe dentro de Next.
 vi.mock('@/lib/settings', () => ({ readAffiliateSettings: vi.fn() }));
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DISCLOSURE } from '@/lib/content/captions';
-import { getPriceStatsMany } from '@/lib/queries/price-history';
-import { readConfirmedDrops } from '@/lib/social/drops';
 import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
-import { pickByRules, pickForTelegram, TELEGRAM_RULES, type SocialProduct } from '@/lib/social/telegram';
+import type { InterestEvidence } from '@/lib/social/interest';
+import { pickByRules, TELEGRAM_RULES, type PickRules, type SocialProduct } from '@/lib/social/telegram';
 import {
   NETWORK_RULES,
   RECORDS_MAX,
@@ -57,54 +54,73 @@ function product(over: Partial<SocialProduct> = {}): SocialProduct {
   };
 }
 
-describe('pickByRules', () => {
-  const opts = { now: NOW, recentlyPosted: new Set<string>() };
-  const six = { ...NETWORK_RULES, maxPosts: 6 };
-
-  it('Telegram sigue eligiendo con sus reglas: 15% o más, sin lo oculto', () => {
-    const ok = product();
-    const gaming = product({ category: 'gaming', original_price: 95_000 }); // 16%
-    const low = product({ original_price: 81_000 }); // 1%
-    const hidden = product({ is_hidden: true });
-    const picks = pickForTelegram([ok, gaming, low, hidden], opts);
-    expect(picks.map((p) => p.product.id).sort()).toEqual([ok.id, gaming.id].sort());
-    expect(pickByRules([ok, gaming, low, hidden], opts, TELEGRAM_RULES)).toEqual(picks);
+/**
+ * Una oferta que cualquier canal publicaría: audífonos de marca conocida, de
+ * tienda oficial y con 40% de lista. Queda muy por encima del piso de interés.
+ */
+function strong(over: Partial<SocialProduct> = {}): SocialProduct {
+  return product({
+    name: 'Audífonos Bluetooth JBL Tune 520BT Negro',
+    brand: 'JBL',
+    price: 60_000,
+    original_price: 100_000,
+    seller_sales_count: 50_000,
+    ml_root_category: 'MLC1000',
+    offer_info: { free_shipping: true, is_full: false, official_store: true, sold_by_ml: false, is_lowest: true } as SocialProduct['offer_info'],
+    ...over,
   });
+}
+
+/** Un producto pedido por su id: sin piso de interés ni avisos, para probar solo cómo se arma el plan. */
+const HAND_PICKED: PickRules = { ...NETWORK_RULES, anyScore: true };
+
+// La selección misma (puerta de entrada, piso, variedad, orden) se prueba en pick.test.ts.
+describe('NETWORK_RULES', () => {
+  const opts = { now: NOW, recentlyPosted: new Set<string>() };
+  const ids = (picks: { product: SocialProduct }[]) => picks.map((pick) => pick.product.id);
 
   it('las redes piden el descuento que el sitio llama oferta (20%), no el de Telegram', () => {
-    const at15 = product({ price: 85_000, original_price: 100_000 });
-    const at20 = product({ price: 80_000, original_price: 100_000 });
-    expect(pickForTelegram([at15], opts)).toHaveLength(1);
-    expect(pickByRules([at15, at20], opts, six).map((p) => p.product.id)).toEqual([at20.id]);
+    const at17 = strong({ price: 83_000 });
+    const at40 = strong({ category: 'gaming' });
+    // Sin el piso de interés ni el filtro de avisos, para mirar solo la puerta de entrada.
+    const gate = (rules: PickRules): PickRules => ({ ...rules, maxPosts: 6, anyScore: true });
+    expect(ids(pickByRules([at17, at40], opts, gate(TELEGRAM_RULES))).sort()).toEqual([at17.id, at40.id].sort());
+    expect(ids(pickByRules([at17, at40], opts, gate(NETWORK_RULES)))).toEqual([at40.id]);
   });
 
   it('por defecto propone pocos: Metricool gratis da 20 publicaciones al mes y cada red cuenta', () => {
-    const rows = [product(), product({ category: 'gaming' }), product({ category: 'hogar' })];
+    const rows = [strong(), strong({ category: 'gaming' }), strong({ category: 'hogar' })];
+    expect(NETWORK_RULES.maxPosts).toBe(2);
     expect(pickByRules(rows, opts, NETWORK_RULES)).toHaveLength(2);
   });
 
-  it('respeta la cantidad pedida, el máximo por categoría y lo ya publicado', () => {
-    const rows = [product(), product(), product(), product({ category: 'gaming' }), product({ category: 'hogar' })];
-    const picks = pickByRules(rows, opts, { ...NETWORK_RULES, maxPosts: 3 });
-    expect(picks).toHaveLength(3);
-    expect(picks.filter((p) => p.product.category === 'audio')).toHaveLength(2);
-
-    const posted = new Set([rows[0].id, rows[1].id]);
-    const rest = pickByRules(rows, { now: NOW, recentlyPosted: posted }, six);
-    expect(rest).toHaveLength(3);
-    expect(rest.some((p) => posted.has(p.product.id))).toBe(false);
-  });
-
   it('un precio revisado hace más de 6 horas no se publica', () => {
-    const stale = product({ price_checked_at: new Date(NOW.getTime() - 7 * 3600_000).toISOString() });
-    expect(pickByRules([stale], opts, six)).toHaveLength(0);
+    const stale = strong({ price_checked_at: new Date(NOW.getTime() - 7 * 3600_000).toISOString() });
+    expect(pickByRules([stale], opts, NETWORK_RULES)).toHaveLength(0);
+    expect(pickByRules([strong()], opts, NETWORK_RULES)).toHaveLength(1);
   });
 
-  it('una baja comprobada entra aunque no llegue al descuento', () => {
-    const p = product({ original_price: null });
-    expect(pickByRules([p], opts, six)).toHaveLength(0);
-    const picks = pickByRules([p], { ...opts, drops: new Map([[p.id, 8]]) }, six);
-    expect(picks[0]).toMatchObject({ drop: 8, discount: 0 });
+  it('lo programado sale solo y no se puede corregir: lo que trae un aviso no se propone', () => {
+    // Una consola con una baja de verdad, pero de un vendedor casi sin ventas.
+    const doubtful = strong({
+      name: 'Consola PlayStation 5 Slim Digital 1TB Blanco',
+      brand: 'Sony',
+      category: 'gaming',
+      price: 449_990,
+      original_price: null,
+      seller_sales_count: 4,
+      offer_info: { free_shipping: true, is_full: true, official_store: false, is_lowest: true } as SocialProduct['offer_info'],
+    });
+    const fine = strong();
+    const evidence = new Map<string, InterestEvidence>([
+      [doubtful.id, { drop: { pct: 25, amount: 150_000 }, min30: 449_990, daysTracked: 12 }],
+    ]);
+
+    expect(NETWORK_RULES.cleanOnly).toBe(true);
+    expect(ids(pickByRules([doubtful, fine], { ...opts, evidence }, NETWORK_RULES))).toEqual([fine.id]);
+    // No es que le falten puntos: donde alguien mira antes de publicar, sale, con su aviso.
+    const seen = pickByRules([doubtful, fine], { ...opts, evidence }, { ...NETWORK_RULES, cleanOnly: false });
+    expect(seen.find((pick) => pick.product.id === doubtful.id)?.score.warning).toEqual(expect.any(String));
   });
 });
 
@@ -112,8 +128,36 @@ describe('buildPlanItem', () => {
   const settings = { word: 'comparatech', tool: '15629069', directLinks: true };
   const build = { now: NOW, siteUrl: 'https://sitio.test/', settings, key: KEY };
   const p = product();
-  const [pick] = pickByRules([p], { now: NOW, recentlyPosted: new Set() }, NETWORK_RULES);
+  const [pick] = pickByRules([p], { now: NOW, recentlyPosted: new Set() }, HAND_PICKED);
   const item = buildPlanItem(pick, build)!;
+
+  it('dice cuánto interesa, por qué y qué conviene mirar antes de programarlo', () => {
+    expect(item.puntos).toBe(pick.score.points);
+    expect(item.motivo).toBe(pick.score.reason);
+    expect(item.motivo.length).toBeGreaterThan(10);
+    expect(item.aviso).toBe(pick.score.warning);
+
+    const score = { ...pick.score, points: 61.5, reason: 'Audífonos JBL, 30% por debajo del precio de lista' };
+    const warned = buildPlanItem({ ...pick, score: { ...score, warning: 'otro vendedor lo ofrece a menos' } }, build)!;
+    expect(warned).toMatchObject({
+      puntos: 61.5,
+      motivo: 'Audífonos JBL, 30% por debajo del precio de lista',
+      aviso: 'otro vendedor lo ofrece a menos',
+    });
+    expect(buildPlanItem({ ...pick, score: { ...score, warning: null } }, build)!.aviso).toBeNull();
+    // Lo que ya traía el plan sigue ahí.
+    expect(warned).toMatchObject({ descuento: 20, baja_historial: null, comision_estimada: pick.commission });
+  });
+
+  it('una oferta limpia llega al plan sin aviso, y el motivo no usa las palabras que el sitio evita', () => {
+    const [strongPick] = pickByRules([strong()], { now: NOW, recentlyPosted: new Set() }, NETWORK_RULES);
+    const built = buildPlanItem(strongPick, build)!;
+    expect(built.aviso).toBeNull();
+    expect(built.puntos).toBeGreaterThan(0);
+    expect(`${built.motivo} | ${item.motivo} | ${item.aviso ?? ''}`).not.toMatch(
+      /recomendad|verificad|publicidad|mejor precio|m[aá]s barato|imperdible|ofert[oó]n|solo hoy|[uú]ltimas unidades|antes \$|rebajad|precio normal|ahorra/i
+    );
+  });
 
   it('la imagen es una dirección firmada del sitio, con el precio del texto', () => {
     expect(item.pieza.startsWith(`https://sitio.test/social/pieza/${p.id}/feed-80000-100000-`)).toBe(true);
@@ -164,7 +208,7 @@ describe('buildPlanItem', () => {
 
   it('el título de TikTok cabe en 90 caracteres aunque el nombre sea largo, y no lleva etiqueta', () => {
     const long = product({ name: 'Televisor '.repeat(30) });
-    const [longPick] = pickByRules([long], { now: NOW, recentlyPosted: new Set() }, NETWORK_RULES);
+    const [longPick] = pickByRules([long], { now: NOW, recentlyPosted: new Set() }, HAND_PICKED);
     const title = (buildPlanItem(longPick, build)!.metricool.tiktok.tiktokData as { title: string }).title;
     expect(title.length).toBeLessThanOrEqual(90);
     expect(title).not.toMatch(/publicidad/i);
@@ -218,11 +262,12 @@ describe('buildPlanItem', () => {
 
   it('sin precio de lista mayor, no informa un precio de lista', () => {
     const flat = product({ original_price: null });
-    const [flatPick] = pickByRules(
-      [flat],
-      { now: NOW, recentlyPosted: new Set(), drops: new Map([[flat.id, 10]]) },
-      NETWORK_RULES
-    );
+    // Entra solo por la baja que vio el sitio.
+    const evidence = new Map<string, InterestEvidence>([
+      [flat.id, { drop: { pct: 10.2, amount: 9_000 }, min30: 80_000, daysTracked: 12 }],
+    ]);
+    expect(pickByRules([flat], { now: NOW, recentlyPosted: new Set() }, HAND_PICKED)).toHaveLength(0);
+    const [flatPick] = pickByRules([flat], { now: NOW, recentlyPosted: new Set(), evidence }, HAND_PICKED);
     const built = buildPlanItem(flatPick, build)!;
     expect(built.precio_lista).toBeNull();
     expect(built.pieza).toContain('/feed-80000-0-');
@@ -616,37 +661,5 @@ describe('pendingIssue', () => {
     expect(pendingIssue({ posted_price: 100_000 }, { ...live, is_active: false })).toMatch(/ya no está a la venta/);
     expect(pendingIssue({ posted_price: 100_000 }, { ...live, is_hidden: true })).toMatch(/ya no está a la venta/);
     expect(pendingIssue({ posted_price: 100_000 }, null)).toMatch(/ya no está a la venta/);
-  });
-});
-
-describe('readConfirmedDrops', () => {
-  it('solo consulta el historial de los que no llegan al descuento, y devuelve la baja en %', async () => {
-    const deal = product({ price: 70_000, original_price: 100_000 });
-    const flat = product({ price: 90_000, original_price: null });
-    const lastChangeAt = new Date(NOW.getTime() - 2 * 86_400_000).toISOString();
-    vi.mocked(getPriceStatsMany).mockResolvedValueOnce(
-      new Map([
-        [
-          flat.id,
-          {
-            min30: 90_000,
-            median30: 95_000,
-            max30: 100_000,
-            minTracked: 90_000,
-            maxTracked: 100_000,
-            daysTracked: 20,
-            lastPrice: 90_000,
-            previousPrice: 100_000,
-            lastChangeAt,
-            lastPriceSeenRecently: false,
-          },
-        ],
-      ])
-    );
-
-    const drops = await readConfirmedDrops([deal, flat], NOW, NETWORK_RULES.minDiscount);
-    expect(vi.mocked(getPriceStatsMany)).toHaveBeenLastCalledWith([flat.id]);
-    expect(drops.get(flat.id)).toBeCloseTo(10);
-    expect(drops.has(deal.id)).toBe(false);
   });
 });

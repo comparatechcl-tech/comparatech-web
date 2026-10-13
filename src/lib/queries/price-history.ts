@@ -136,6 +136,7 @@ async function readHistoryChunk(ids: string[], since: string): Promise<Map<strin
     }
     if (rows.length < BULK_PAGE) return byId;
   }
+  console.warn(`[price-history] una tanda de ${ids.length} productos pasó de ${BULK_MAX_PAGES * BULK_PAGE} registros: no se afirma nada de ella`);
   return null;
 }
 
@@ -152,9 +153,26 @@ async function readHistoryChunk(ids: string[], since: string): Promise<Map<strin
  * Nunca lanza: sin historial, las páginas se muestran sin la marca "Bajó".
  */
 export async function getPriceStatsMany(productIds: string[]): Promise<Map<string, PriceStats>> {
+  return (await getPriceStatsManyChecked(productIds)).stats;
+}
+
+export interface CheckedPriceStats {
+  stats: Map<string, PriceStats>;
+  /**
+   * Los productos cuyo historial NO se pudo leer (la consulta falló o la
+   * tanda era demasiado larga). No es lo mismo que no tener historial: de
+   * estos no se sabe si estuvieron más baratos, así que quien decide qué
+   * destacar o publicar solo no puede tratarlos como "precio quieto".
+   */
+  unread: Set<string>;
+}
+
+/** Lo mismo que getPriceStatsMany, diciendo además de cuáles no se pudo leer el historial. */
+export async function getPriceStatsManyChecked(productIds: string[]): Promise<CheckedPriceStats> {
   const byId = new Map<string, PriceStats>();
+  const unread = new Set<string>();
   const unique = [...new Set(productIds)];
-  if (unique.length === 0) return byId;
+  if (unique.length === 0) return { stats: byId, unread };
 
   const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString();
   const chunks: string[][] = [];
@@ -163,7 +181,10 @@ export async function getPriceStatsMany(productIds: string[]): Promise<Map<strin
   try {
     await mapWithConcurrency(chunks, 4, async (chunk) => {
       const histories = await readHistoryChunk(chunk, since);
-      if (!histories) return;
+      if (!histories) {
+        for (const id of chunk) unread.add(id);
+        return;
+      }
       for (const [id, history] of histories) {
         const stats = priceStats(history);
         if (stats) byId.set(id, stats);
@@ -171,6 +192,8 @@ export async function getPriceStatsMany(productIds: string[]): Promise<Map<strin
     });
   } catch (err) {
     console.warn('[price-history] no se pudo leer el historial:', err);
+    // Sin saber qué tandas alcanzaron a leerse, lo prudente es no dar ninguna por leída.
+    for (const id of unique) if (!byId.has(id)) unread.add(id);
   }
-  return byId;
+  return { stats: byId, unread };
 }

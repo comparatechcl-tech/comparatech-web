@@ -5,7 +5,8 @@ import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { shortProductName } from '@/lib/text';
-import { readConfirmedDrops } from '@/lib/social/drops';
+import { readInterestEvidence } from '@/lib/social/drops';
+import type { InterestScore } from '@/lib/social/interest';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
 import {
@@ -37,6 +38,8 @@ export const STORY_RULES: PickRules & { repeatAfterDays: number } = {
   ...NETWORK_RULES,
   /** Se suben a mano y no gastan la cuota de Metricool: caben más que en el plan de publicaciones. */
   maxPosts: 8,
+  /** El dueño ve el aviso en la tarjeta antes de subirla: decide él. */
+  cleanOnly: false,
 };
 
 /**
@@ -115,6 +118,12 @@ export interface StoryItem {
   checkedAt: string | null;
   /** Si ya se subió en estos días y vuelve porque bajó: a cuánto se subió y cuándo. */
   again: { price: number; at: string } | null;
+  /** Por qué se propone, en una frase (lib/social/interest). Vacío en las ya publicadas. */
+  reason: string;
+  /** Lo que conviene mirar antes de subirla, o null. */
+  warning: string | null;
+  /** Puntaje de interés: las ofertas vienen ordenadas por él. 0 en las ya publicadas. */
+  points: number;
   /** Ruta firmada de la pieza 9:16, sin dominio: sirve en producción y en local. */
   image: string;
   /** El mismo destino que el botón de compra del sitio. */
@@ -122,9 +131,14 @@ export interface StoryItem {
   fileName: string;
 }
 
+/** Lo que buildStoryItem necesita de la selección. Una historia ya publicada no lleva puntaje. */
+export type StoryPick = Pick<TelegramPick<SocialProduct>, 'product' | 'discount' | 'drop'> & {
+  score: InterestScore | null;
+};
+
 /** Lo que hace falta para subir la historia de un producto. null si no se pudo firmar la imagen. Puro. */
 export function buildStoryItem(
-  pick: TelegramPick<SocialProduct>,
+  pick: StoryPick,
   opts: { now: Date; settings: AffiliateSettings; key: Buffer; history?: StoryHistory }
 ): StoryItem | null {
   const p = pick.product;
@@ -144,6 +158,9 @@ export function buildStoryItem(
     drop: pick.drop === null ? null : Math.round(pick.drop),
     checkedAt: p.price_checked_at,
     again: h && h.lowest !== null ? { price: h.lowest, at: h.lastAt } : null,
+    reason: pick.score?.reason ?? '',
+    warning: pick.score?.warning ?? null,
+    points: pick.score?.points ?? 0,
     image,
     link: resolveOutboundUrl(p, opts.settings),
     fileName: `comparatech-${safeSlug}-historia.jpg`,
@@ -151,11 +168,12 @@ export function buildStoryItem(
 }
 
 /**
- * Las ofertas de este momento para subir como historia: las reglas del plan
- * de publicaciones (descuento sobre el precio de lista o baja confirmada,
- * precio recién revisado, dos por categoría), con más productos. Lo que ya
- * se subió como historia en los últimos 14 días no vuelve, salvo que haya
- * bajado de precio: esas van primero. Solo lee.
+ * Las ofertas de este momento para subir como historia: la puerta de entrada
+ * del plan de publicaciones (descuento sobre el precio de lista o baja
+ * confirmada, precio recién revisado), con más productos y en orden de
+ * interés (lib/social/interest). Lo que ya se subió como historia en los
+ * últimos 14 días no vuelve, salvo que haya bajado de precio: esas van
+ * primero. Solo lee.
  */
 export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buffer): Promise<StoryItem[]> {
   const freshSince = new Date(now.getTime() - STORY_RULES.maxPriceAgeMs).toISOString();
@@ -163,21 +181,19 @@ export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buff
   if (read.error) throw new Error(`No se pudo leer el catálogo: ${read.error}`);
 
   const since = new Date(now.getTime() - STORY_RULES.repeatAfterDays * 86_400_000);
-  const [history, drops, settings] = await Promise.all([
-    readStoryHistory(admin, since),
-    readConfirmedDrops(read.rows, now, STORY_RULES.minDiscount),
-    readAffiliateSettings(admin),
-  ]);
+  const [history, settings] = await Promise.all([readStoryHistory(admin, since), readAffiliateSettings(admin)]);
 
   const alreadyPosted = new Set<string>();
   for (const p of read.rows) {
     if (history.has(p.id) && !droppedSinceStory(history.get(p.id), p.price)) alreadyPosted.add(p.id);
   }
+  // Después de saber qué se subió: el historial de precios de eso no hace falta leerlo.
+  const evidence = await readInterestEvidence(read.rows, now, alreadyPosted);
 
-  const items = pickByRules(read.rows, { now, recentlyPosted: alreadyPosted, drops }, STORY_RULES)
+  const items = pickByRules(read.rows, { now, recentlyPosted: alreadyPosted, evidence }, STORY_RULES)
     .map((pick) => buildStoryItem(pick, { now, settings, key, history: history.get(pick.product.id) }))
     .filter((item): item is StoryItem => item !== null);
-  // sort es estable: dentro de cada grupo se conserva el orden de la selección.
+  // sort es estable: dentro de cada grupo se conserva el orden de la selección, que es el de interés.
   return items.sort((a, b) => Number(b.again !== null) - Number(a.again !== null));
 }
 
@@ -239,10 +255,7 @@ export async function readPostedStories(admin: SupabaseClient, now: Date, key: B
   for (const [productId, row] of latest) {
     const product = onSale.get(productId);
     if (!product) continue;
-    const item = buildStoryItem(
-      { product, discount: captionDiscount(product), drop: null, commission: 0, reason: '' },
-      { now, settings, key }
-    );
+    const item = buildStoryItem({ product, discount: captionDiscount(product), drop: null, score: null }, { now, settings, key });
     if (!item) continue;
     stories.push({ ...item, postId: row.id, postedAt: row.posted_at, postedPrice: row.posted_price });
   }

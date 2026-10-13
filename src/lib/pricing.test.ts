@@ -272,6 +272,9 @@ describe('offerInfoFrom', () => {
   });
 });
 
+/** Respuesta de una consulta que se queda colgada. */
+const HANG = Symbol('sin respuesta');
+
 /**
  * Cliente falso de Supabase: registra cada update e insert y responde lo
  * que diga `respond`.
@@ -280,6 +283,10 @@ function fakeAdmin(respond: {
   update?: (patch: Record<string, unknown>) => { code: string; message: string } | null;
   bulk?: () => { code: string; message: string } | null;
   insert?: () => { code: string; message: string } | null;
+  /** Cuántas filas de historial tiene el producto (por defecto, alguna). Un error: la consulta falla. */
+  historyRows?: (productId: string) => number | { code: string; message: string };
+  /** Cuándo se agregó cada producto al sitio. Un error: la consulta falla. HANG: nunca responde. */
+  createdAt?: (ids: string[]) => Record<string, string> | { code: string; message: string } | typeof HANG;
 }) {
   const updates: Record<string, unknown>[] = [];
   const bulk: { patch: Record<string, unknown>; ids: string[] }[] = [];
@@ -302,6 +309,26 @@ function fakeAdmin(respond: {
         insert: async (rows: unknown[]) => {
           inserts.push({ table, rows });
           return { error: respond.insert?.() ?? null };
+        },
+        select() {
+          return {
+            // price_history: ¿tiene alguna fila este producto?
+            eq: (_column: string, productId: string) => ({
+              limit: async () => {
+                const rows = respond.historyRows ? respond.historyRows(productId) : 1;
+                if (typeof rows !== 'number') return { data: null, error: rows };
+                return { data: Array.from({ length: Math.min(rows, 1) }, (_, i) => ({ id: i + 1 })), error: null };
+              },
+            }),
+            // products: desde cuándo están en el sitio.
+            in: async (_column: string, ids: string[]) => {
+              const answer = respond.createdAt ? respond.createdAt(ids) : {};
+              if (answer === HANG) return new Promise<never>(() => {});
+              if ('code' in answer && 'message' in answer) return { data: null, error: answer };
+              const dates = answer as Record<string, string>;
+              return { data: ids.filter((id) => dates[id]).map((id) => ({ id, created_at: dates[id] })), error: null };
+            },
+          };
         },
       };
     },
@@ -389,6 +416,154 @@ describe('applyPricing', () => {
       Array.from({ length: 120 }, (_, i) => touchedOutcome(`t${i}`))
     );
     expect(failed).toBe(120);
+  });
+
+  describe('la fila de partida', () => {
+    const DAYS_AGO = new Date(Date.now() - 3 * 86_400_000).toISOString();
+
+    it('el primer cambio de un producto sin historial guarda también el precio que tenía, con la fecha en que se agregó', async () => {
+      const { admin, inserts } = fakeAdmin({ historyRows: () => 0, createdAt: () => ({ p1: DAYS_AGO }) });
+
+      await applyPricing(admin, [changedOutcome('p1')]);
+
+      // Dos escrituras: primero el cambio, después la partida. Una partida mal armada no puede llevarse el cambio.
+      expect(inserts.map((insert) => insert.table)).toEqual(['price_history', 'price_history']);
+      expect(inserts[0].rows).toEqual([expect.objectContaining({ product_id: 'p1', price: 45_000, observed_at: NOW })]);
+      // Lo que tenía desde que se agregó: sin esto no se sabría si subió o bajó.
+      expect(inserts[1].rows).toEqual([
+        { product_id: 'p1', ml_product_id: 'MLC100', price: 50_000, original_price: 60_000, seller_id: 7, winner_item_id: 'MLC900', observed_at: DAYS_AGO },
+      ]);
+    });
+
+    it('si el producto nunca tuvo un ganador revisado, su precio de alta no es una partida', async () => {
+      // Recién aprobado trae el precio del candidato; nadie lo comparó todavía con Mercado Libre.
+      const unverified = decide(
+        product({ id: 'p1', winner_item_id: null }),
+        ok([offer({ price: 45_000 })]),
+        sellers(GREEN),
+        NOW,
+        true
+      );
+      expect(unverified.observation).toMatchObject({ price: 45_000 });
+      expect(unverified.previous).toBeUndefined();
+      const { admin, inserts } = fakeAdmin({ historyRows: () => 0, createdAt: () => ({ p1: DAYS_AGO }) });
+      await applyPricing(admin, [unverified]);
+      expect(inserts).toHaveLength(1);
+      expect(inserts[0].rows).toHaveLength(1);
+      // Tampoco con precio 0.
+      expect(decide(product({ price: 0 }), ok([offer({ price: 45_000 })]), sellers(GREEN), NOW, true).previous).toBeUndefined();
+    });
+
+    it('si la consulta por las partidas falla de golpe o no responde, el cambio se anota igual', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const rejecting = fakeAdmin({
+        historyRows: () => {
+          throw new Error('fetch failed');
+        },
+      });
+      await applyPricing(rejecting.admin, [changedOutcome('p1')]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+      expect(rejecting.inserts).toHaveLength(1);
+      expect(rejecting.inserts[0].rows).toEqual([expect.objectContaining({ product_id: 'p1', price: 45_000 })]);
+
+      // Una consulta que nunca responde: pasado el tope, la corrida sigue sin partidas.
+      vi.useFakeTimers();
+      try {
+        const hanging = fakeAdmin({ historyRows: () => 0, createdAt: () => HANG });
+        const run = applyPricing(hanging.admin, [changedOutcome('p1')]);
+        await vi.advanceTimersByTimeAsync(3_500);
+        await expect(run).resolves.toBe(0);
+        expect(hanging.inserts).toHaveLength(1);
+        expect(hanging.inserts[0].rows).toEqual([expect.objectContaining({ product_id: 'p1', price: 45_000 })]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('si ya tiene historial, solo se anota el cambio', async () => {
+      const { admin, inserts } = fakeAdmin({ historyRows: () => 12, createdAt: () => ({ p1: DAYS_AGO }) });
+      await applyPricing(admin, [changedOutcome('p1')]);
+      expect(inserts[0].rows).toHaveLength(1);
+      expect(inserts[0].rows[0]).toMatchObject({ product_id: 'p1', price: 45_000 });
+    });
+
+    it('cada producto por separado: partida solo para el que no tenía registros', async () => {
+      const { admin, inserts } = fakeAdmin({
+        historyRows: (id) => (id === 'p2' ? 0 : 3),
+        createdAt: () => ({ p1: DAYS_AGO, p2: DAYS_AGO }),
+      });
+      await applyPricing(admin, [changedOutcome('p1'), changedOutcome('p2')], 1);
+      const pairs = (rows: unknown[]) => (rows as { product_id: string; price: number }[]).map((row) => [row.product_id, row.price]);
+      expect(pairs(inserts[0].rows)).toEqual([
+        ['p1', 45_000],
+        ['p2', 45_000],
+      ]);
+      expect(pairs(inserts[1].rows)).toEqual([['p2', 50_000]]);
+    });
+
+    it('justo en el borde: a los 9 minutos de agregado no hay partida; a los 11, sí', async () => {
+      const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+      const early = fakeAdmin({ historyRows: () => 0, createdAt: () => ({ p1: minutesAgo(9) }) });
+      await applyPricing(early.admin, [changedOutcome('p1')]);
+      expect(early.inserts).toHaveLength(1);
+      const later = fakeAdmin({ historyRows: () => 0, createdAt: () => ({ p1: minutesAgo(11) }) });
+      await applyPricing(later.admin, [changedOutcome('p1')]);
+      expect(later.inserts).toHaveLength(2);
+    });
+
+    it('un producto agregado hace minutos no lleva partida: su precio de alta viene del candidato', async () => {
+      const justNow = new Date(Date.now() - 2 * 60_000).toISOString();
+      const { admin, inserts } = fakeAdmin({ historyRows: () => 0, createdAt: () => ({ p1: justNow }) });
+      await applyPricing(admin, [changedOutcome('p1')]);
+      expect(inserts[0].rows).toHaveLength(1);
+    });
+
+    it('ante cualquier duda no se inventa una partida, y el cambio se anota igual', async () => {
+      const failing = { code: '57014', message: 'canceling statement due to statement timeout' };
+      // No se pudo saber si tenía historial.
+      const noHistory = fakeAdmin({ historyRows: () => failing, createdAt: () => ({ p1: DAYS_AGO }) });
+      await applyPricing(noHistory.admin, [changedOutcome('p1')]);
+      expect(noHistory.inserts[0].rows).toHaveLength(1);
+      // No se pudo saber desde cuándo está en el sitio.
+      const noDate = fakeAdmin({ historyRows: () => 0, createdAt: () => failing });
+      await applyPricing(noDate.admin, [changedOutcome('p1')]);
+      expect(noDate.inserts[0].rows).toHaveLength(1);
+      // El producto no trae fecha.
+      const missing = fakeAdmin({ historyRows: () => 0, createdAt: () => ({}) });
+      await applyPricing(missing.admin, [changedOutcome('p1')]);
+      expect(missing.inserts[0].rows).toHaveLength(1);
+    });
+
+    it('si lo primero que cambia es solo el precio de lista, la partida se guarda igual', async () => {
+      // El precio que regía es igual de cierto, y sin la partida ese registro parecería un cambio desde no se sabe cuánto.
+      const onlyList = decide(product({ id: 'p1' }), ok([offer({ original_price: 70_000 })]), sellers(GREEN), NOW, true);
+      expect(onlyList.observation).toMatchObject({ price: 50_000, original_price: 70_000 });
+      expect(onlyList.previous).toMatchObject({ price: 50_000, original_price: 60_000 });
+      const { admin, inserts } = fakeAdmin({ historyRows: () => 0, createdAt: () => ({ p1: DAYS_AGO }) });
+      await applyPricing(admin, [onlyList]);
+      expect(inserts[1].rows).toEqual([expect.objectContaining({ price: 50_000, original_price: 60_000, observed_at: DAYS_AGO })]);
+    });
+
+    it('sin cambio de precio ni de lista no hay nada que anotar ni partida que buscar', () => {
+      const same = decide(product({ id: 'p1' }), ok([offer()]), sellers(GREEN), NOW, true);
+      expect(same.observation).toBeUndefined();
+      expect(same.previous).toBeUndefined();
+    });
+
+    it('no se pregunta por la partida de lo que no se pudo escribir en products', async () => {
+      let asked = 0;
+      const { admin, inserts } = fakeAdmin({
+        update: () => ({ code: '500', message: 'caído' }),
+        historyRows: () => {
+          asked++;
+          return 0;
+        },
+      });
+      await applyPricing(admin, [changedOutcome('p1')]);
+      expect(inserts).toHaveLength(0);
+      expect(asked).toBe(0);
+    });
   });
 
   it('no agrega al historial lo que no se pudo escribir en products', async () => {

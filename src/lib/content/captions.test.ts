@@ -172,8 +172,9 @@ vi.mock('@/lib/settings', () => ({
   readAffiliateSettings: async () => ({ word: null, tool: null, directLinks: false }),
 }));
 
-// La selección y el pie de foto de Telegram se arman con buildCaption: se
-// prueban acá para no sumar otro archivo de tests.
+// El pie de foto de Telegram se arma con buildCaption: se prueba acá para no
+// sumar otro archivo de tests. La selección (pickForTelegram) se prueba en
+// lib/social/pick.test.ts.
 describe('Telegram', async () => {
   const { pickForTelegram, telegramCaption, syncTelegramPosts, TELEGRAM_CAPTION_MAX } = await import(
     '@/lib/social/telegram'
@@ -194,39 +195,6 @@ describe('Telegram', async () => {
     deleted_at: null,
     price_checked_at: fresh,
     ...over,
-  });
-
-  it('elige con descuento real y precio fresco, máximo 2 por categoría y 5 en total', () => {
-    const rows = [
-      ...Array.from({ length: 4 }, (_, i) => row({ id: `a${i}`, category: 'audio', price: 10000 + i })),
-      ...Array.from({ length: 3 }, (_, i) => row({ id: `c${i}`, category: 'computacion', price: 50000 + i })),
-      row({ id: 'g1', category: 'gaming', price: 90000, original_price: 120000 }),
-      row({ id: 'viejo', category: 'hogar', price_checked_at: '2026-10-04T08:00:00Z' }),
-      row({ id: 'sin-dcto', category: 'hogar', original_price: null }),
-      row({ id: 'oculto', category: 'hogar', is_hidden: true }),
-      row({ id: 'repetido', category: 'electronica' }),
-    ];
-    const picks = pickForTelegram(rows, { now, recentlyPosted: new Set(['repetido']) });
-    const ids = picks.map((p) => p.product.id);
-    expect(ids).toHaveLength(5);
-    expect(ids.filter((id) => id.startsWith('a'))).toHaveLength(2);
-    expect(ids.filter((id) => id.startsWith('c'))).toHaveLength(2);
-    expect(ids).toContain('g1');
-    for (const excluded of ['viejo', 'sin-dcto', 'oculto', 'repetido']) expect(ids).not.toContain(excluded);
-    // Primero lo que más comisión deja (a igual tasa, el más caro).
-    expect(ids[0]).toBe('g1');
-  });
-
-  it('acepta una baja confirmada por el historial aunque no haya descuento de lista', () => {
-    const rows = [row({ id: 'baja', original_price: null })];
-    expect(pickForTelegram(rows, { now, recentlyPosted: new Set() })).toHaveLength(0);
-    const picks = pickForTelegram(rows, { now, recentlyPosted: new Set(), drops: new Map([['baja', 12]]) });
-    expect(picks.map((p) => p.product.id)).toEqual(['baja']);
-  });
-
-  it('no publica dos colores del mismo modelo', () => {
-    const rows = [row({ id: 'negro', ml_family_id: 'F1' }), row({ id: 'blanco', ml_family_id: 'F1' })];
-    expect(pickForTelegram(rows, { now, recentlyPosted: new Set() })).toHaveLength(1);
   });
 
   it('el pie de foto escapa HTML, cabe en 1024 y conserva el aviso', () => {

@@ -104,7 +104,11 @@ export function formatTimeAgo(iso: string | null | undefined, now: number = Date
   const rtf = new Intl.RelativeTimeFormat('es-CL', { numeric: 'auto' });
   const abs = Math.abs(seconds);
 
-  if (abs < 60) return 'recién';
+  // Una revisión "del futuro" por pocos minutos es un reloj atrasado (el del
+  // visitante o el del servidor). Por más que eso, la fecha está mala: mejor
+  // no decir nada que decir "recién" de un precio que no se sabe cuándo se revisó.
+  if (seconds > 5 * 60) return null;
+  if (abs < 60 || seconds > 0) return 'recién';
   if (abs < 3600) return rtf.format(Math.round(seconds / 60), 'minute');
   if (abs < 86400) return rtf.format(Math.round(seconds / 3600), 'hour');
   return rtf.format(Math.round(seconds / 86400), 'day');

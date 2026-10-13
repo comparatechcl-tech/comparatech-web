@@ -77,13 +77,24 @@ describe('confirmedDrop', () => {
   });
 });
 
+describe('confirmedDrop y el precio de lista', () => {
+  it('la baja no se mide contra algo más alto que el precio de lista de hoy', () => {
+    // Otro vendedor lo tuvo a 209.510; hoy vuelve a 109.990 con lista 119.990: la tarjeta dice -8%, no "bajó 48%".
+    const stats = dropped(209_510, 109_990);
+    expect(confirmedDrop(product('lg', 109_990, 119_990), stats, NOW)).toMatchObject({ amount: 10_000 });
+    expect(confirmedDrop(product('lg', 109_990), stats, NOW)).toMatchObject({ amount: 99_520 });
+    // Si contra la lista no llega al mínimo para destacarse, no hay baja.
+    expect(confirmedDrop(product('lg', 109_990, 111_990), stats, NOW)).toBeNull();
+  });
+});
+
 describe('rankDeals', () => {
   // Como llegan de getDeals: de mayor a menor descuento de lista.
   const deals = [
     product('lista-60', 40_000, 100_000),
     product('lista-50', 50_000, 100_000),
     product('bajo-10', 90_000, 120_000),
-    product('bajo-30', 70_000, 95_000),
+    product('bajo-30', 70_000, 105_000),
     product('lista-20', 80_000, 100_000),
   ];
   const stats = new Map<string, PriceStats>([

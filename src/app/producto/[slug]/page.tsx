@@ -275,7 +275,7 @@ export default async function ProductoPage({
             <PriceFreshness checkedAt={product.price_checked_at} />
           </div>
           <TrustChips product={product} />
-          <PriceHistoryNote productId={product.id} price={product.price} />
+          <PriceHistoryNote productId={product.id} price={product.price} listPrice={product.original_price} createdAt={product.created_at} />
           <div id={PRIMARY_CTA_ID} className="mt-6">
             <AffiliateButton
               href={href}

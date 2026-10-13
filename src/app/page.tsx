@@ -2,9 +2,10 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Search, Check, Tags, ChartNoAxesColumn, Link2, Flame, Sparkles } from 'lucide-react';
-import { getCatalogProducts, getDeals } from '@/lib/queries/products';
-import { getPriceStatsMany } from '@/lib/queries/price-history';
-import { dropsById, rankDeals } from '@/lib/deal-rank';
+import { getCatalogProducts } from '@/lib/queries/products';
+import { getDealsWithStats } from '@/lib/queries/deals';
+import { dropsById } from '@/lib/deal-rank';
+import { selectHomeDeals } from '@/lib/home-deals';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { DealStrip } from '@/components/product/DealStrip';
 import { DealSpotlight } from '@/components/product/DealSpotlight';
@@ -17,8 +18,10 @@ import { getSiteCategories } from '@/lib/queries/site-categories';
 // sitio en duplicado de la home.
 export const metadata: Metadata = { alternates: { canonical: '/' } };
 
-// Revalida cada 5 minutos: así el catálogo se actualiza solo (sin tener que
-// hacer un redeploy manual) cuando se cargan productos nuevos en Supabase.
+// Revalida sola: así el catálogo se actualiza (sin tener que hacer un
+// redeploy manual) cuando se cargan productos nuevos en Supabase. En la
+// práctica se regenera cada minuto y no cada 5: manda el caché más corto de
+// lo que la página lee (el catálogo, 60 segundos, en lib/queries/products).
 export const revalidate = 300;
 
 const BENEFITS = [
@@ -56,8 +59,6 @@ function glowOf(hex: string, alpha = 0.45): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
-/** Ofertas que se miran en el historial para decidir cuál va primero. */
-const DEALS_POOL = 24;
 /** Cuántas ofertas van en la franja del celular y en la grilla de escritorio. */
 const DEALS_MOBILE = 8;
 const DEALS_DESKTOP = 8;
@@ -73,26 +74,26 @@ const dropDateFmt = new Intl.DateTimeFormat('es-CL', {
 });
 
 export default async function HomePage() {
-  const [catalog, categories, allDeals] = await Promise.all([
+  const [catalog, categories, { deals: allDeals, stats, unread }] = await Promise.all([
     getCatalogProducts(),
     getSiteCategories(),
-    getDeals(),
+    getDealsWithStats(),
   ]);
 
-  // Las ofertas que bajaron de verdad (según nuestro propio registro de
-  // precios) van primero; el resto, por descuento. Se mira solo el comienzo
-  // de la lista: leer el historial de las cien ofertas en cada regeneración
-  // de la portada no cambia qué se ve arriba.
-  const pool = allDeals.slice(0, DEALS_POOL);
-  const stats = await getPriceStatsMany(pool.map((p) => p.id));
-  const ranked = rankDeals(pool, stats);
-  const drops = dropsById(ranked, stats);
+  // Qué ofertas van arriba lo decide lib/home-deals: las que más interesan
+  // entre las de precio estable y recién revisado, y cada hora encabeza otra.
+  // La hora se toma acá porque la página es estática: se fija cada vez que
+  // se regenera, no en cada visita.
+  const now = Date.now();
+  const { spotlight, block } = selectHomeDeals(allDeals, stats, now, { size: 1 + DEALS_DESKTOP, unread });
+  const drops = dropsById(block, stats, now);
 
-  const spotlight = ranked[0];
   const spotlightDrop = spotlight ? drops[spotlight.id] : undefined;
-  const mobileDeals = ranked.slice(0, DEALS_MOBILE);
-  // En escritorio la primera ya está en el encabezado: la grilla sigue desde la segunda.
-  const desktopDeals = ranked.slice(1, 1 + DEALS_DESKTOP);
+  // En el celular no hay encabezado con oferta: la destacada es la primera tarjeta de la franja.
+  const mobileDeals = block.slice(0, DEALS_MOBILE);
+  // En escritorio la destacada ya está en el encabezado y la grilla sigue
+  // desde la segunda. Sin destacada, la grilla parte desde la primera.
+  const desktopDeals = spotlight ? block.slice(1, 1 + DEALS_DESKTOP) : block.slice(0, DEALS_DESKTOP);
 
   // Los productos marcados como destacados en el admin. Si no hay ninguno,
   // el bloque no aparece: mejor nada que una sección vacía.
@@ -100,7 +101,7 @@ export default async function HomePage() {
 
   // "Recién agregados" no repite lo que ya está más arriba: con un catálogo
   // chico, las mismas tarjetas dos veces en la portada parecían un relleno.
-  const shownAbove = new Set([...ranked.slice(0, 1 + DEALS_DESKTOP), ...picks].map((p) => p.id));
+  const shownAbove = new Set([...mobileDeals, ...desktopDeals, ...picks].map((p) => p.id));
   const fresh = catalog.filter((p) => !shownAbove.has(p.id)).slice(0, NEW_LIMIT);
 
   // El comparador rápido recibe solo lo que usa para elegir, y solo lo más
@@ -144,7 +145,7 @@ export default async function HomePage() {
       {/* Hero. En el celular queda solo el título y el buscador: todo lo
           demás empujaba la primera oferta fuera de la pantalla, y el tráfico
           de redes llega casi entero desde el teléfono. En escritorio, la
-          mitad derecha es la mejor oferta del momento. */}
+          mitad derecha es la oferta destacada de esta hora. */}
       <section className="relative mb-6 overflow-hidden rounded-3xl border border-border bg-surface px-5 py-6 sm:mb-12 sm:px-10 sm:py-10">
         <div
           className="pointer-events-none absolute inset-0 -z-10"
@@ -208,7 +209,9 @@ export default async function HomePage() {
               />
             </div>
           ) : (
-            // Sin ninguna oferta en el catálogo queda la ilustración de siempre.
+            // Sin una oferta que pase las reglas para encabezar (o sin
+            // ofertas) queda la ilustración de siempre: mejor eso que
+            // destacar un precio que puede haber cambiado.
             <div className="relative mx-auto hidden aspect-square w-full max-w-md lg:block">
               <Image
                 src="/hero-products.png"
@@ -236,7 +239,7 @@ export default async function HomePage() {
               </h2>
               <p className="mt-1 hidden text-sm text-muted sm:block">
                 {allDeals.length} {allDeals.length === 1 ? 'producto' : 'productos'} con 20% o más de descuento.
-                Primero, los que bajaron de precio.
+                Esta selección va cambiando durante el día.
               </p>
             </div>
             <Link

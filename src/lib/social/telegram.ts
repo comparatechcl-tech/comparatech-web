@@ -13,6 +13,7 @@ import {
 import { estimateCommission } from '@/lib/commission';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
+import { interestScore, pickVaried, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
 import { shortProductName } from '@/lib/text';
 import { SITE_URL } from '@/lib/site';
 
@@ -198,6 +199,7 @@ export const SOCIAL_BASE_COLUMNS = [
   'ml_product_id',
   'ml_family_id',
   'price_checked_at',
+  'created_at',
   'seller_reputation',
   'seller_sales_count',
   'is_active',
@@ -208,6 +210,8 @@ const COLUMNS_0016 = 'offer_info,ml_root_category';
 const COLUMNS_0017 = 'deleted_at,rrss_published_at,rrss_channel';
 
 export interface SocialProduct extends CaptionProduct {
+  /** Cuándo se agregó al sitio: dice si el primer registro del historial es su precio de partida. */
+  created_at?: string | null;
   brand: string | null;
   category: string;
   image_url: string;
@@ -290,7 +294,15 @@ export const TELEGRAM_RULES = {
   maxPosts: 5,
   minPosts: 3,
   perCategory: 2,
-  /** Descuento mínimo sobre el precio de lista. */
+  /** Son pocos posts al día: dos de la misma marca ya se ve repetido. */
+  perBrand: 1,
+  /** El bot publica sin que nadie mire: lo que trae un aviso en el puntaje no sale. */
+  cleanOnly: true,
+  /**
+   * Descuento mínimo sobre el precio de lista. En la práctica manda el
+   * puntaje: bajo 19% a 30% (según la marca y quién vende) la oferta lleva
+   * el aviso "la oferta es chica" y, con cleanOnly, no sale.
+   */
   minDiscount: 15,
   /** Baja mínima según el historial propio, para los que no llegan al descuento. */
   minDrop: 5,
@@ -302,82 +314,140 @@ export const TELEGRAM_RULES = {
 
 export interface TelegramPick<T> {
   product: T;
+  /** Descuento sobre el precio de lista, en % entero. */
   discount: number;
+  /** Baja comprobada con el historial propio, en %. null si no hay. */
   drop: number | null;
   commission: number;
+  /** Cuánto interesa publicarlo y qué hay que mirar antes (lib/social/interest). */
+  score: InterestScore;
+  /** La frase del puntaje: qué es y por qué queda donde queda. */
   reason: string;
 }
 
 /** Las reglas de selección que cambian de un canal a otro. */
-export type PickRules = Pick<
-  typeof TELEGRAM_RULES,
-  'maxPosts' | 'perCategory' | 'minDiscount' | 'minDrop' | 'maxPriceAgeMs'
->;
+export interface PickRules {
+  maxPosts: number;
+  perCategory: number;
+  minDiscount: number;
+  minDrop: number;
+  maxPriceAgeMs: number;
+  /** Cuántos del mismo tipo de producto (dos audífonos seguidos es repetir). Sin valor, 1. */
+  perType?: number;
+  /** Cuántos de la misma marca. Sin valor, 2. */
+  perBrand?: number;
+  /**
+   * true: tampoco sale lo que trae un aviso en el puntaje. Para los canales
+   * que publican sin que nadie mire; donde el dueño ve el aviso, decide él.
+   */
+  cleanOnly?: boolean;
+  /**
+   * true: el producto lo eligió una persona. No se le aplica el piso de
+   * interés, la exclusión ni los avisos. La puerta de entrada sí.
+   */
+  anyScore?: boolean;
+}
 
 export interface PickOptions {
   now: Date;
   recentlyPosted: Set<string>;
-  drops?: Map<string, number>;
+  /** Lo que el historial dice de cada candidato (lib/social/drops). Sin entrada: sin historial. */
+  evidence?: Map<string, InterestEvidence>;
 }
 
+const DEFAULT_PER_TYPE = 1;
+const DEFAULT_PER_BRAND = 2;
 /**
- * Elige qué publicar: precio fresco, una rebaja que valga la pena (o una
- * baja confirmada por el historial), nada repetido en 14 días y como mucho
- * dos por categoría, para que el canal no sean cinco audífonos seguidos.
- * Entre los que califican van primero los que más comisión dejan.
+ * Cuánto más caro que la versión más barata de su mismo modelo puede ser un
+ * producto para publicarse. Dos colores casi al mismo precio valen los dos;
+ * el mismo reloj a $49.990 con otro vendedor, estando a $39.990 en la tienda
+ * oficial, no es una oferta.
+ */
+const FAMILY_PRICE_SLACK = 1.05;
+const NO_EVIDENCE: InterestEvidence = { drop: null, min30: null, daysTracked: 0 };
+
+/**
+ * Elige qué publicar. La puerta de entrada: a la venta, sin repetir en 14
+ * días, con el precio recién revisado y una rebaja que valga la pena (o una
+ * baja comprobada con el historial).
  *
- * Puro: recibe las bajas ya calculadas (drops, en %).
+ * Entre los que entran manda el puntaje de interés (lib/social/interest), no
+ * la comisión: primero lo que más gente querría mirar, sin repetir tipo de
+ * producto ni marca mientras haya de dónde elegir, como mucho dos por
+ * categoría y nunca dos colores del mismo modelo. Lo que el puntaje excluye
+ * o deja bajo el piso no sale aunque sobren cupos: mejor un post menos que
+ * rellenar. Tampoco sale un producto que el sitio tiene bastante más barato
+ * en otra versión del mismo modelo, se haya publicado esa o no.
+ *
+ * Puro: recibe ya leído lo que el historial dice de cada producto (evidence).
  */
 export function pickForTelegram<T extends SocialProduct>(rows: T[], opts: PickOptions): TelegramPick<T>[] {
   return pickByRules(rows, opts, TELEGRAM_RULES);
 }
 
-/** La misma selección con las reglas de otro canal (ver lib/social/networks). */
+/** La misma selección con las reglas de otro canal (ver lib/social/networks y lib/social/stories). */
 export function pickByRules<T extends SocialProduct>(
   rows: T[],
   opts: PickOptions,
   rules: PickRules
 ): TelegramPick<T>[] {
   const now = opts.now.getTime();
-  const eligible: TelegramPick<T>[] = [];
+  const candidates: {
+    id: string;
+    category: string;
+    familyId: string | null;
+    commission: number;
+    score: InterestScore;
+    pick: TelegramPick<T>;
+  }[] = [];
+
+  // El precio más bajo de cada modelo entre lo que llega (a la venta y con
+  // el precio recién revisado), también lo ya publicado: es contra lo que
+  // compara quien entra al sitio. Mercado Libre a veces agrupa en una familia
+  // versiones distintas (256 y 512 GB): ahí la cara queda sin publicarse,
+  // que es el lado prudente.
+  const familyLowest = new Map<string, number>();
+  for (const p of rows) {
+    if (!isOnSale(p) || !p.ml_family_id || !(p.price > 0)) continue;
+    const lowest = familyLowest.get(p.ml_family_id);
+    if (lowest === undefined || p.price < lowest) familyLowest.set(p.ml_family_id, p.price);
+  }
 
   for (const p of rows) {
     if (!isOnSale(p) || opts.recentlyPosted.has(p.id)) continue;
+    const cheapest = p.ml_family_id ? familyLowest.get(p.ml_family_id) : undefined;
+    if (!rules.anyScore && cheapest !== undefined && p.price > cheapest * FAMILY_PRICE_SLACK) continue;
     const checked = p.price_checked_at ? new Date(p.price_checked_at).getTime() : NaN;
     if (!Number.isFinite(checked) || now - checked > rules.maxPriceAgeMs || checked > now + 60_000) continue;
 
+    const evidence = opts.evidence?.get(p.id) ?? NO_EVIDENCE;
     const discount = captionDiscount(p);
-    const drop = opts.drops?.get(p.id) ?? null;
-    const byDiscount = discount >= rules.minDiscount;
-    const byDrop = drop !== null && drop >= rules.minDrop;
-    if (!byDiscount && !byDrop) continue;
+    const seen = evidence.drop;
+    const drop = seen && Number.isFinite(seen.pct) && seen.pct > 0 ? seen.pct : null;
+    if (discount < rules.minDiscount && (drop === null || drop < rules.minDrop)) continue;
 
-    eligible.push({
-      product: p,
-      discount,
-      drop,
-      commission: estimateCommission(p.price, p.ml_root_category ?? null),
-      reason: byDiscount ? `-${discount}% sobre precio de lista` : `bajó ${Math.round(drop ?? 0)}% según historial`,
+    const score = interestScore(p, evidence);
+    if (rules.cleanOnly && !rules.anyScore && score.warning !== null) continue;
+
+    const commission = estimateCommission(p.price, p.ml_root_category ?? null);
+    candidates.push({
+      id: p.id,
+      category: p.category,
+      familyId: p.ml_family_id ?? null,
+      commission,
+      // A lo elegido a mano la exclusión no lo saca; el pick lleva el puntaje tal cual, para que se vea.
+      score: rules.anyScore ? { ...score, excluded: null } : score,
+      pick: { product: p, discount, drop, commission, score, reason: score.reason },
     });
   }
 
-  eligible.sort((a, b) => b.commission - a.commission || b.discount - a.discount);
-
-  const perCategory = new Map<string, number>();
-  // Dos colores del mismo modelo serían el mismo post repetido.
-  const families = new Set<string>();
-  const picked: TelegramPick<T>[] = [];
-  for (const item of eligible) {
-    if (picked.length >= rules.maxPosts) break;
-    const family = item.product.ml_family_id;
-    if (family && families.has(family)) continue;
-    const used = perCategory.get(item.product.category) ?? 0;
-    if (used >= rules.perCategory) continue;
-    perCategory.set(item.product.category, used + 1);
-    if (family) families.add(family);
-    picked.push(item);
-  }
-  return picked;
+  return pickVaried(candidates, {
+    max: rules.maxPosts,
+    perCategory: rules.perCategory,
+    perType: rules.perType ?? DEFAULT_PER_TYPE,
+    perBrand: rules.perBrand ?? DEFAULT_PER_BRAND,
+    minPoints: rules.anyScore ? -Infinity : undefined,
+  }).map((c) => c.pick);
 }
 
 // ---------------------------------------------------------------------------

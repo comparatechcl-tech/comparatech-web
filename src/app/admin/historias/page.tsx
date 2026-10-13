@@ -8,6 +8,7 @@ import {
   type PostedStory,
   type StoryItem,
 } from '@/lib/social/stories';
+import { HISTORY_UNREAD_WARNING } from '@/lib/social/interest';
 import { StoryList } from './StoryList';
 
 export const dynamic = 'force-dynamic';
@@ -39,6 +40,8 @@ export default async function HistoriasPage() {
       error = err instanceof Error ? err.message : String(err);
     }
   }
+
+  const unreadHistory = items.filter((item) => item.warning?.includes(HISTORY_UNREAD_WARNING)).length;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:py-10">
@@ -74,7 +77,7 @@ export default async function HistoriasPage() {
         </li>
         <li>
           Publica y vuelve acá a tocar <strong>Ya la publiqué</strong>: no te la muestro de nuevo, salvo que baje de
-          precio.
+          precio y siga entre las que más pueden interesar.
         </li>
       </ol>
 
@@ -84,12 +87,21 @@ export default async function HistoriasPage() {
         </div>
       )}
 
+      {unreadHistory > 0 && (
+        <div role="status" className="mt-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          Ahora no pude leer el historial de precios de {unreadHistory === items.length ? 'estas ofertas' : `${unreadHistory} de estas ofertas`}:
+          no sé si estuvieron más baratas hace poco. Es una falla pasajera del sitio, no de los productos. Toca{' '}
+          <strong>Actualizar</strong> en unos minutos antes de subirlas.
+        </div>
+      )}
+
       {!error && items.length === 0 && (
         <p className="mt-6 rounded-xl border border-border bg-surface px-4 py-6 text-sm text-muted">
-          Ahora no hay ofertas para mostrar: tienen que estar {STORY_RULES.minDiscount}% o más bajo el precio de lista
-          (o tener una baja confirmada por el historial), con el precio revisado en las últimas{' '}
+          Ahora no hay ofertas para mostrar: tienen que estar {STORY_RULES.minDiscount}% o más por debajo del precio de
+          lista (o tener una baja confirmada por el historial), con el precio revisado en las últimas{' '}
           {Math.round(STORY_RULES.maxPriceAgeMs / 3_600_000)} horas, y no haberse subido como historia en los últimos{' '}
-          {STORY_RULES.repeatAfterDays} días. Vuelve a mirar más tarde.
+          {STORY_RULES.repeatAfterDays} días. Tampoco muestro las que le interesarían a poca gente ni las que hace poco
+          costaban bastante menos. Vuelve a mirar más tarde.
         </p>
       )}
 
@@ -102,9 +114,12 @@ export default async function HistoriasPage() {
             renderedAt={now.getTime()}
           />
           <p className="mt-6 text-xs text-muted">
-            Hasta {STORY_RULES.maxPosts} ofertas, dos por categoría como máximo y primero las que más comisión dejan.
-            Una historia que ya subiste no vuelve en {STORY_RULES.repeatAfterDays} días, salvo que el producto baje{' '}
-            {Math.round(STORY_REPOST_DROP * 100)}% o más. No cuentan para las publicaciones del feed.
+            Hasta {STORY_RULES.maxPosts} ofertas, primero las que más pueden interesar: lo que la gente busca y
+            reconoce, qué tan comprobada está la oferta y que el precio esté al alcance. Una por tipo de producto y dos
+            por marca (si hay pocas ofertas, se repiten), y nunca más de dos por categoría. Si una oferta dice
+            &quot;Ojo&quot;, mira eso antes de subirla. Una historia que ya subiste no vuelve en{' '}
+            {STORY_RULES.repeatAfterDays} días, salvo que el producto baje {Math.round(STORY_REPOST_DROP * 100)}% o
+            más y siga entre las que más pueden interesar. No cuentan para las publicaciones del feed.
           </p>
         </>
       )}

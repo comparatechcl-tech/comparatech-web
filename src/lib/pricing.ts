@@ -85,6 +85,21 @@ export interface PriceObservation {
   observed_at: string;
 }
 
+/**
+ * Lo que el producto tenía hasta este cambio. Si su historial está vacío se
+ * guarda como fila de partida (ver applyPricing): sin ella, del primer
+ * cambio de un producto solo quedaba el precio nuevo, y no había cómo saber
+ * si había subido o bajado.
+ */
+export interface PriceStart {
+  product_id: string;
+  ml_product_id: string;
+  price: number;
+  original_price: number | null;
+  seller_id: number | null;
+  winner_item_id: string | null;
+}
+
 export interface PricingOutcome {
   id: string;
   result: PricingResult;
@@ -94,6 +109,8 @@ export interface PricingOutcome {
   deactivated: boolean;
   /** Solo cuando cambió el precio: lo que se agrega al historial. */
   observation?: PriceObservation;
+  /** Solo cuando cambió el precio: lo que regía hasta ahora. */
+  previous?: PriceStart;
 }
 
 function listPriceOf(offer: { price: number; original_price: number | null }): number | null {
@@ -184,6 +201,7 @@ export function decide(
   const patch: Record<string, unknown> = { price_checked_at: now };
   let reason: InactiveReason | null = null;
   let observation: PriceObservation | undefined;
+  let previous: PriceStart | undefined;
 
   if (winners.status === 'no_winner') {
     reason = 'sin_ganador';
@@ -223,6 +241,20 @@ export function decide(
         winner_item_id: winner.item_id,
         observed_at: now,
       };
+      // Solo si el producto ya tuvo un ganador revisado: recién aprobado trae el
+      // precio del candidato, que pudo prospectarse días antes y nadie comparó
+      // con Mercado Libre. Vale también cuando cambia solo el precio de lista:
+      // el precio que regía es igual de cierto.
+      if (product.price > 0 && product.winner_item_id) {
+        previous = {
+          product_id: product.id,
+          ml_product_id: product.ml_product_id,
+          price: product.price,
+          original_price: product.original_price ?? null,
+          seller_id: product.seller_id ?? null,
+          winner_item_id: product.winner_item_id ?? null,
+        };
+      }
     }
 
     if (!isGreenSeller(seller)) {
@@ -249,6 +281,7 @@ export function decide(
       priceChanged,
       deactivated: product.is_active,
       ...(observation ? { observation } : {}),
+      ...(previous ? { previous } : {}),
     };
   }
 
@@ -263,6 +296,7 @@ export function decide(
     priceChanged,
     reactivated: !product.is_active,
     ...(observation ? { observation } : {}),
+    ...(previous ? { previous } : {}),
   };
 }
 
@@ -424,6 +458,68 @@ function isTouchOnly(patch: Record<string, unknown>): boolean {
  * consulta. De a uno, con 790 productos eran 790 escrituras en cada corrida
  * del cron (unos 6 segundos de sus 60) para decir casi siempre lo mismo.
  */
+/** Un producto recién agregado todavía se está acomodando: su precio de alta no es una partida. */
+const START_MIN_AGE_MS = 10 * 60_000;
+/** Ids por consulta: viajan en la URL. */
+const START_CHUNK = 40;
+/** Lo que se espera a saber qué partidas faltan. Pasado esto, la corrida sigue sin ellas. */
+const START_ROWS_TIMEOUT_MS = 3_000;
+
+/**
+ * Las filas de partida que faltan: para cada producto que cambia de precio
+ * y no tiene ningún registro en el historial, el precio que tenía desde que
+ * se agregó al sitio, con esa fecha.
+ *
+ * El historial solo anota cambios. Un producto agregado después de crear la
+ * tabla no tenía fila de partida, así que de su primer cambio quedaba solo
+ * el precio nuevo: una subida de 10% pasaba por "precio quieto y en su
+ * mínimo". Con la partida, el historial de todos empieza con el precio de
+ * alta.
+ *
+ * No se escribe para un producto agregado hace minutos: ahí el precio de
+ * alta viene del candidato, que pudo prospectarse días antes, y nadie lo vio
+ * en el sitio. Nunca lanza: ante cualquier duda (una consulta que falla) no
+ * se inventa una partida y todo sigue como antes.
+ */
+async function missingStartRows(
+  admin: SupabaseClient,
+  previous: PriceStart[],
+  concurrency: number
+): Promise<(PriceStart & { observed_at: string })[]> {
+  if (previous.length === 0) return [];
+  try {
+    const checked = await mapWithConcurrency(previous, concurrency, async (start) => {
+      const { data, error } = await admin.from('price_history').select('id').eq('product_id', start.product_id).limit(1);
+      return !error && Array.isArray(data) && data.length === 0 ? start : null;
+    });
+    const without = checked.filter((start): start is PriceStart => start !== null);
+    if (without.length === 0) return [];
+
+    const createdAt = new Map<string, string>();
+    for (let i = 0; i < without.length; i += START_CHUNK) {
+      const ids = without.slice(i, i + START_CHUNK).map((start) => start.product_id);
+      const { data, error } = await admin.from('products').select('id, created_at').in('id', ids);
+      if (error) return [];
+      for (const row of (data ?? []) as { id: string; created_at: string | null }[]) {
+        if (row.created_at) createdAt.set(row.id, row.created_at);
+      }
+    }
+
+    const now = Date.now();
+    const rows: (PriceStart & { observed_at: string })[] = [];
+    for (const start of without) {
+      const at = createdAt.get(start.product_id);
+      const added = at ? new Date(at).getTime() : NaN;
+      if (!at || !Number.isFinite(added) || now - added < START_MIN_AGE_MS) continue;
+      rows.push({ ...start, observed_at: at });
+    }
+    return rows;
+  } catch (err) {
+    console.warn('[pricing] no se pudo revisar si faltan filas de partida:', err);
+    return [];
+  }
+}
+
 export async function applyPricing(
   admin: SupabaseClient,
   outcomes: PricingOutcome[],
@@ -433,6 +529,7 @@ export async function applyPricing(
   const writes = withPatch.filter((o) => !isTouchOnly(o.patch));
   const touches = withPatch.filter((o) => isTouchOnly(o.patch));
   const observations: PriceObservation[] = [];
+  const previous: PriceStart[] = [];
 
   // Apenas un update confirma que faltan las columnas nuevas, el resto de la
   // corrida las omite de entrada en vez de fallar y reintentar cada uno.
@@ -451,16 +548,32 @@ export async function applyPricing(
 
     // Al historial solo va lo que quedó escrito en products: si el update
     // falló, el sitio sigue mostrando el precio anterior.
-    if (!error && o.observation) observations.push(o.observation);
+    if (!error && o.observation) {
+      observations.push(o.observation);
+      if (o.previous) previous.push(o.previous);
+    }
     return error ? 1 : 0;
   });
 
   if (observations.length > 0) {
+    // Las partidas se averiguan antes de anotar los cambios (después, todos
+    // "tienen historial"), con un tope de tiempo y en una escritura aparte: ni
+    // una consulta colgada ni una partida mal armada pueden llevarse un cambio real.
+    const starts = await Promise.race([
+      missingStartRows(admin, previous, concurrency),
+      new Promise<never[]>((resolve) => setTimeout(() => resolve([]), START_ROWS_TIMEOUT_MS)),
+    ]);
+
     const { error } = await admin.from('price_history').insert(observations);
     // Sin la migración 0016 la tabla no existe y no hay nada que hacer. Un
     // historial incompleto no justifica marcar la corrida como fallida.
     if (error && !isMissingSchemaError(error)) {
       console.warn('[pricing] no se pudo guardar el historial de precios:', error.message);
+    }
+
+    if (!error && starts.length > 0) {
+      const { error: startError } = await admin.from('price_history').insert(starts);
+      if (startError) console.warn('[pricing] no se pudieron guardar las filas de partida:', startError.message);
     }
   }
 
