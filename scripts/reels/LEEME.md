@@ -73,7 +73,7 @@ node scripts/reels/hacer.mjs <productos.json> <número> <salida.mp4> [opciones]
 
 | Opción | Qué hace |
 |---|---|
-| `--plantilla estudio` | Cómo se ve el video. Por defecto, `estudio`. |
+| `--plantilla estudio` | Cómo se ve el video: `estudio` o `bloques`. Por defecto, `estudio`. |
 | `--cta "texto"` | Cambia la llamada del cierre (por defecto, "Más ofertas en el perfil"). Si es larga se parte en dos renglones y se achica; si ni así cabe, se corta con puntos suspensivos y avisa. No acepta direcciones web ni frases como "solo hoy" o "mejor precio". |
 | `--portada foto.jpg` | Guarda además la escena del precio completa como imagen, para subirla de portada. |
 | `--hoja hoja.jpg` | Guarda además una hoja con 8 cuadros del video ya armado, para revisarlo de un vistazo. |
@@ -106,7 +106,11 @@ minúsculas y números. Lo demás (leer los datos, medir y dibujar texto, prepar
 es común y está fuera de las carpetas de las plantillas. El sitio dice en el plan con qué plantilla va cada
 producto.
 
-Hoy existe una, `estudio`, que se acomoda sola de dos maneras según la forma de la foto:
+Hay dos: `estudio` (la primera, más tranquila) y `bloques` (más enérgica, ver más abajo). El sitio decide cuál
+usa cada video del día (`VIDEO_TEMPLATES` en `src/lib/social/videos.ts`): hoy solo `estudio`. `bloques` ya se
+puede armar a mano con `--plantilla bloques`, y se agrega a esa lista cuando el dueño apruebe cómo se ve.
+
+`estudio` se acomoda sola de dos maneras según la forma de la foto:
 
 - **Foto alta o cuadrada** (un celular): la foto ocupa todo lo que deja la hoja.
 - **Foto apaisada** (un televisor, una tablet): la foto vive entera en la mitad de arriba de la pantalla,
@@ -133,6 +137,40 @@ diciendo el dato del descuento, el nombre y el precio. Con descuento dura 10,2 s
 - La foto nunca se deforma. Una foto de origen chica no se agranda más de 1,6 veces (y avisa). Una foto que no
   viene sobre blanco se muestra entera, como una lámina con sombra.
 
+## Qué se ve en "bloques"
+
+Enérgica y directa: la pantalla parte en bloques de color de la marca, con el producto ya a la vista; el precio
+se estampa como una etiqueta de tienda y los cortes son marcados. El precio pega medio segundo antes que en
+"estudio". Con descuento dura 9,6 segundos (288 cuadros):
+
+| Segundos | Qué pasa |
+|---|---|
+| 0 – 1,25 | Desde el primer cuadro: arriba una franja de noche; un bloque cian con la pastilla del logo y el número enorme en tinta oscura ("45%", de 330 a 470 px); un bloque azul con "por debajo del / precio de lista" en blanco (94 px) y, debajo a la derecha, la tarjeta blanca con la foto real. Así el primer cuadro, que muchas apps usan de miniatura, ya muestra el producto. Los bordes entre bloques van inclinados. El número llega apenas más grande, se asienta y a los 0,6 s late una vez. |
+| 1,25 – 1,65 | Los bloques suben de un empujón y entra la noche, con un bloque azul inclinado arriba. La tarjeta no se va: crece desde su sitio hasta su tamaño grande. El logo queda quieto. Entran la marca y el nombre en negrita (hasta 68 px). |
+| 1,65 – 2,6 | La tarjeta grande (un celular a 681x830 px), con la marca y el nombre debajo. Desde los 2,24 s el nombre se va y la tarjeta se encoge (en 0,34 s) a su tamaño de la escena del precio. |
+| 2,6 – 2,76 | La etiqueta del precio (cian, con su punta, su agujero y un poco chueca) se estampa desde un 25% más grande y pega a los 2,76 s, con un eco de luz y una sacudida. Su borde de arriba no se mueve, así que nunca pisa el producto, y el precio se ve entero en todos los cuadros (al empezar, solo la punta queda fuera de la pantalla). |
+| 2,8 – 4,1 | Entran el nombre chico, el bloque blanco "−45%" (o "Bajó 12%"), "precio de lista $399.990" (se tacha en cian), "Envío gratis" / "Full" y, pegado debajo, "Precio revisado 13/10 09:30" / "Precios en Mercado Libre" (34 px): la aclaración va junto al precio. |
+| 4,1 – 7,25 | Todo quieto para leer, con la foto acercándose despacio. A los 5,16 s un brillo cruza la etiqueta y el descuento late. La portada es el cuadro de los 6,9 s. |
+| 7,25 – 9,6 | Tres barras (cian, azul y noche) suben una tras otra y tapan todo: logo grande, ComparaTech, la llamada en una losa cian con letra oscura (de 80 a 40 px, dos renglones como máximo; si ni así cabe, se corta y avisa) y otra vez "Precio revisado" y "Precios en Mercado Libre". |
+
+- Sin precio de lista pero con baja de historial, el gancho es "Bajó" / "12%" / "según nuestro historial" y en
+  la fila va el bloque "Bajó 12%".
+- Sin ninguno de los dos no hay gancho: el primer cuadro ya trae la tarjeta grande, la marca y el nombre; la
+  etiqueta pega a los 1,41 s y dura 9,35 s (281 cuadros).
+- **El número del gancho** va lo más grande que quepa (hasta 470 px), pero baja (hasta 330) si así la tarjeta
+  de abajo quedara de menos de 400 px de alto.
+- **Foto alta o cuadrada**: tarjeta de x=72 a x=924. Un celular se ve a 339x414 px en el gancho, 681x830 con el
+  nombre y 470x573 con el precio.
+- **Foto apaisada**: tarjeta casi de lado a lado (x=48 a x=1032), con el producto entero sobre la mitad de la
+  pantalla. Un televisor se ve a 615x414 en el gancho, 918x618 con el nombre y 844x568 con el precio.
+- **Producto bajo** (una barra de sonido, una foto chica): la tarjeta mide lo que pide el producto más aire
+  (nunca menos de 440 px de alto) y el grupo baja hasta 130 px para no dejar una tarjeta medio vacía.
+- La etiqueta nunca pasa de x=924, ni siquiera mientras se estampa; el precio va en 156 px (160 con foto
+  apaisada) o lo que quepa, y nunca se cuenta.
+- **La portada** lleva el bloque azul detrás de la tarjeta: en la grilla del perfil se distingue de "estudio".
+- Zonas seguras: las mismas que "estudio". En la columna de botones solo entran el borde de la tarjeta y su
+  sombra cian (no dicen nada) y, por 0,3 s, el eco de luz del golpe de la etiqueta.
+
 ## De dónde sale lo que se dice
 
 Todo sale del dato del producto; no hay frases de venta escritas a mano.
@@ -154,6 +192,8 @@ Todo sale del dato del producto; no hay frases de venta escritas a mano.
   (crf 17) los de muestra pesan entre 2,1 y 3,8 MB. Si alguno pasa de 4 MB, se arma de nuevo con un poco
   menos de calidad (crf 20, después 23 y 26) hasta que quepa, y lo dice.
 - En el PC del proyecto (6 hilos) cada video demora entre 10 y 17 segundos, según qué más esté corriendo.
+- Con "bloques" los de muestra pesan entre 2,0 y 3,6 MB y demoran de 8 a 12 segundos. Con 1 hilo o con 6 sale
+  el mismo archivo.
 
 ## Los archivos
 
@@ -166,7 +206,8 @@ Todo sale del dato del producto; no hay frases de venta escritas a mano.
   texto con la letra Inter del sitio (`src/lib/content/fonts`). `video.mjs`: ffmpeg (lo busca en la consola,
   en la variable `FFMPEG` o donde lo deja WinGet).
 - `plantillas/`: las plantillas. `plantillas/estudio/`: su escena (medidas, tiempos y el dibujo de cada
-  cuadro) y sus fondos.
+  cuadro) y sus fondos. `plantillas/bloques/`: lo mismo, más `piezas.mjs` (la etiqueta del precio, el bloque
+  del descuento y la losa de la llamada).
 - `*.test.ts` y `pruebas/`: las pruebas (`npx vitest run scripts/reels`). El proceso del día se prueba contra
   un sitio de mentira en 127.0.0.1 (`pruebas/sitio-de-mentira.mjs`, que entrega los nombres con su huella
   igual que el sitio de verdad), sin salir a la red: cuando una prueba lanza el comando en otro proceso, lo
@@ -195,3 +236,10 @@ Solo necesita `sharp` y `next`, que ya están en el proyecto, y ffmpeg instalado
   `eslint-compact` y `eslint-stylish`) antes de correr el generador. Nada de esto se pudo probar dentro de
   Actions: que las órdenes rotas ya no se obedecen sale de cómo las lee el programa de GitHub, no de una
   corrida.
+- **En "bloques", el producto de la escena del precio queda más chico que en "estudio"** (un celular a 470x573
+  contra 536x654; un televisor a 844x568 contra 945x636): la tarjeta deja aire blanco bajo el producto para la
+  etiqueta y la letra chica va bajo el descuento. En el gancho la tarjeta es chica (unos 400 px de alto; con
+  "Bajó" algo menos) y el número baja a unos 390 px para dejarle sitio.
+- **En "bloques", algunos movimientos de menos de 0,3 s cruzan las zonas de las apps**: el empujón de los
+  bloques y el eco de luz del golpe de la etiqueta (asoma unos 40 px en la columna de botones mientras se
+  apaga). En reposo no entra nada escrito ni el producto.

@@ -10,7 +10,7 @@
  * Telegram y los tests, con la misma salida para la misma entrada.
  */
 
-import { normalizeName, shortProductName } from '@/lib/text';
+import { normalizeName, reelProductName, shortProductName } from '@/lib/text';
 import { FORBIDDEN_WORDS } from '@/lib/social/interest-tables';
 
 export type CaptionChannel = 'instagram' | 'tiktok' | 'whatsapp' | 'telegram' | 'facebook';
@@ -297,7 +297,8 @@ function withoutForbiddenWords(name: string): string {
 export function youtubeTitle(product: Pick<CaptionProduct, 'name' | 'price' | 'original_price'>): string {
   const discount = captionDiscount(product);
   const tail = ` a ${formatPrice(product.price)}${discount > 0 ? `, ${discount}% por debajo del precio de lista` : ''}`;
-  const name = shortProductName(withoutForbiddenWords(product.name) || 'Producto', YOUTUBE_TITLE_MAX - tail.length);
+  // El título es el del video: el nombre va como en el reel, sin códigos de fábrica.
+  const name = reelProductName(withoutForbiddenWords(product.name) || 'Producto', YOUTUBE_TITLE_MAX - tail.length);
   return `${name}${tail}`.slice(0, YOUTUBE_TITLE_MAX);
 }
 

@@ -5,6 +5,7 @@
 // lleva letras minúsculas y números.
 const PLANTILLAS = {
   estudio: () => import('./estudio/index.mjs'),
+  bloques: () => import('./bloques/index.mjs'),
 };
 
 export const PLANTILLA_POR_DEFECTO = 'estudio';

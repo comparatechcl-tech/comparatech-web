@@ -26,7 +26,6 @@ import { AdminTabs } from '@/app/admin/AdminTabs';
 import VideosPage, * as videosPageModule from '@/app/admin/videos/page';
 import {
   VideoList,
-  fetchVideoFile,
   isEverywhere,
   mergePosted,
   pendingFirst,
@@ -34,6 +33,7 @@ import {
   splitReason,
   type Mark,
 } from '@/app/admin/videos/VideoList';
+import { fetchVideoFile } from '@/app/admin/videos/wiring';
 import { readAdminEvents, type AdminEventRow } from '@/lib/admin-audit';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { VIDEO_RULES, readVideoBoard, type ReadyVideo, type VideoBoard } from '@/lib/social/videos';
@@ -139,7 +139,7 @@ function elements(node: unknown, out: El[] = []): El[] {
 }
 
 function board(over: Partial<VideoBoard> = {}): VideoBoard {
-  return { videos: [], stale: 0, lastRenderedAt: null, storageReady: true, ...over };
+  return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: true, ...over };
 }
 
 async function page(): Promise<string> {
@@ -545,6 +545,74 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
 
     vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: [video()] }));
     expect(text(await page())).not.toMatch(/ya no se muestran?/);
+  });
+
+  describe('los videos que no se muestran porque no se pudo revisar su historial de precios', () => {
+    const MANY = '3 videos no se muestran ahora porque no se pudo revisar su historial de precios. Vuelve a mirar en unos minutos.';
+    const ONE = '1 video no se muestra ahora porque no se pudo revisar su historial de precios. Vuelve a mirar en unos minutos.';
+
+    it('los cuenta, en plural y en singular, y no dice que no hay videos', async () => {
+      vi.mocked(readVideoBoard).mockResolvedValue(board({ hiddenUnread: 3 }));
+      const many = text(await page());
+      expect(many).toContain(MANY);
+
+      vi.mocked(readVideoBoard).mockResolvedValue(board({ hiddenUnread: 1 }));
+      const one = text(await page());
+      expect(one).toContain(ONE);
+      expect(one).not.toContain('1 videos');
+
+      for (const read of [many, one]) {
+        // Sí hay videos: decir que no hay, o que se vuelva "más tarde", contradiría el aviso.
+        expect(read).not.toContain('Ahora no hay videos listos');
+        expect(read).not.toContain('Vuelve a mirar más tarde');
+        expect(read).not.toContain('Todavía no se ha generado');
+        // No es un video que cambió: no se mezcla con el aviso de los que ya no se muestran.
+        expect(read).not.toContain('porque el producto cambió');
+        expect(read).not.toMatch(AVOIDED);
+        // El método sigue a la vista.
+        expect(read).toContain('Elige uno o dos videos al día');
+      }
+    });
+
+    it('con cero no dice nada y vuelve lo de siempre', async () => {
+      const read = text(await page());
+      expect(read).not.toContain('historial de precios');
+      expect(read).toContain('Ahora no hay videos listos.');
+      expect(read).toContain('Vuelve a mirar más tarde.');
+    });
+
+    it('un número que no es mayor que cero no se cuenta', async () => {
+      for (const hiddenUnread of [-2, Number.NaN]) {
+        vi.mocked(readVideoBoard).mockResolvedValue(board({ hiddenUnread }));
+        const read = text(await page());
+        expect(read).not.toContain('historial de precios');
+        expect(read).toContain('Ahora no hay videos listos.');
+      }
+    });
+
+    it('con otros videos a la vista, el aviso va antes de la lista y la lista sigue', async () => {
+      const items = [video(), video()];
+      vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: items, hiddenUnread: 3 }));
+      const html = await page();
+      const at = html.indexOf('no se pudo revisar su historial de precios');
+      expect(at).toBeGreaterThan(html.indexOf('Un reel no lleva link'));
+      expect(at).toBeLessThan(html.indexOf('<video'));
+      for (const item of items) expect(html).toContain(`src="${item.videoUrl}"`);
+      expect(text(html)).toContain(MANY);
+    });
+
+    it('junto al aviso de los que cambiaron, se ven los dos, cada uno con su número', async () => {
+      vi.mocked(readVideoBoard).mockResolvedValue(board({ stale: 2, hiddenUnread: 1 }));
+      const read = text(await page());
+      expect(read).toContain(ONE);
+      expect(read).toContain('2 videos ya no se muestran porque el producto cambió');
+      expect(read).not.toContain('Ahora no hay videos listos');
+    });
+
+    it('si no se pudo leer el tablero, no inventa videos escondidos', async () => {
+      vi.mocked(readVideoBoard).mockRejectedValue(new Error('se cayó'));
+      expect(text(await page())).not.toContain('historial de precios');
+    });
   });
 
   it('al pie dice cuándo se generó el último, en hora de Chile, y con qué criterio se eligen', async () => {

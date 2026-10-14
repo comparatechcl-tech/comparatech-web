@@ -40,7 +40,7 @@ import { getPriceStatsMany, getPriceStatsManyChecked } from '@/lib/queries/price
 import { MIN_INTEREST_POINTS, floorPoints, interestScore } from '@/lib/social/interest';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { readFreshSocialProducts, type SocialProduct } from '@/lib/social/telegram';
-import { shortProductName } from '@/lib/text';
+import { reelProductName, shortProductName } from '@/lib/text';
 import {
   VIDEO_BOARD_MAX,
   VIDEO_BUCKET,
@@ -333,7 +333,7 @@ const sha256 = (text: string) => createHash('sha256').update(text).digest('hex')
 function printOf(p: SocialProduct, drop: number | null = null, price: number = p.price): string {
   const discount = p.original_price && p.original_price > price ? Math.round((1 - price / p.original_price) * 100) : 0;
   const said = [
-    shortProductName(p.name),
+    reelProductName(p.name),
     p.brand || null,
     discount > 0 ? p.original_price : null,
     discount,
@@ -564,6 +564,21 @@ describe('lo que el video dice y su huella', () => {
     // "Envío gratis" y "Full" solo con un sí explícito.
     const unknown = strong({ offer_info: { free_shipping: null, is_full: undefined } as SocialProduct['offer_info'] });
     expect(videoClaims(unknown, null)).toMatchObject({ envio_gratis: false, full: false });
+  });
+
+  it('el nombre que el video lleva escrito va sin el código de fábrica, y así entra en la huella', () => {
+    const watch = strong({ name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3', brand: 'Samsung' });
+    const said = videoClaims(watch, null);
+    expect(said.nombre_corto).toBe('Samsung Smartwatch Galaxy Fit 3');
+    expect(videoFingerprint(said)).toBe(
+      sha256(JSON.stringify(['Samsung Smartwatch Galaxy Fit 3', 'Samsung', 100_000, 40, null, true, false])).slice(0, 8)
+    );
+    // Con el código (el nombre corto de la ficha y de las redes) sería otro video.
+    expect(shortProductName(watch.name)).toBe('Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3');
+    expect(videoFingerprint({ ...said, nombre_corto: shortProductName(watch.name) })).not.toBe(videoFingerprint(said));
+    // Una memoria conserva su número de parte: es lo que dice cuál es.
+    const ram = strong({ name: 'Kingston ValueRAM KVR32S22S8/8 Memoria RAM color verde 8GB 3200MHz', brand: 'Kingston' });
+    expect(videoClaims(ram, null).nombre_corto).toBe('Kingston ValueRAM KVR32S22S8/8 Memoria RAM');
   });
 
   it('la huella son los primeros 8 caracteres del SHA-256 de esos datos, siempre en el mismo orden', () => {
@@ -962,6 +977,38 @@ describe('readVideoPicks', () => {
     expect(byId.get(dropped.id)?.claims.baja_historial).toBe(25);
   });
 
+  it('un video de hoy con la misma huella pero otro precio no cuenta, aunque el descuento redondeado no cambie', async () => {
+    // Se armó a $60.000 ("-40%"). Ahora está a $60.200: sigue siendo -40% y
+    // el resto de lo que dice el video es igual, así que la huella no cambia.
+    // Lo único que lo delata es el precio del nombre.
+    const p = strong({ price: 60_200 });
+    const old = fileOf(TODAY, p, 60_000);
+    expect(printOf(p, null, 60_000)).toBe(printOf(p));
+    catalog([p]);
+    const fake = fakeSite({ products: [p], objects: stored([old]) });
+
+    const plan = await readVideoPicks(fake.admin, NOW);
+    expect(plan.picks).toHaveLength(1);
+    expect(plan.picks[0].claims.descuento).toBe(40);
+    expect(plan.picks[0]).toMatchObject({ exists: false, file: `${TODAY}/${p.id}-60200-estudio-${printOf(p)}` });
+    expect(plan.picks[0].file).not.toBe(old);
+
+    // Lo mismo por la ruta que lee el generador: no lo da por hecho y trae dónde subir el nuevo.
+    site.admin = fake.admin;
+    const response = await planRoute(
+      new NextRequest('https://sitio.test/api/social/videos/plan', { headers: { authorization: `Bearer ${SECRET}` } })
+    );
+    const [row] = ((await response.json()) as { seleccion: { archivo: string; ya_existe: boolean; precio: number; subir: unknown }[] })
+      .seleccion;
+    expect(row).toMatchObject({ archivo: plan.picks[0].file, ya_existe: false, precio: 60_200 });
+    expect(row.subir).not.toBeNull();
+
+    // Y el tablero no ofrece el de $60.000: dice un precio que ya no rige.
+    const board = await readVideoBoard(fake.admin, NOW);
+    expect(board.videos).toEqual([]);
+    expect(board.stale).toBe(1);
+  });
+
   it('la plantilla de un video de hoy se conserva solo si ese video dice lo mismo que diría ahora', async () => {
     const two = ['estudio', 'ficha'];
     const p = strong();
@@ -1138,14 +1185,14 @@ describe('el almacén', () => {
 describe('readVideoBoard', () => {
   it('sin el bucket avisa que el almacén no está listo y no lee nada más', async () => {
     const { admin, read, ops } = fakeSite({ bucket: false, products: [strong()] });
-    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, lastRenderedAt: null, storageReady: false });
+    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: false });
     expect(read).toEqual([]);
     expect(ops).toEqual(['getBucket reels']);
   });
 
   it('con el bucket vacío no hay videos, y no se lee la base', async () => {
     const { admin, read } = fakeSite({ products: [strong()] });
-    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, lastRenderedAt: null, storageReady: true });
+    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: true });
     expect(read).toEqual([]);
   });
 
@@ -1160,7 +1207,7 @@ describe('readVideoBoard', () => {
     const { admin } = fakeSite({ products: [p], objects: stored([fileOf(TODAY, p)], uploadedAt) });
 
     const board = await readVideoBoard(admin, NOW);
-    expect(board).toMatchObject({ stale: 0, lastRenderedAt: uploadedAt, storageReady: true });
+    expect(board).toMatchObject({ stale: 0, hiddenUnread: 0, lastRenderedAt: uploadedAt, storageReady: true });
     expect(board.videos).toHaveLength(1);
     const video = board.videos[0];
     expect(video).toMatchObject({
@@ -1186,6 +1233,31 @@ describe('readVideoBoard', () => {
     expect(video.reason).not.toContain('Ojo');
     expect(video.texts).toEqual(buildVideoTexts(p, NOW));
     expect(Object.keys(video.texts).sort()).toEqual(['facebook', 'instagram', 'tiktok', 'youtubeDescription', 'youtubeTitle']);
+  });
+
+  it('la tarjeta y el título de YouTube llevan el nombre del reel; los textos para pegar, el nombre corto de siempre', async () => {
+    const p = strong({ name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3', brand: 'Samsung' });
+    catalog([p]);
+    const plan = await readVideoPicks(fakeSite({ products: [p] }).admin, NOW);
+    expect(plan.picks.map((pick) => pick.claims.nombre_corto)).toEqual(['Samsung Smartwatch Galaxy Fit 3']);
+    expect(plan.picks[0].file).toBe(fileOf(TODAY, p));
+
+    const { admin } = fakeSite({ products: [p], objects: stored([fileOf(TODAY, p)]) });
+    const [video] = (await readVideoBoard(admin, NOW)).videos;
+    expect(video.name).toBe('Samsung Smartwatch Galaxy Fit 3');
+    expect(video.texts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $60.000, 40% por debajo del precio de lista');
+    for (const text of [video.texts.instagram, video.texts.tiktok, video.texts.facebook, video.texts.youtubeDescription]) {
+      expect(text.split('\n')).toContain('Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3');
+    }
+  });
+
+  it('un video armado con el nombre de antes, con el código de fábrica, ya no es el de hoy', async () => {
+    const p = strong({ name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3', brand: 'Samsung' });
+    const before = sha256(JSON.stringify([shortProductName(p.name), 'Samsung', 100_000, 40, null, true, false])).slice(0, 8);
+    const { admin } = fakeSite({ products: [p], objects: stored([`${TODAY}/${p.id}-60000-estudio-${before}`]) });
+    const board = await readVideoBoard(admin, NOW);
+    expect(board.videos).toEqual([]);
+    expect(board.stale).toBe(1);
   });
 
   it('sin descuento de lista no muestra un precio de lista, y el nombre del archivo no lleva caracteres raros', async () => {
@@ -1234,7 +1306,8 @@ describe('readVideoBoard', () => {
     const objects = stored([fileOf(TODAY, p), fileOf(TODAY, future), fileOf(TODAY, never)]);
 
     const hidden = await readVideoBoard(fakeSite({ products: [p, future, never], objects }).admin, NOW);
-    expect(hidden).toMatchObject({ videos: [], stale: 0, storageReady: true });
+    // El historial sí se leyó: tampoco cuentan como escondidos por eso.
+    expect(hidden).toMatchObject({ videos: [], stale: 0, hiddenUnread: 0, storageReady: true });
 
     const again = await readVideoBoard(fakeSite({ products: [{ ...p, price_checked_at: hoursAgo(0.2) }], objects }).admin, NOW);
     expect(again.videos.map((video) => video.id)).toEqual([p.id]);
@@ -1441,7 +1514,7 @@ describe('readVideoBoard', () => {
     expect(byId.get(fine.id)?.reason).not.toContain('Ojo');
   });
 
-  it('si no se pudo leer el historial de un producto, su video no se muestra y tampoco cuenta como viejo', async () => {
+  it('si no se pudo leer el historial de un producto, su video no se muestra, no cuenta como viejo y se dice cuántos fueron', async () => {
     // Sin el historial no se sabe qué baja diría hoy el video: no se puede saber si sigue vigente.
     const lost = strong({ category: 'audio' });
     const fine = strong({ category: 'gaming' });
@@ -1451,12 +1524,40 @@ describe('readVideoBoard', () => {
     const board = await readVideoBoard(admin, NOW);
     expect(board.videos.map((video) => video.id)).toEqual([fine.id]);
     expect(board.stale).toBe(0);
+    expect(board.hiddenUnread).toBe(1);
     expect(board.lastRenderedAt).toBe(hoursAgo(3));
 
     // A la próxima carga, con el historial leído, vuelve sin que nadie lo arme de nuevo.
     const again = await readVideoBoard(admin, NOW);
     expect(again.videos.map((video) => video.id).sort()).toEqual([lost.id, fine.id].sort());
     expect(again.stale).toBe(0);
+    expect(again.hiddenUnread).toBe(0);
+  });
+
+  it('hiddenUnread cuenta un producto por video escondido, y solo si el historial es lo único que lo esconde', async () => {
+    // Video de hoy y de ayer, los dos vigentes: es un solo producto escondido.
+    const twice = strong({ category: 'audio' });
+    // Su precio no se revisa hace rato: no se mostraría aunque el historial se leyera.
+    const unchecked = strong({ category: 'gaming', price_checked_at: hoursAgo(7) });
+    // El video lleva un precio que ya no rige: es viejo, se lea o no el historial.
+    const repriced = strong({ category: 'hogar', price: 55_000 });
+    // Ya no está a la venta.
+    const paused = strong({ category: 'celulares', is_active: false });
+    const fine = strong({ category: 'computacion' });
+    const lost = [twice, unchecked, repriced, paused];
+    const { admin } = fakeSite({
+      products: [...lost, fine],
+      objects: {
+        ...stored([fileOf(YESTERDAY, twice)], hoursAgo(26)),
+        ...stored([fileOf(TODAY, twice), fileOf(TODAY, unchecked), fileOf(TODAY, repriced, 60_000), fileOf(TODAY, paused), fileOf(TODAY, fine)]),
+      },
+    });
+
+    vi.mocked(getPriceStatsManyChecked).mockResolvedValueOnce({ stats: new Map(), unread: new Set(lost.map((p) => p.id)) });
+    const board = await readVideoBoard(admin, NOW);
+    expect(board.videos.map((video) => video.id)).toEqual([fine.id]);
+    expect(board.hiddenUnread).toBe(1);
+    expect(board.stale).toBe(2);
   });
 
   it('si el historial no se pudo leer de ninguno, no muestra nada, no da nada por viejo y no sigue preguntando', async () => {
@@ -1465,7 +1566,8 @@ describe('readVideoBoard', () => {
     const { admin, read } = fakeSite({ products: rows, objects: stored(rows.map((p) => fileOf(TODAY, p)), hoursAgo(2)) });
 
     vi.mocked(getPriceStatsManyChecked).mockRejectedValueOnce(new Error('sin conexión'));
-    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, lastRenderedAt: hoursAgo(2), storageReady: true });
+    // Pero dice cuántos quedaron escondidos por eso.
+    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, hiddenUnread: 2, lastRenderedAt: hoursAgo(2), storageReady: true });
     // Ni señales ni marcas: no hay nada que mostrar.
     expect(read).toEqual(['products']);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -1576,7 +1678,7 @@ describe('readVideoBoard', () => {
   it('con todos los videos caídos lo dice, y no calcula nada más', async () => {
     const repriced = strong({ price: 70_000 });
     const { admin, read } = fakeSite({ products: [repriced], objects: stored([fileOf(TODAY, repriced, 60_000)], hoursAgo(2)) });
-    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 1, lastRenderedAt: hoursAgo(2), storageReady: true });
+    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 1, hiddenUnread: 0, lastRenderedAt: hoursAgo(2), storageReady: true });
     expect(read).toEqual(['products']);
   });
 });

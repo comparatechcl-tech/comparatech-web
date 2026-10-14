@@ -25,7 +25,7 @@ export default async function VideosPage() {
   const admin = getSupabaseAdmin();
   const now = new Date();
 
-  let board: VideoBoard = { videos: [], stale: 0, lastRenderedAt: null, storageReady: true };
+  let board: VideoBoard = { videos: [], stale: 0, lastRenderedAt: null, storageReady: true, hiddenUnread: 0 };
   let error: string | null = null;
   if (!admin) error = 'Supabase admin no configurado';
   else {
@@ -37,6 +37,8 @@ export default async function VideosPage() {
   }
 
   const { videos, stale } = board;
+  // Comparado y no tomado tal cual: un número que no sea mayor que cero no se cuenta.
+  const hidden = board.hiddenUnread > 0 ? board.hiddenUnread : 0;
   const last = chileDateTime(board.lastRenderedAt);
   const maxAgeHours = Math.round(VIDEO_RULES.maxPriceAgeMs / 3_600_000);
 
@@ -103,11 +105,24 @@ export default async function VideosPage() {
         </div>
       )}
 
-      {!error && videos.length === 0 && (
+      {/* Con videos escondidos por un rato no se dice que no hay: sí hay, y el aviso de abajo dice por qué no se ven. */}
+      {!error && videos.length === 0 && hidden === 0 && (
         <p className="mt-6 rounded-xl border border-border bg-surface px-4 py-6 text-sm text-muted">
           {board.storageReady ? 'Ahora no hay videos listos.' : 'Todavía no se ha generado el primer video.'} Se
           preparan solos tres veces al día ({RENDER_TIMES}) y aparecen acá cuando están listos.
           {board.storageReady ? ' Vuelve a mirar más tarde.' : ''}
+        </p>
+      )}
+
+      {/*
+        Sin el historial de precios no se sabe si lo que dice el video (la
+        baja) sigue en pie, y el video no se muestra. Es por un rato: vuelve
+        solo en otra carga, sin armarlo de nuevo.
+      */}
+      {hidden > 0 && (
+        <p className="mt-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          {hidden === 1 ? '1 video no se muestra' : `${hidden} videos no se muestran`} ahora porque no se pudo revisar su
+          historial de precios. Vuelve a mirar en unos minutos.
         </p>
       )}
 

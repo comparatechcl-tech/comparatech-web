@@ -13,11 +13,11 @@ import {
   textTargets,
   type CopyTarget,
   type FileState,
-  type GestureEnv,
   type Mark,
   type Note,
   type VideoGestures,
 } from './gestures';
+import { browserEnv, screenUi, type ManualCopy, type PostedByNetwork, type Visit } from './wiring';
 
 /**
  * Los videos del día, pensados para el teléfono: compartir el archivo directo
@@ -33,11 +33,11 @@ import {
  * play (preload="none"), por lo mismo.
  *
  * Lo que pasa al tocar cada botón está en ./gestures, que no sabe de React ni
- * del navegador: acá queda el estado de la pantalla y el dibujo.
+ * del navegador; lo que une esas reglas con el navegador y con el estado de
+ * la pantalla, en ./wiring. Acá queda el estado y el dibujo.
  */
 
-export type { Mark };
-export type PostedByNetwork = Partial<Record<VideoNetwork, Mark>>;
+export type { Mark, PostedByNetwork };
 
 /**
  * Las redes, en el orden en que se muestran. Un Record y no una lista: si el
@@ -73,10 +73,6 @@ const BUTTON_MARKED = `${BUTTON_SHAPE} border-accent/60 bg-accent/10 text-accent
  * una lista pedida de nuevo trae del servidor lo que vale, y lo anotado para
  * la anterior no se le aplica.
  */
-interface Visit {
-  openedAt: number;
-  changes: Map<string, Mark | null>;
-}
 const visits = new Map<number, Visit>();
 const MAX_VISITS = 6;
 
@@ -148,45 +144,10 @@ export function saveLabel(saving: boolean): string {
 }
 
 /**
- * Baja el video a memoria, o null si no se pudo. Dos intentos: en el teléfono
- * una descarga se corta fácil al pasar a otra app.
+ * El navegador de verdad. globalThis y no window: este módulo también se
+ * carga en el servidor, donde no hay window; nada se lee hasta que hay un toque.
  */
-export async function fetchVideoFile(url: string, fileName: string, fetcher: typeof fetch = fetch): Promise<File | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetcher(url);
-      if (!res.ok) throw new Error(String(res.status));
-      const blob = await res.blob();
-      if (blob.size === 0) throw new Error('archivo vacío');
-      // Siempre video/mp4, diga lo que diga el almacén: con ese tipo el teléfono decide a qué apps ofrecerlo.
-      return new File([blob], fileName, { type: 'video/mp4' });
-    } catch {
-      /* se intenta una vez más */
-    }
-  }
-  return null;
-}
-
-/** Lo que las reglas de ./gestures tocan del navegador, de verdad. Nada se llama hasta que hay un toque. */
-const BROWSER: GestureEnv = {
-  share: (data) => navigator.share(data),
-  writeText: (text) => navigator.clipboard.writeText(text),
-  fetchFile: (url, fileName) => fetchVideoFile(url, fileName),
-  createObjectURL: (file) => URL.createObjectURL(file),
-  revokeObjectURL: (url) => URL.revokeObjectURL(url),
-  download: (url, fileName) => {
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-  },
-  now: () => Date.now(),
-  later: (run, ms) => {
-    setTimeout(run, ms);
-  },
-};
+const BROWSER = browserEnv(globalThis);
 
 /** El video directo solo se enlaza si es una dirección web: nunca otro esquema en un href. */
 const isWebUrl = (url: string) => /^https?:\/\//i.test(url);
@@ -231,7 +192,7 @@ export interface VideoCardProps {
   busy: string | null;
   note: Note | undefined;
   /** El texto que no se pudo copiar, para copiarlo a mano. */
-  manual: { label: string; text: string } | undefined;
+  manual: ManualCopy | undefined;
   gestures: CardGestures;
 }
 
@@ -431,18 +392,10 @@ export function VideoList({
   /** Lo último que se copió, dicho en palabras para quien usa lector de pantalla. */
   const [announced, setAnnounced] = useState('');
   /** El texto que no se pudo copiar, para copiarlo a mano. */
-  const [manual, setManual] = useState<Record<string, { label: string; text: string }>>({});
+  const [manual, setManual] = useState<Record<string, ManualCopy>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, Note>>({});
   const [, startTransition] = useTransition();
-
-  /** Quita una entrada de un estado por producto, sin crear otro objeto si no estaba. */
-  const without = <T,>(all: Record<string, T>, videoId: string): Record<string, T> => {
-    if (!(videoId in all)) return all;
-    const rest = { ...all };
-    delete rest[videoId];
-    return rest;
-  };
 
   // Las reglas se arman una vez por lista: guardan los archivos ya bajados y
   // los candados de doble toque, que tienen que durar de un toque al siguiente.
@@ -450,26 +403,11 @@ export function VideoList({
     createVideoGestures(
       BROWSER,
       { mark: markVideoPosted, undo: undoVideoPosted },
-      {
-        note: (videoId, note) => setNotes((n) => (note ? { ...n, [videoId]: note } : without(n, videoId))),
-        fileState: (videoId, state) => setFileState((s) => ({ ...s, [videoId]: state })),
-        saving: (videoId, on) => setSaving((s) => ({ ...s, [videoId]: on })),
-        copied: (key, on) => setCopied((c) => (on ? key : c === key ? null : c)),
-        announce: setAnnounced,
-        manual: (videoId, pending) => setManual((m) => (pending ? { ...m, [videoId]: pending } : without(m, videoId))),
-        busy: setBusy,
-        posted: (videoId, network, mark) => {
-          // También en la visita: es lo que sobrevive a ir a otra pestaña y volver con "atrás".
-          visit.changes.set(markKey(videoId, network), mark);
-          setPosted((p) => {
-            const next: PostedByNetwork = { ...(p[videoId] ?? {}) };
-            if (mark) next[network] = mark;
-            else delete next[network];
-            return { ...p, [videoId]: next };
-          });
-        },
-        run: (job) => startTransition(job),
-      },
+      screenUi(
+        { setNotes, setFileState, setSaving, setCopied, setAnnounced, setManual, setBusy, setPosted, startTransition },
+        visit
+      ),
+      // La edad de la lista cuenta desde la visita, no desde que se armaron las reglas: volver con "atrás" no la rejuvenece.
       { maxPriceAgeMs, openedAt: visit.openedAt }
     )
   );

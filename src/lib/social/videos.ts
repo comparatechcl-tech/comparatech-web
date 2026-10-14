@@ -6,7 +6,7 @@ import { buildVideoTexts, captionDiscount, mlPhotoJpg, type VideoTexts } from '@
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings } from '@/lib/settings';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
-import { shortProductName } from '@/lib/text';
+import { reelProductName } from '@/lib/text';
 import { addInterestSignals, countUnreadHistory, readInterestEvidence, readSocialEvidence } from '@/lib/social/drops';
 import { interestScore, type InterestEvidence } from '@/lib/social/interest';
 import { NETWORK_RULES, VIDEO_MARK } from '@/lib/social/networks';
@@ -163,6 +163,7 @@ export function parseVideoObjectName(name: string): VideoObject | null {
  * se revisa después no pueden separarse.
  */
 export interface VideoClaims {
+  /** El nombre que el video lleva escrito (reelProductName): sin códigos de fábrica. */
   nombre_corto: string;
   marca: string | null;
   /** Precio de lista, solo si es mayor que el precio. */
@@ -185,7 +186,10 @@ export function videoClaims(
 ): VideoClaims {
   const discount = captionDiscount(product);
   return {
-    nombre_corto: shortProductName(product.name),
+    // El nombre que va escrito en el video: sin los códigos de fábrica, que en
+    // pantalla no le dicen nada a nadie (reelProductName). Los textos que se
+    // pegan en cada red siguen con el nombre corto de siempre.
+    nombre_corto: reelProductName(product.name),
     marca: product.brand || null,
     precio_lista: discount > 0 ? product.original_price : null,
     descuento: discount,
@@ -622,9 +626,19 @@ export interface VideoBoard {
    * descuento, baja, envío gratis, Full, nombre o marca) o salió del sitio.
    * No cuenta lo que se esconde por un rato y vuelve solo, sin armarlo de
    * nuevo (precio sin revisar en las últimas 6 horas, o historial de precios
-   * que no se pudo leer en esta carga), ni lo que el puntaje ya no publicaría.
+   * que no se pudo leer en esta carga, que va en hiddenUnread), ni lo que el
+   * puntaje ya no publicaría.
    */
   stale: number;
+  /**
+   * Productos con video de hoy o de ayer que no se muestran porque en esta
+   * carga no se pudo leer su historial de precios: sin él no se sabe qué baja
+   * diría hoy el video. No es que estén viejos: con otra carga vuelven solos.
+   * Uno por producto, como la lista. Solo cuenta los que tienen un video con
+   * el precio de ahora y su precio recién revisado: lo demás no se mostraría
+   * igual aunque el historial se leyera.
+   */
+  hiddenUnread: number;
   /** Cuándo se subió el último video de hoy o de ayer, sirva o no. */
   lastRenderedAt: string | null;
   /** false si el bucket todavía no existe (el generador no ha corrido nunca). */
@@ -674,17 +688,20 @@ async function readProductsById(admin: SupabaseClient, ids: string[]): Promise<M
  *
  * La huella lleva la baja que confirma el historial de precios. Si el de un
  * producto no se pudo leer en esta carga, no se sabe qué diría hoy su video:
- * no se muestra, y tampoco se da por viejo (a la próxima carga vuelve).
+ * no se muestra, tampoco se da por viejo (a la próxima carga vuelve) y se
+ * cuenta en hiddenUnread, para que la página lo diga en vez de callarlo.
  *
  * Si el bucket no existe todavía no lanza: storageReady va en false. Solo lee.
  */
 export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<VideoBoard> {
-  if (!(await videoBucketExists(admin))) return { videos: [], stale: 0, lastRenderedAt: null, storageReady: false };
+  if (!(await videoBucketExists(admin))) {
+    return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: false };
+  }
 
   const today = chileDateKey(now);
   const folders = await Promise.all([today, shiftDateKey(today, -1)].map((date) => listVideoFolder(admin, date)));
   const stored = folders[0].concat(folders[1]);
-  if (stored.length === 0) return { videos: [], stale: 0, lastRenderedAt: null, storageReady: true };
+  if (stored.length === 0) return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: true };
 
   // Del más nuevo al más antiguo: el día de la carpeta y, dentro del día, la hora en que se subió.
   stored.sort((a, b) => (a.date === b.date ? timeOf(b.renderedAt) - timeOf(a.renderedAt) : a.date < b.date ? 1 : -1));
@@ -713,7 +730,7 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
     if (!isOnSale(product) || list.length === 0) stale++;
     else priced.push({ product, list });
   }
-  if (priced.length === 0) return { videos: [], stale, lastRenderedAt, storageReady: true };
+  if (priced.length === 0) return { videos: [], stale, hiddenUnread: 0, lastRenderedAt, storageReady: true };
 
   // La baja del historial es parte de lo que el video dice: sin leerlo no se
   // puede saber cuál es el nombre de hoy.
@@ -722,10 +739,15 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
     now
   );
   const live: { video: StoredVideo; product: SocialProduct; claims: VideoClaims }[] = [];
+  let hiddenUnread = 0;
   for (const { product, list } of priced) {
     const seen = history.get(product.id);
-    // No se pudo leer: ni se muestra ni quedó viejo.
-    if (!seen || seen.historyUnread === true) continue;
+    // No se pudo leer: ni se muestra ni quedó viejo. Se cuenta si es lo único
+    // que lo esconde; con el precio sin revisar no saldría de todos modos.
+    if (!seen || seen.historyUnread === true) {
+      if (isFreshlyChecked(product, now)) hiddenUnread++;
+      continue;
+    }
     const claims = videoClaims(product, evidenceDrop(seen));
     const fingerprint = videoFingerprint(claims);
     // De cada producto, el video más nuevo que se llame como se llamaría hoy.
@@ -742,7 +764,7 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
     // diciendo la verdad: no se muestra, pero tampoco quedó viejo.
     if (isFreshlyChecked(product, now)) live.push({ video, product, claims });
   }
-  if (live.length === 0) return { videos: [], stale, lastRenderedAt, storageReady: true };
+  if (live.length === 0) return { videos: [], stale, hiddenUnread, lastRenderedAt, storageReady: true };
 
   const since = new Date(now.getTime() - VIDEO_RULES.repeatAfterDays * DAY_MS);
   const [evidence, marks, settings] = await Promise.all([
@@ -794,5 +816,5 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
     (a, b) => Number(pending(b)) - Number(pending(a)) || b.points - a.points || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   );
 
-  return { videos: videos.slice(0, VIDEO_BOARD_MAX), stale, lastRenderedAt, storageReady: true };
+  return { videos: videos.slice(0, VIDEO_BOARD_MAX), stale, hiddenUnread, lastRenderedAt, storageReady: true };
 }

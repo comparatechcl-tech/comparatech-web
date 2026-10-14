@@ -260,6 +260,19 @@ describe('buildVideoTexts', () => {
     // Un nombre limpio no se toca.
     expect(youtubeTitle({ name: 'Parlante JBL Go 4', price: 19_990, original_price: null })).toBe('Parlante JBL Go 4 a $19.990');
   });
+
+  it('el título lleva el nombre como en el reel, sin el código de fábrica; los demás textos, el nombre corto de siempre', () => {
+    const watch = { ...base, name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3 - Color Negro' };
+    const watchTexts = buildVideoTexts(watch, opts.now);
+    expect(watchTexts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $27.990, 60% por debajo del precio de lista');
+    for (const text of [watchTexts.instagram, watchTexts.tiktok, watchTexts.facebook, watchTexts.youtubeDescription]) {
+      expect(text.split('\n')).toContain('Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3');
+    }
+    // El código que dice con qué calza un repuesto se queda también en el título.
+    expect(youtubeTitle({ name: 'Cargador Para Notebook Lenovo Adlx65ndc3a 20v 3.25a', price: 19_990, original_price: null })).toBe(
+      'Cargador Para Notebook Lenovo Adlx65ndc3a 20v 3.25a a $19.990'
+    );
+  });
 });
 
 describe('ayudantes', () => {
