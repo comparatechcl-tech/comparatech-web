@@ -367,6 +367,19 @@ const FAMILY_PRICE_SLACK = 1.05;
 const NO_EVIDENCE: InterestEvidence = { drop: null, min30: null, daysTracked: 0 };
 
 /**
+ * La baja comprobada con el historial, en %, o null si no hay (o si el número
+ * no sirve). Puro.
+ *
+ * Es la cuenta de la selección, y la usa también quien revisa después si lo
+ * que se armó con ella sigue siendo cierto (el tablero de videos): si cada
+ * uno sacara la baja a su modo, un mismo producto diría dos cosas.
+ */
+export function evidenceDrop(evidence: InterestEvidence | null | undefined): number | null {
+  const seen = evidence ? evidence.drop : null;
+  return seen && Number.isFinite(seen.pct) && seen.pct > 0 ? seen.pct : null;
+}
+
+/**
  * Elige qué publicar. La puerta de entrada: a la venta, sin repetir en 14
  * días, con el precio recién revisado y una rebaja que valga la pena (o una
  * baja comprobada con el historial).
@@ -378,6 +391,10 @@ const NO_EVIDENCE: InterestEvidence = { drop: null, min30: null, daysTracked: 0 
  * o deja bajo el piso no sale aunque sobren cupos: mejor un post menos que
  * rellenar. Tampoco sale un producto que el sitio tiene bastante más barato
  * en otra versión del mismo modelo, se haya publicado esa o no.
+ *
+ * El piso se mide sin las señales (clics del sitio y puesto entre los más
+ * vendidos), que se pueden fabricar desde afuera: ordenan lo que entra, pero
+ * no hacen entrar nada. Este canal publica sin que nadie mire.
  *
  * Puro: recibe ya leído lo que el historial dice de cada producto (evidence).
  */
@@ -422,8 +439,7 @@ export function pickByRules<T extends SocialProduct>(
 
     const evidence = opts.evidence?.get(p.id) ?? NO_EVIDENCE;
     const discount = captionDiscount(p);
-    const seen = evidence.drop;
-    const drop = seen && Number.isFinite(seen.pct) && seen.pct > 0 ? seen.pct : null;
+    const drop = evidenceDrop(evidence);
     if (discount < rules.minDiscount && (drop === null || drop < rules.minDrop)) continue;
 
     const score = interestScore(p, evidence);

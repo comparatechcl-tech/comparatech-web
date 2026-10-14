@@ -35,6 +35,13 @@ function supabaseOrigin() {
 }
 
 /**
+ * La carpeta pública del bucket de los videos, dentro del Storage. El nombre
+ * del bucket es VIDEO_BUCKET de src/lib/social/videos.ts (este archivo no
+ * puede importarlo): si cambia allá, cambia acá, y un test los compara.
+ */
+const VIDEO_FOLDER = '/storage/v1/object/public/reels/';
+
+/**
  * CSP solo en producción: `next dev` usa eval y websockets para recargar en
  * caliente, y una CSP estricta lo rompe. Sin nonces a propósito: un nonce
  * cambia en cada request y obligaría a renderizar todo en cada visita,
@@ -43,12 +50,14 @@ function supabaseOrigin() {
  * Las imágenes de productos vienen directo del CDN de Mercado Libre.
  *
  * Los videos de /admin/videos y sus portadas están en el Storage del propio
- * proyecto de Supabase, que es otro dominio. Ese origen (y nada más) se
- * agrega en tres lugares: img-src para la portada, media-src para reproducir
- * el video, y connect-src porque para compartirlo o guardarlo la página lo
- * baja entero con fetch (el atributo download no sirve entre dominios). Sin
- * esto, en el sitio publicado el reproductor queda en negro y Compartir
- * falla, y en local no se nota porque ahí no hay CSP.
+ * proyecto de Supabase, que es otro dominio. Se abre solo la carpeta pública
+ * de ese bucket, no el proyecto entero: en el mismo dominio está la API de la
+ * base (/rest/v1), y el navegador del sitio nunca tiene por qué hablarle. La
+ * carpeta se agrega en tres lugares: img-src para la portada, media-src para
+ * reproducir el video, y connect-src porque para compartirlo o guardarlo la
+ * página lo baja entero con fetch (el atributo download no sirve entre
+ * dominios). Sin esto, en el sitio publicado el reproductor queda en negro y
+ * Compartir falla, y en local no se nota porque ahí no hay CSP.
  */
 function buildContentSecurityPolicy() {
   // En los deploys de Preview, Vercel inyecta su barra de comentarios desde
@@ -57,7 +66,9 @@ function buildContentSecurityPolicy() {
   const toolbar = process.env.VERCEL_ENV === 'preview';
   const extra = (sources) => (toolbar ? ` ${sources}` : '');
 
-  const storage = supabaseOrigin();
+  const origin = supabaseOrigin();
+  // Termina en "/": así la CSP la toma como carpeta y deja pasar lo que cuelga de ella, y nada más.
+  const storage = origin ? `${origin}${VIDEO_FOLDER}` : null;
   const media = storage ? ` ${storage}` : '';
 
   return [

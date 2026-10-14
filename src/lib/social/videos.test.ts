@@ -31,14 +31,16 @@ vi.mock('@/lib/social/telegram', async (original) => ({
   readFreshSocialProducts: vi.fn(),
 }));
 
+import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildVideoTexts } from '@/lib/content/captions';
 import type { PriceStats } from '@/lib/deals';
 import { getPriceStatsMany, getPriceStatsManyChecked } from '@/lib/queries/price-history';
-import { MIN_INTEREST_POINTS } from '@/lib/social/interest';
+import { MIN_INTEREST_POINTS, floorPoints, interestScore } from '@/lib/social/interest';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { readFreshSocialProducts, type SocialProduct } from '@/lib/social/telegram';
+import { shortProductName } from '@/lib/text';
 import {
   VIDEO_BOARD_MAX,
   VIDEO_BUCKET,
@@ -58,9 +60,12 @@ import {
   readVideoPicks,
   removeOldVideos,
   signVideoUploads,
+  videoClaims,
+  videoFingerprint,
   videoObjectName,
   videoPhoto,
   videoPublicUrl,
+  type VideoClaims,
 } from '@/lib/social/videos';
 import { GET as planRoute } from '@/app/api/social/videos/plan/route';
 
@@ -91,10 +96,18 @@ interface Seed {
   storageErrors?: Partial<Record<'getBucket' | 'createBucket' | 'list' | 'sign' | 'remove', StorageFault>>;
 }
 
+/** Una consulta a la base de mentira: a qué tabla, con qué listas de .in() y qué página. */
+interface Asked {
+  table: string;
+  in: Record<string, unknown[]>;
+  range: [number, number] | null;
+}
+
 /**
  * El sitio de mentira: una base que filtra como la de verdad (eq, neq, in,
  * not … is null, gte, orden, tope y páginas) y un almacén con carpetas. Anota
- * qué tablas se leyeron y cada operación del almacén.
+ * qué tablas se leyeron, cada consulta que se ejecutó y cada operación del
+ * almacén.
  */
 function fakeSite(seed: Seed = {}) {
   const tables: Record<string, Row[]> = {
@@ -104,9 +117,12 @@ function fakeSite(seed: Seed = {}) {
     product_candidates: seed.candidates ?? [],
   };
   const read: string[] = [];
+  /** Cada consulta que llegó a ejecutarse, en orden. */
+  const asked: Asked[] = [];
 
   function from(table: string) {
     read.push(table);
+    const query: Asked = { table, in: {}, range: null };
     const filters: ((row: Row) => boolean)[] = [];
     let sort: { column: string; ascending: boolean } | null = null;
     let max = Infinity;
@@ -122,6 +138,7 @@ function fakeSite(seed: Seed = {}) {
         return builder;
       },
       in(column: string, values: unknown[]) {
+        query.in[column] = values;
         filters.push((row) => values.includes(row[column]));
         return builder;
       },
@@ -143,9 +160,11 @@ function fakeSite(seed: Seed = {}) {
       },
       range(start: number, end: number) {
         page = [start, end];
+        query.range = [start, end];
         return builder;
       },
       then<T>(resolve: (value: { data: Row[] | null; error: DbError | null }) => T) {
+        asked.push(query);
         const error = seed.tableErrors?.[table];
         if (error) return Promise.resolve({ data: null, error }).then(resolve);
         let rows = (tables[table] ?? []).filter((row) => filters.every((f) => f(row)));
@@ -225,7 +244,7 @@ function fakeSite(seed: Seed = {}) {
   };
 
   const admin = { from, storage } as unknown as SupabaseClient;
-  return { admin, read, ops, created, signed, objects, tables, hasBucket: () => bucket !== null };
+  return { admin, read, asked, ops, created, signed, objects, tables, hasBucket: () => bucket !== null };
 }
 
 let seq = 0;
@@ -302,9 +321,46 @@ function stats(price: number, over: Partial<PriceStats> = {}): PriceStats {
 const droppedFrom = (price: number, previous: number) =>
   stats(price, { max30: previous, maxTracked: previous, previousPrice: previous, lastChangeAt: daysAgo(2) });
 
+/** SHA-256 de un texto, en hexadecimal: la cuenta de la huella hecha acá, sin pasar por el código del sitio. */
+const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+
+/**
+ * La huella que le corresponde a un producto, sacada a mano: los primeros 8
+ * caracteres del SHA-256 de lo que su video dice además del precio. `drop` es
+ * la baja del historial ya redondeada, y `price` el precio con que se armó el
+ * video (el descuento sale de ahí).
+ */
+function printOf(p: SocialProduct, drop: number | null = null, price: number = p.price): string {
+  const discount = p.original_price && p.original_price > price ? Math.round((1 - price / p.original_price) * 100) : 0;
+  const said = [
+    shortProductName(p.name),
+    p.brand || null,
+    discount > 0 ? p.original_price : null,
+    discount,
+    drop,
+    p.offer_info?.free_shipping === true,
+    p.offer_info?.is_full === true,
+  ];
+  return sha256(JSON.stringify(said)).slice(0, 8);
+}
+
 /** El nombre del video de un producto en el almacén, sin extensión. */
-const fileOf = (date: string, p: Pick<SocialProduct, 'id' | 'price'>, price: number = p.price, template = 'estudio') =>
-  `${date}/${p.id}-${price}-${template}`;
+const fileOf = (date: string, p: SocialProduct, price: number = p.price, template = 'estudio', drop: number | null = null) =>
+  `${date}/${p.id}-${price}-${template}-${printOf(p, drop, price)}`;
+
+/**
+ * Las plantillas son una lista fija en el código, y hoy hay una sola. Para
+ * probar el día en que haya más, se agregan mientras dura el test.
+ */
+async function withTemplates<T>(extra: string[], run: () => Promise<T>): Promise<T> {
+  const list = VIDEO_TEMPLATES as unknown as string[];
+  list.push(...extra);
+  try {
+    return await run();
+  } finally {
+    list.splice(list.length - extra.length, extra.length);
+  }
+}
 
 /** Los dos archivos (video y portada) de cada nombre, subidos a esa hora. */
 function stored(files: string[], at: string = hoursAgo(3)): Record<string, string> {
@@ -365,11 +421,11 @@ afterEach(() => {
 
 describe('nombre de los archivos', () => {
   const ID = '6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60';
-  const video = { date: '2026-10-13', productId: ID, price: 27_990, template: 'estudio' };
+  const video = { date: '2026-10-13', productId: ID, price: 27_990, template: 'estudio', fingerprint: '0a1b2c3d' };
 
-  it('arma "AAAA-MM-DD/<id>-<precio>-<plantilla>" y lo lee de vuelta', () => {
+  it('arma "AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>" y lo lee de vuelta', () => {
     const name = videoObjectName(video);
-    expect(name).toBe(`2026-10-13/${ID}-27990-estudio`);
+    expect(name).toBe(`2026-10-13/${ID}-27990-estudio-0a1b2c3d`);
     expect(parseVideoObjectName(name!)).toEqual(video);
 
     for (const other of [
@@ -377,6 +433,10 @@ describe('nombre de los archivos', () => {
       { ...video, price: 2_147_483_647 },
       { ...video, template: 'ficha2' },
       { ...video, date: '2028-02-29' },
+      { ...video, fingerprint: '00000000' },
+      { ...video, fingerprint: 'ffffffff' },
+      // Una plantilla que parece una huella no confunde: son dos tramos distintos.
+      { ...video, template: 'deadbeef', fingerprint: 'cafe0123' },
     ]) {
       expect(parseVideoObjectName(videoObjectName(other)!)).toEqual(other);
     }
@@ -400,13 +460,23 @@ describe('nombre de los archivos', () => {
       { ...video, template: 'estudio-2' },
       { ...video, template: 'a/b' },
       { ...video, template: 'x'.repeat(25) },
+      // La huella son exactamente 8 caracteres en hexadecimal, en minúsculas.
+      { ...video, fingerprint: '' },
+      { ...video, fingerprint: '0a1b2c3' },
+      { ...video, fingerprint: '0a1b2c3d4' },
+      { ...video, fingerprint: '0A1B2C3D' },
+      { ...video, fingerprint: '0a1b2c3g' },
+      { ...video, fingerprint: '0a1b-c3d' },
+      { ...video, fingerprint: '0a1b2c3d/..' },
+      { ...video, fingerprint: undefined as unknown as string },
+      { ...video, fingerprint: 12345678 as unknown as string },
     ]) {
       expect(videoObjectName(bad)).toBeNull();
     }
   });
 
   it('al leer rechaza todo lo que no calce exacto', () => {
-    const good = `2026-10-13/${ID}-27990-estudio`;
+    const good = `2026-10-13/${ID}-27990-estudio-0a1b2c3d`;
     expect(parseVideoObjectName(good)).not.toBeNull();
     for (const bad of [
       '',
@@ -416,22 +486,32 @@ describe('nombre de los archivos', () => {
       `${good}\n`,
       `reels/${good}`,
       `${good}/otro`,
+      // Los nombres de antes de la huella: no se sabe qué dice ese video.
+      `2026-10-13/${ID}-27990-estudio`,
       `2026-10-13/${ID}-27990`,
       `2026-10-13/${ID}-estudio`,
-      `2026-10-13/${ID}-027990-estudio`,
-      `2026-10-13/${ID}-0-estudio`,
-      `2026-10-13/${ID}--27990-estudio`,
-      `2026-10-13/${ID}-27.990-estudio`,
-      `2026-10-13/${ID}-27990-Estudio`,
-      `2026-10-13/${ID}-27990-estudio-v2`,
-      `2026-10-13/${ID}-99999999999-estudio`,
-      `2026-10-13/${ID}-3000000000-estudio`,
-      `2026-10-13/${ID.toUpperCase()}-27990-estudio`,
-      `2026-10-13/${ID.slice(1)}-27990-estudio`,
-      `2026-02-31/${ID}-27990-estudio`,
-      `2026-1-3/${ID}-27990-estudio`,
-      `2026-10-13\\${ID}-27990-estudio`,
-      `../2026-10-13/${ID}-27990-estudio`,
+      `2026-10-13/${ID}-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-27990-0a1b2c3d`,
+      `2026-10-13/${ID}-027990-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-0-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}--27990-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-27.990-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-27990-Estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-27990-estudio-v2-0a1b2c3d`,
+      `2026-10-13/${ID}-27990-estudio-0a1b2c3`,
+      `2026-10-13/${ID}-27990-estudio-0a1b2c3d4`,
+      `2026-10-13/${ID}-27990-estudio-0A1B2C3D`,
+      `2026-10-13/${ID}-27990-estudio-0a1b2c3g`,
+      `2026-10-13/${ID}-27990-estudio-0a1b2c3d-0a1b2c3d`,
+      `2026-10-13/${ID}-27990-estudio-`,
+      `2026-10-13/${ID}-99999999999-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-3000000000-estudio-0a1b2c3d`,
+      `2026-10-13/${ID.toUpperCase()}-27990-estudio-0a1b2c3d`,
+      `2026-10-13/${ID.slice(1)}-27990-estudio-0a1b2c3d`,
+      `2026-02-31/${ID}-27990-estudio-0a1b2c3d`,
+      `2026-1-3/${ID}-27990-estudio-0a1b2c3d`,
+      `2026-10-13\\${ID}-27990-estudio-0a1b2c3d`,
+      `../2026-10-13/${ID}-27990-estudio-0a1b2c3d`,
     ]) {
       expect(parseVideoObjectName(bad)).toBeNull();
     }
@@ -440,10 +520,105 @@ describe('nombre de los archivos', () => {
 
   it('la dirección pública es la del bucket público del proyecto', () => {
     expect(VIDEO_BUCKET).toBe('reels');
-    expect(videoPublicUrl(`2026-10-13/${ID}-27990-estudio.mp4`)).toBe(
-      `${STORAGE_URL}/storage/v1/object/public/reels/2026-10-13/${ID}-27990-estudio.mp4`
+    expect(videoPublicUrl(`2026-10-13/${ID}-27990-estudio-0a1b2c3d.mp4`)).toBe(
+      `${STORAGE_URL}/storage/v1/object/public/reels/2026-10-13/${ID}-27990-estudio-0a1b2c3d.mp4`
     );
     expect(videoPublicUrl('a.jpg', 'https://otro.test/')).toBe('https://otro.test/storage/v1/object/public/reels/a.jpg');
+  });
+});
+
+describe('lo que el video dice y su huella', () => {
+  const claims: VideoClaims = {
+    nombre_corto: 'Audífonos Bluetooth JBL Tune 520BT',
+    marca: 'JBL',
+    precio_lista: 100_000,
+    descuento: 40,
+    baja_historial: null,
+    envio_gratis: true,
+    full: false,
+  };
+
+  it('videoClaims arma lo que el video lleva escrito además del precio', () => {
+    const p = strong({ name: 'Audífonos Bluetooth JBL Tune 520BT - Color Negro' });
+    expect(videoClaims(p, null)).toEqual(claims);
+    // La baja va en % entero, como la escribe el video.
+    expect(videoClaims(p, 12.4).baja_historial).toBe(12);
+    expect(videoClaims(p, 12.5).baja_historial).toBe(13);
+    // Un número que no sirve es "sin baja", no un NaN que se cuele en la huella.
+    expect(videoClaims(p, Number.NaN).baja_historial).toBeNull();
+
+    // Sin descuento de lista no hay precio de lista que mostrar; sin marca, null; sin datos de entrega, dos "no".
+    const bare = strong({ name: p.name, original_price: null, brand: '', offer_info: null });
+    expect(videoClaims(bare, 25)).toEqual({
+      nombre_corto: 'Audífonos Bluetooth JBL Tune 520BT',
+      marca: null,
+      precio_lista: null,
+      descuento: 0,
+      baja_historial: 25,
+      envio_gratis: false,
+      full: false,
+    });
+    // Un precio de lista que no es mayor que el precio tampoco se muestra.
+    expect(videoClaims(strong({ original_price: 60_000 }), null)).toMatchObject({ precio_lista: null, descuento: 0 });
+    expect(videoClaims(strong({ original_price: 50_000 }), null)).toMatchObject({ precio_lista: null, descuento: 0 });
+    // "Envío gratis" y "Full" solo con un sí explícito.
+    const unknown = strong({ offer_info: { free_shipping: null, is_full: undefined } as SocialProduct['offer_info'] });
+    expect(videoClaims(unknown, null)).toMatchObject({ envio_gratis: false, full: false });
+  });
+
+  it('la huella son los primeros 8 caracteres del SHA-256 de esos datos, siempre en el mismo orden', () => {
+    // El contrato, escrito con todas sus letras: si esta cuenta cambia, los
+    // videos ya guardados dejan de reconocerse.
+    const written = '["Audífonos Bluetooth JBL Tune 520BT","JBL",100000,40,null,true,false]';
+    expect(videoFingerprint(claims)).toBe(sha256(written).slice(0, 8));
+    expect(videoFingerprint(claims)).toBe('7b6ff293');
+    expect(
+      videoFingerprint({ ...claims, marca: null, precio_lista: null, descuento: 0, baja_historial: 25, envio_gratis: false })
+    ).toBe('188b17c7');
+    expect(videoFingerprint(claims)).toMatch(/^[0-9a-f]{8}$/);
+    // No depende del orden en que vengan los campos del objeto.
+    const shuffled: VideoClaims = {
+      full: false,
+      envio_gratis: true,
+      baja_historial: null,
+      descuento: 40,
+      precio_lista: 100_000,
+      marca: 'JBL',
+      nombre_corto: 'Audífonos Bluetooth JBL Tune 520BT',
+    };
+    expect(videoFingerprint(shuffled)).toBe('7b6ff293');
+  });
+
+  it('cualquier cosa que el video diga distinto da otra huella', () => {
+    const changes: Partial<VideoClaims>[] = [
+      { nombre_corto: 'Audífonos Bluetooth JBL Tune 720BT' },
+      { marca: 'Sony' },
+      { marca: null },
+      { precio_lista: 110_000 },
+      { precio_lista: null },
+      { descuento: 39 },
+      { descuento: 0 },
+      { baja_historial: 12 },
+      { baja_historial: 0 },
+      { envio_gratis: false },
+      { full: true },
+      // Los dos "sí" cambiados de lugar no dan lo mismo.
+      { envio_gratis: false, full: true },
+    ];
+    const prints = changes.map((change) => videoFingerprint({ ...claims, ...change }));
+    for (const print of prints) expect(print).toMatch(/^[0-9a-f]{8}$/);
+    expect(new Set([videoFingerprint(claims), ...prints]).size).toBe(changes.length + 1);
+  });
+
+  it('el nombre de un video lleva la huella de su producto, y con ella se lee de vuelta', () => {
+    const p = strong({ name: 'Audífonos Bluetooth JBL Tune 520BT - Color Negro' });
+    const fingerprint = videoFingerprint(videoClaims(p, null));
+    expect(fingerprint).toBe('7b6ff293');
+    // La cuenta hecha a mano en este archivo da lo mismo que la del sitio.
+    expect(printOf(p)).toBe(fingerprint);
+    const name = videoObjectName({ date: TODAY, productId: p.id, price: p.price, template: 'estudio', fingerprint });
+    expect(name).toBe(`${TODAY}/${p.id}-60000-estudio-7b6ff293`);
+    expect(name).toBe(fileOf(TODAY, p));
   });
 });
 
@@ -577,8 +752,27 @@ describe('readVideoPicks', () => {
     expect(plan.picks).toHaveLength(4);
     for (const pick of plan.picks) {
       expect(pick.template).toBe('estudio');
-      expect(pick.file).toBe(`${TODAY}/${pick.product.id}-60000-estudio`);
-      expect(parseVideoObjectName(pick.file)).toMatchObject({ productId: pick.product.id, price: 60_000 });
+      // Las cuatro ofertas dicen lo mismo, así que llevan la misma huella.
+      expect(pick.file).toBe(`${TODAY}/${pick.product.id}-60000-estudio-f1e1ca68`);
+      expect(pick.file).toBe(fileOf(TODAY, pick.product));
+      expect(parseVideoObjectName(pick.file)).toEqual({
+        date: TODAY,
+        productId: pick.product.id,
+        price: 60_000,
+        template: 'estudio',
+        fingerprint: 'f1e1ca68',
+      });
+      // Lo que el video dice va con el elegido: de ahí sale la huella y es lo que entrega la ruta.
+      expect(pick.claims).toEqual({
+        nombre_corto: 'Audífonos Bluetooth JBL Tune 520BT Negro',
+        marca: 'JBL',
+        precio_lista: 100_000,
+        descuento: 40,
+        baja_historial: null,
+        envio_gratis: true,
+        full: false,
+      });
+      expect(videoFingerprint(pick.claims)).toBe('f1e1ca68');
       expect(pick.exists).toBe(false);
       expect(pick.score.points).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
       expect(pick.score.warning).toBeNull();
@@ -606,7 +800,7 @@ describe('readVideoPicks', () => {
     catalog([p]);
     const plan = await readVideoPicks(fakeSite().admin, late);
     expect(plan.date).toBe('2026-10-13');
-    expect(plan.picks[0].file).toBe(`2026-10-13/${p.id}-60000-estudio`);
+    expect(plan.picks[0].file).toBe(fileOf('2026-10-13', p));
   });
 
   it('no vuelve lo que ya se subió como video a cualquier red en los últimos 14 días', async () => {
@@ -727,6 +921,75 @@ describe('readVideoPicks', () => {
     expect(ops).toEqual([`list reels/${TODAY}`]);
   });
 
+  it('un video de hoy con el mismo precio que dice otra cosa no cuenta: se propone de nuevo, con otro nombre', async () => {
+    const same = strong({ category: 'audio' });
+    // Se armó cuando llegaba con Full; ya no.
+    const lostFull = strong({ category: 'gaming' });
+    const withFull = { ...lostFull, offer_info: { ...lostFull.offer_info, is_full: true } as SocialProduct['offer_info'] };
+    // Se armó con el precio de lista de antes ($120.000, "-50%").
+    const relisted = strong({ category: 'hogar' });
+    // Se armó cuando el historial no mostraba ninguna baja; ahora confirma una de 25%.
+    const dropped = strong({ category: 'celulares' });
+    // Un archivo de antes de que el nombre llevara huella: no se sabe qué dice.
+    const legacy = strong({ category: 'computacion' });
+    catalog([same, lostFull, relisted, dropped, legacy]);
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([[dropped.id, droppedFrom(60_000, 80_000)]]));
+    const made = [
+      fileOf(TODAY, same),
+      fileOf(TODAY, withFull),
+      fileOf(TODAY, { ...relisted, original_price: 120_000 }),
+      fileOf(TODAY, dropped),
+      `${TODAY}/${legacy.id}-60000-estudio`,
+    ];
+    const { admin } = fakeSite({ objects: stored(made) });
+
+    const plan = await readVideoPicks(admin, NOW, 6);
+    const byId = new Map(plan.picks.map((pick) => [pick.product.id, pick]));
+    expect(byId.size).toBe(5);
+    expect(byId.get(same.id)).toMatchObject({ exists: true, file: made[0] });
+    for (const [p, old, drop] of [
+      [lostFull, made[1], null],
+      [relisted, made[2], null],
+      [dropped, made[3], 25],
+      [legacy, made[4], null],
+    ] as const) {
+      const pick = byId.get(p.id)!;
+      expect(pick.exists).toBe(false);
+      expect(pick.file).not.toBe(old);
+      // El nombre nuevo es el de siempre con la huella de lo que diría ahora.
+      expect(pick.file).toBe(fileOf(TODAY, p, p.price, 'estudio', drop));
+    }
+    expect(byId.get(dropped.id)?.claims.baja_historial).toBe(25);
+  });
+
+  it('la plantilla de un video de hoy se conserva solo si ese video dice lo mismo que diría ahora', async () => {
+    const two = ['estudio', 'ficha'];
+    const p = strong();
+    // La que le tocaría hoy a este producto si no tuviera video, y la otra.
+    const fresh = assignVideoTemplates([p.id], TODAY, new Map(), two)[0];
+    const other = two.find((template) => template !== fresh)!;
+    catalog([p]);
+
+    await withTemplates(['ficha'], async () => {
+      // Ya tiene su video de hoy con la otra plantilla y diciendo lo mismo: se queda con ella, y no se arma de nuevo.
+      const same = fakeSite({ objects: stored([fileOf(TODAY, p, p.price, other)]) });
+      expect((await readVideoPicks(same.admin, NOW)).picks[0]).toMatchObject({
+        template: other,
+        file: fileOf(TODAY, p, p.price, other),
+        exists: true,
+      });
+
+      // El de hoy se armó cuando llegaba con Full: hay que armarlo de nuevo, y ese video no ata la plantilla.
+      const withFull = { ...p, offer_info: { ...p.offer_info, is_full: true } as SocialProduct['offer_info'] };
+      const reworded = fakeSite({ objects: stored([fileOf(TODAY, withFull, p.price, other)]) });
+      expect((await readVideoPicks(reworded.admin, NOW)).picks[0]).toMatchObject({
+        template: fresh,
+        file: fileOf(TODAY, p, p.price, fresh),
+        exists: false,
+      });
+    });
+  });
+
   it('las señales de ganadores y de tendencia llegan a la selección y al motivo', async () => {
     const plain = strong({ category: 'audio' });
     const winner = strong({ category: 'gaming' });
@@ -809,7 +1072,7 @@ describe('el almacén', () => {
 
   it('firma la subida del video y de su portada, con reemplazo', async () => {
     const { admin, signed } = fakeSite();
-    const file = `${TODAY}/6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60-27990-estudio`;
+    const file = `${TODAY}/6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60-27990-estudio-0a1b2c3d`;
     const uploads = await signVideoUploads(admin, file);
     expect(uploads.video).toBe(`${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.mp4?token=firma-1`);
     expect(uploads.cover).toBe(`${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.jpg?token=firma-2`);
@@ -910,8 +1173,8 @@ describe('readVideoBoard', () => {
       discount: 40,
       checkedAt: p.price_checked_at,
       template: 'estudio',
-      videoUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio.mp4`,
-      coverUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio.jpg`,
+      videoUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio-7b6ff293.mp4`,
+      coverUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio-7b6ff293.jpg`,
       fileName: 'comparatech-audifonos-jbl-tune-520bt-reel.mp4',
       renderedAt: uploadedAt,
       // El mismo destino que el botón de compra del sitio.
@@ -998,10 +1261,13 @@ describe('readVideoBoard', () => {
     const board = await readVideoBoard(admin, NOW);
     const byId = new Map(board.videos.map((video) => [video.id, video]));
     expect(board.videos).toHaveLength(3);
-    expect(byId.get(twice.id)?.videoUrl).toContain(`/${TODAY}/${twice.id}-60000-estudio.mp4`);
+    expect(byId.get(twice.id)?.videoUrl).toContain(`/${TODAY}/${twice.id}-60000-estudio-`);
+    expect(byId.get(twice.id)?.videoUrl).toContain(`/${fileOf(TODAY, twice)}.mp4`);
     expect(byId.get(twice.id)?.renderedAt).toBe(hoursAgo(3));
-    expect(byId.get(cheaper.id)?.videoUrl).toContain(`/${TODAY}/${cheaper.id}-55000-estudio.mp4`);
-    expect(byId.get(back.id)?.videoUrl).toContain(`/${YESTERDAY}/${back.id}-60000-estudio.mp4`);
+    expect(byId.get(cheaper.id)?.videoUrl).toContain(`/${TODAY}/${cheaper.id}-55000-estudio-`);
+    expect(byId.get(cheaper.id)?.videoUrl).toContain(`/${fileOf(TODAY, cheaper)}.mp4`);
+    expect(byId.get(back.id)?.videoUrl).toContain(`/${YESTERDAY}/${back.id}-60000-estudio-`);
+    expect(byId.get(back.id)?.videoUrl).toContain(`/${fileOf(YESTERDAY, back)}.mp4`);
     // Ninguno quedó fuera: cada producto tiene un video que sirve.
     expect(board.stale).toBe(0);
     // El último que se subió, sirva o no.
@@ -1018,9 +1284,32 @@ describe('readVideoBoard', () => {
         ...stored([fileOf(TODAY, p, 60_000, 'media')], hoursAgo(3)),
       },
     });
-    const board = await readVideoBoard(admin, NOW);
+    // El día en que el generador arme esas tres plantillas.
+    const board = await withTemplates(['antigua', 'nueva', 'media'], () => readVideoBoard(admin, NOW));
     expect(board.videos.map((video) => video.template)).toEqual(['nueva']);
     expect(board.stale).toBe(0);
+  });
+
+  it('un video de una plantilla que ya no se arma no es el que saldría hoy: queda fuera y cuenta como viejo', async () => {
+    const retired = strong({ category: 'audio' });
+    const both = strong({ category: 'gaming' });
+    const { admin } = fakeSite({
+      products: [retired, both],
+      objects: {
+        ...stored([fileOf(TODAY, retired, 60_000, 'retirada')], hoursAgo(2)),
+        // Este tiene además uno de la plantilla de hoy, más antiguo: ese es el que vale.
+        ...stored([fileOf(TODAY, both, 60_000, 'retirada')], hoursAgo(1)),
+        ...stored([fileOf(TODAY, both)], hoursAgo(4)),
+      },
+    });
+
+    const board = await readVideoBoard(admin, NOW);
+    expect(board.videos.map((video) => [video.id, video.template, video.renderedAt])).toEqual([[both.id, 'estudio', hoursAgo(4)]]);
+    expect(board.stale).toBe(1);
+    // Mientras esa plantilla se armaba, el mismo archivo sí se mostraba.
+    const before = await withTemplates(['retirada'], () => readVideoBoard(admin, NOW));
+    expect(before.videos.map((video) => video.id).sort()).toEqual([retired.id, both.id].sort());
+    expect(before.stale).toBe(0);
   });
 
   it('solo mira hoy y ayer, solo videos completos, y nada que no tenga un nombre de video', async () => {
@@ -1037,9 +1326,13 @@ describe('readVideoBoard', () => {
         [`${TODAY}/notas.txt`]: hoursAgo(1),
         [`${TODAY}/video.mp4`]: hoursAgo(1),
         [`${TODAY}/video.jpg`]: hoursAgo(1),
-        [`${TODAY}/${fine.id}-060000-estudio.mp4`]: hoursAgo(1),
-        [`${TODAY}/${fine.id}-060000-estudio.jpg`]: hoursAgo(1),
-        [`${TODAY}/sub/${fine.id}-60000-estudio.mp4`]: hoursAgo(1),
+        [`${TODAY}/${fine.id}-060000-estudio-${printOf(fine)}.mp4`]: hoursAgo(1),
+        [`${TODAY}/${fine.id}-060000-estudio-${printOf(fine)}.jpg`]: hoursAgo(1),
+        [`${TODAY}/sub/${fileOf(TODAY, fine).split('/')[1]}.mp4`]: hoursAgo(1),
+        // Un video completo con un nombre de antes de la huella: no se sabe qué dice, así que no es de acá.
+        ...stored([`${TODAY}/${coverOnly.id}-60000-estudio`], hoursAgo(1)),
+        // Y uno con la huella mal escrita.
+        ...stored([`${TODAY}/${half.id}-60000-estudio-${printOf(half).toUpperCase()}x`], hoursAgo(1)),
       },
     });
 
@@ -1148,12 +1441,126 @@ describe('readVideoBoard', () => {
     expect(byId.get(fine.id)?.reason).not.toContain('Ojo');
   });
 
-  it('si no se pudo leer el historial de precios, el video se muestra con ese aviso', async () => {
+  it('si no se pudo leer el historial de un producto, su video no se muestra y tampoco cuenta como viejo', async () => {
+    // Sin el historial no se sabe qué baja diría hoy el video: no se puede saber si sigue vigente.
+    const lost = strong({ category: 'audio' });
+    const fine = strong({ category: 'gaming' });
+    const { admin } = fakeSite({ products: [lost, fine], objects: stored([fileOf(TODAY, lost), fileOf(TODAY, fine)]) });
+
+    vi.mocked(getPriceStatsManyChecked).mockResolvedValueOnce({ stats: new Map(), unread: new Set([lost.id]) });
+    const board = await readVideoBoard(admin, NOW);
+    expect(board.videos.map((video) => video.id)).toEqual([fine.id]);
+    expect(board.stale).toBe(0);
+    expect(board.lastRenderedAt).toBe(hoursAgo(3));
+
+    // A la próxima carga, con el historial leído, vuelve sin que nadie lo arme de nuevo.
+    const again = await readVideoBoard(admin, NOW);
+    expect(again.videos.map((video) => video.id).sort()).toEqual([lost.id, fine.id].sort());
+    expect(again.stale).toBe(0);
+  });
+
+  it('si el historial no se pudo leer de ninguno, no muestra nada, no da nada por viejo y no sigue preguntando', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const rows = [strong({ category: 'audio' }), strong({ category: 'gaming' })];
+    const { admin, read } = fakeSite({ products: rows, objects: stored(rows.map((p) => fileOf(TODAY, p)), hoursAgo(2)) });
+
+    vi.mocked(getPriceStatsManyChecked).mockRejectedValueOnce(new Error('sin conexión'));
+    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, lastRenderedAt: hoursAgo(2), storageReady: true });
+    // Ni señales ni marcas: no hay nada que mostrar.
+    expect(read).toEqual(['products']);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('un video que el historial ya no respalda (decía una baja que hoy no consta) queda fuera y cuenta como viejo', async () => {
     const p = strong();
-    vi.mocked(getPriceStatsManyChecked).mockResolvedValueOnce({ stats: new Map(), unread: new Set([p.id]) });
-    const { admin } = fakeSite({ products: [p], objects: stored([fileOf(TODAY, p)]) });
-    const [video] = (await readVideoBoard(admin, NOW)).videos;
-    expect(video.reason).toContain('Ojo: hoy no se pudo leer su historial de precios');
+    // Se armó cuando el historial confirmaba una baja de 25%.
+    const { admin } = fakeSite({ products: [p], objects: stored([fileOf(TODAY, p, p.price, 'estudio', 25)]) });
+
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([[p.id, droppedFrom(60_000, 80_000)]]));
+    expect((await readVideoBoard(admin, NOW)).videos.map((video) => video.id)).toEqual([p.id]);
+
+    // Con el mismo precio, el historial de ahora ya no muestra esa baja.
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([[p.id, stats(60_000)]]));
+    expect(await readVideoBoard(admin, NOW)).toMatchObject({ videos: [], stale: 1 });
+  });
+
+  it('el día es el de Chile: a las 21:10 del 13 mira las carpetas del 13 y del 12, no las del día de UTC', async () => {
+    // 21:10 del 13 de octubre en Chile (UTC-3); en UTC ya es 14.
+    const late = new Date('2026-10-14T00:10:00Z');
+    const at = (hours: number) => new Date(late.getTime() - hours * HOUR).toISOString();
+    const today = strong({ category: 'audio', price_checked_at: at(1) });
+    const yesterday = strong({ category: 'gaming', price_checked_at: at(1) });
+    const utcDay = strong({ category: 'hogar', price_checked_at: at(1) });
+    const before = strong({ category: 'celulares', price_checked_at: at(1) });
+    const { admin, ops } = fakeSite({
+      products: [today, yesterday, utcDay, before],
+      objects: {
+        ...stored([fileOf('2026-10-13', today)], at(2)),
+        ...stored([fileOf('2026-10-12', yesterday)], at(26)),
+        // La carpeta que miraría quien tomara el día de UTC, y la de anteayer.
+        ...stored([fileOf('2026-10-14', utcDay)], at(0.1)),
+        ...stored([fileOf('2026-10-11', before)], at(50)),
+      },
+    });
+
+    const board = await readVideoBoard(admin, late);
+    expect(ops).toEqual(['getBucket reels', 'list reels/2026-10-13', 'list reels/2026-10-12']);
+    expect(board.videos.map((video) => video.id).sort()).toEqual([today.id, yesterday.id].sort());
+    expect(board.stale).toBe(0);
+    expect(board.lastRenderedAt).toBe(at(2));
+    for (const video of board.videos) expect(video.videoUrl).toMatch(/\/reels\/2026-10-1[23]\//);
+  });
+
+  it('pide los clics solo de los productos que puede mostrar, no la semana entera de todo el sitio', async () => {
+    const shown = [strong({ category: 'audio' }), strong({ category: 'gaming' }), strong({ category: 'hogar' })];
+    // Estos tres tienen video, pero no se muestran: de ellos no se pregunta.
+    const repriced = strong({ category: 'celulares', price: 70_000 });
+    const unchecked = strong({ category: 'computacion', price_checked_at: hoursAgo(7) });
+    const reworded = strong({ category: 'celulares', original_price: 110_000 });
+    // Una semana de clics de otros cincuenta productos: tres páginas de mil.
+    const elsewhere: Row[] = Array.from({ length: 2_500 }, (_, i) => ({
+      product_id: `00000000-0000-4000-9000-${String(i % 50).padStart(12, '0')}`,
+      client_key: null,
+      created_at: daysAgo(1),
+    }));
+    const fake = fakeSite({
+      products: [...shown, repriced, unchecked, reworded],
+      objects: stored([
+        ...shown.map((p) => fileOf(TODAY, p)),
+        fileOf(TODAY, repriced, 60_000),
+        fileOf(TODAY, unchecked),
+        fileOf(TODAY, { ...reworded, original_price: 100_000 }),
+      ]),
+      clicks: [...elsewhere, ...clicksOf(shown[0].id, 6), ...clicksOf(repriced.id, 9), ...clicksOf(unchecked.id, 9), ...clicksOf(reworded.id, 9)],
+    });
+
+    const board = await readVideoBoard(fake.admin, NOW);
+    expect(board.videos.map((video) => video.id).sort()).toEqual(shown.map((p) => p.id).sort());
+    expect(board.stale).toBe(2);
+    // El dato es el de siempre.
+    expect(board.videos[0].id).toBe(shown[0].id);
+    expect(board.videos[0].reason).toContain('lleva 6 clics recientes en el sitio');
+
+    // Una sola consulta de clics, por los tres productos y nada más.
+    const clicks = fake.asked.filter((query) => query.table === 'outbound_clicks');
+    expect(clicks).toHaveLength(1);
+    expect([...(clicks[0].in.product_id as string[])].sort()).toEqual(shown.map((p) => p.id).sort());
+    expect(clicks[0].range).toEqual([0, 999]);
+    // Toda la carga: los productos, las dos señales y las marcas. Una consulta cada una.
+    expect(fake.asked.map((query) => query.table).sort()).toEqual(['outbound_clicks', 'product_candidates', 'products', 'social_posts']);
+
+    // La selección completa sigue leyendo la semana entera, de a mil: necesita casi todo el catálogo.
+    catalog(shown);
+    const from = fake.asked.length;
+    const plan = await readVideoPicks(fake.admin, NOW);
+    expect(plan.picks[0].reason).toContain('lleva 6 clics recientes en el sitio');
+    const full = fake.asked.slice(from).filter((query) => query.table === 'outbound_clicks');
+    expect(full.map((query) => query.range)).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+    ]);
+    expect(full.every((query) => query.in.product_id === undefined)).toBe(true);
   });
 
   it('sin la tabla de publicaciones muestra los videos sin marcas; si no puede leer los productos, falla', async () => {
@@ -1255,7 +1662,9 @@ describe('/api/social/videos/plan', () => {
         'subir',
       ].sort()
     );
-    const file = `${TODAY}/${p.id}-60000-estudio`;
+    // Con Full: no es la huella de las demás ofertas de este archivo.
+    const file = fileOf(TODAY, p);
+    expect(file).not.toBe(`${TODAY}/${p.id}-60000-estudio-7b6ff293`);
     expect(row).toEqual({
       id: p.id,
       slug: p.slug,
@@ -1319,7 +1728,7 @@ describe('/api/social/videos/plan', () => {
     expect(fake.signed).toHaveLength(4);
 
     // El generador sube el primero (video y portada) y vuelve a preguntar.
-    const file = `${TODAY}/${done.id}-60000-estudio`;
+    const file = fileOf(TODAY, done);
     fake.objects.set(`${file}.mp4`, hoursAgo(0));
     fake.objects.set(`${file}.jpg`, hoursAgo(0));
     const second = await call('/api/social/videos/plan');
@@ -1327,8 +1736,8 @@ describe('/api/social/videos/plan', () => {
     expect(byId.get(done.id)).toMatchObject({ archivo: file, ya_existe: true, subir: null });
     expect(byId.get(pending.id)?.ya_existe).toBe(false);
     expect(byId.get(pending.id)?.subir).toEqual({
-      video: expect.stringContaining(`/${TODAY}/${pending.id}-60000-estudio.mp4?token=`),
-      portada: expect.stringContaining(`/${TODAY}/${pending.id}-60000-estudio.jpg?token=`),
+      video: expect.stringContaining(`/${fileOf(TODAY, pending)}.mp4?token=`),
+      portada: expect.stringContaining(`/${fileOf(TODAY, pending)}.jpg?token=`),
     });
     // Solo se firmó lo que faltaba, y el bucket no se creó de nuevo.
     expect(fake.signed).toHaveLength(6);
@@ -1414,5 +1823,243 @@ describe('/api/social/videos/plan', () => {
     expect(rows[0].subir?.video).toContain('token=');
     expect(printed.join('\n')).not.toContain('token=');
     expect(printed.join('\n')).not.toContain(SECRET);
+  });
+
+  it('el nombre del archivo lleva la huella de lo que la misma respuesta dice que va en el video', async () => {
+    const plain = strong({ category: 'audio', name: 'Audífonos Bluetooth JBL Tune 520BT - Color Negro' });
+    const full = strong({
+      category: 'gaming',
+      offer_info: { free_shipping: true, is_full: true, official_store: true, is_lowest: true } as SocialProduct['offer_info'],
+    });
+    // Sin precio de lista, sin marca y sin datos de entrega: entra por la baja que confirma el historial.
+    const dropped = strong({
+      category: 'hogar',
+      name: 'Audífonos Bluetooth JBL Tune 520BT - Color Negro',
+      original_price: null,
+      brand: '',
+      offer_info: null,
+    });
+    // Con las dos cosas: descuento de lista y baja confirmada.
+    const both = strong({ category: 'celulares' });
+    catalog([plain, full, dropped, both]);
+    vi.mocked(getPriceStatsMany).mockResolvedValue(
+      new Map([
+        [dropped.id, droppedFrom(60_000, 80_000)],
+        [both.id, droppedFrom(60_000, 70_000)],
+      ])
+    );
+    site.admin = fakeSite().admin;
+
+    const { rows } = await call('/api/social/videos/plan?n=6');
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      // La cuenta que haría quien revisa desde afuera: siete campos de la respuesta, en este orden.
+      const said = [row.nombre_corto, row.marca, row.precio_lista, row.descuento, row.baja_historial, row.envio_gratis, row.full];
+      const print = sha256(JSON.stringify(said)).slice(0, 8);
+      expect(row.archivo).toBe(`${TODAY}/${row.id}-${row.precio}-${row.plantilla}-${print}`);
+      expect(row.archivo).toMatch(/^\d{4}-\d{2}-\d{2}\/[0-9a-f-]{36}-[1-9]\d*-[a-z0-9]+-[0-9a-f]{8}$/);
+      expect(row.subir?.video).toContain(`/reels/${row.archivo}.mp4?token=`);
+      expect(row.subir?.portada).toContain(`/reels/${row.archivo}.jpg?token=`);
+    }
+    // Cuatro ofertas que dicen cosas distintas: cuatro huellas.
+    expect(new Set(rows.map((row) => row.archivo.slice(-8))).size).toBe(4);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get(plain.id)?.archivo).toBe(`${TODAY}/${plain.id}-60000-estudio-7b6ff293`);
+    expect(byId.get(full.id)).toMatchObject({ envio_gratis: true, full: true });
+    expect(byId.get(dropped.id)).toMatchObject({
+      marca: null,
+      precio_lista: null,
+      descuento: 0,
+      baja_historial: 25,
+      envio_gratis: false,
+      full: false,
+    });
+    expect(byId.get(dropped.id)?.archivo).toBe(`${TODAY}/${dropped.id}-60000-estudio-188b17c7`);
+    expect(byId.get(both.id)).toMatchObject({ precio_lista: 100_000, descuento: 40, baja_historial: 14 });
+  });
+
+  const delivery = (over: Record<string, unknown>) =>
+    ({ free_shipping: true, is_full: false, official_store: true, sold_by_ml: false, is_lowest: true, ...over }) as SocialProduct['offer_info'];
+  /** Lo que le cambia al producto con el mismo precio. Sin `historyAfter`, el historial sigue como estaba. */
+  const CHANGES: [string, { after: Partial<SocialProduct>; historyBefore?: PriceStats; historyAfter?: PriceStats }][] = [
+    ['le cambian el precio de lista', { after: { original_price: 110_000 } }],
+    // Sigue entrando al plan por la baja que confirma el historial.
+    ['le quitan el precio de lista', { after: { original_price: null }, historyBefore: droppedFrom(60_000, 80_000) }],
+    ['pierde el envío gratis', { after: { offer_info: delivery({ free_shipping: false }) } }],
+    ['pasa a llegar con Full', { after: { offer_info: delivery({ is_full: true }) } }],
+    ['el historial pasa a confirmarle una baja', { after: {}, historyBefore: stats(60_000), historyAfter: droppedFrom(60_000, 80_000) }],
+    ['el historial deja de confirmarle la baja', { after: {}, historyBefore: droppedFrom(60_000, 80_000), historyAfter: stats(60_000) }],
+    ['le cambian el modelo en el nombre', { after: { name: 'Audífonos Bluetooth JBL Tune 720BT Negro' } }],
+  ];
+
+  it.each(CHANGES)(
+    'si al producto %s sin cambiarle el precio, su video deja de mostrarse, cuenta como viejo y el plan lo pide de nuevo con otro nombre',
+    async (_label, change) => {
+      const before = strong();
+      const history = (seen?: PriceStats) =>
+        vi.mocked(getPriceStatsMany).mockResolvedValue(new Map(seen ? [[before.id, seen]] : []));
+      history(change.historyBefore);
+      catalog([before]);
+      const fake = fakeSite({ products: [before] });
+      site.admin = fake.admin;
+      const upload = (file: string, at: string) => {
+        fake.objects.set(`${file}.jpg`, at);
+        fake.objects.set(`${file}.mp4`, at);
+      };
+
+      // El generador pide el plan, arma el video y lo sube con el nombre que le llegó.
+      const first = (await call('/api/social/videos/plan')).rows[0];
+      expect(first).toMatchObject({ id: before.id, ya_existe: false });
+      upload(first.archivo, hoursAgo(2));
+      expect(await readVideoBoard(fake.admin, NOW)).toMatchObject({ stale: 0, videos: [{ id: before.id }] });
+      expect((await call('/api/social/videos/plan')).rows[0]).toMatchObject({ archivo: first.archivo, ya_existe: true, subir: null });
+
+      // Cambia lo que el video dice. El precio, no.
+      const after: SocialProduct = { ...before, ...change.after };
+      expect(after.price).toBe(before.price);
+      fake.tables.products[0] = after as unknown as Row;
+      catalog([after]);
+      history('historyAfter' in change ? change.historyAfter : change.historyBefore);
+
+      const board = await readVideoBoard(fake.admin, NOW);
+      expect(board.videos).toEqual([]);
+      expect(board.stale).toBe(1);
+
+      const next = (await call('/api/social/videos/plan')).rows[0];
+      expect(next).toMatchObject({ id: before.id, precio: 60_000, ya_existe: false });
+      expect(next.archivo).not.toBe(first.archivo);
+      // Mismo día, producto, precio y plantilla: lo único distinto es la huella.
+      expect(next.archivo.slice(0, -8)).toBe(first.archivo.slice(0, -8));
+      expect(next.subir?.video).toContain(`/reels/${next.archivo}.mp4?token=`);
+
+      // El generador sube el nuevo: vuelve a mostrarse, con ese archivo, y ya no hay nada viejo.
+      upload(next.archivo, hoursAgo(0.5));
+      const again = await readVideoBoard(fake.admin, NOW);
+      expect(again.stale).toBe(0);
+      expect(again.videos.map((video) => video.videoUrl)).toEqual([
+        `${STORAGE_URL}/storage/v1/object/public/reels/${next.archivo}.mp4`,
+      ]);
+      expect((await call('/api/social/videos/plan')).rows[0]).toMatchObject({ archivo: next.archivo, ya_existe: true, subir: null });
+    }
+  );
+
+  it('lo que el video no lleva escrito no lo deja viejo: otro color, otra hora de revisión, más ventas del vendedor', async () => {
+    const before = strong({ name: 'Audífonos Bluetooth JBL Tune 520BT - Color Negro' });
+    catalog([before]);
+    const fake = fakeSite({ products: [before] });
+    site.admin = fake.admin;
+    const first = (await call('/api/social/videos/plan')).rows[0];
+    fake.objects.set(`${first.archivo}.jpg`, hoursAgo(2));
+    fake.objects.set(`${first.archivo}.mp4`, hoursAgo(2));
+
+    const after: SocialProduct = {
+      ...before,
+      // El nombre corto no lleva el color: el video dice lo mismo.
+      name: 'Audífonos Bluetooth JBL Tune 520BT - Color Azul',
+      price_checked_at: hoursAgo(0.1),
+      seller_sales_count: 60_000,
+      slug: 'otro-slug',
+    };
+    fake.tables.products[0] = after as unknown as Row;
+    catalog([after]);
+
+    expect(await readVideoBoard(fake.admin, NOW)).toMatchObject({ stale: 0, videos: [{ id: before.id }] });
+    expect((await call('/api/social/videos/plan')).rows[0]).toMatchObject({ archivo: first.archivo, ya_existe: true, subir: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('las señales ordenan, pero no habilitan', () => {
+  const info = (over: Record<string, unknown> = {}) =>
+    ({ free_shipping: true, is_full: true, official_store: true, sold_by_ml: false, is_lowest: true, ...over }) as SocialProduct['offer_info'];
+  /**
+   * Una campana de cocina de marca conocida, de tienda oficial y con 45% de
+   * lista: una oferta sin ningún aviso que queda justo bajo el piso (39 puntos
+   * y fracción). Es el caso que encontró la revisión: con doce clics mandados
+   * desde afuera pasaba a publicarse sola.
+   */
+  const hood = (over: Partial<SocialProduct> = {}) =>
+    strong({
+      name: 'Campana De Cocina Retráctil Mademsa 60 cm',
+      brand: 'Mademsa',
+      category: 'electrodomesticos',
+      price: 59_990,
+      original_price: 109_990,
+      offer_info: info(),
+      ...over,
+    });
+  /** Un frigobar sin envío gratis ni Full: justo sobre el piso (41 puntos). */
+  const fridge = (over: Partial<SocialProduct> = {}) =>
+    strong({
+      name: 'Refrigerador frigobar Libero LFB-90 color rojo',
+      brand: 'Libero',
+      category: 'electrodomesticos',
+      price: 99_990,
+      original_price: 149_990,
+      offer_info: info({ free_shipping: false, is_full: false }),
+      ...over,
+    });
+  /** La señal más alta que existe: primero entre los más vendidos y cientos de clics. */
+  const MAX_SIGNAL = { mlPosition: 1, recentClicks: 500 };
+  /** El puntaje de un producto con 20 días de historial quieto, como el que entrega `stats`. */
+  const scoreOf = (p: SocialProduct, signals: { mlPosition?: number; recentClicks?: number } = {}) =>
+    interestScore(p, { drop: null, min30: p.price, daysTracked: 20, ...signals });
+  const ids = (plan: { picks: { product: SocialProduct }[] }) => plan.picks.map((pick) => pick.product.id);
+
+  it('un producto bajo el piso no entra a los videos por más clics y puesto que tenga; uno sobre el piso sí, y la señal lo sube', async () => {
+    const below = hood();
+    const above = fridge();
+    // La misma campana vendida por Mercado Libre, en otra categoría: unos puntos sobre el frigobar.
+    const rival = hood({ category: 'hogar', offer_info: info({ sold_by_ml: true }) });
+    catalog([below, above, rival]);
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([below, above, rival].map((p) => [p.id, stats(p.price)])));
+
+    // Lo que vale cada uno por sí solo y con la señal al máximo. Si los pesos
+    // del puntaje se afinan y esto deja de cumplirse, hay que elegir otros
+    // productos: el test necesita uno bajo el piso que con señales lo pase.
+    expect(scoreOf(below)).toMatchObject({ warning: null, excluded: null });
+    expect(scoreOf(below).points).toBeLessThan(MIN_INTEREST_POINTS);
+    expect(scoreOf(below).points).toBeGreaterThan(MIN_INTEREST_POINTS - 2);
+    expect(scoreOf(below, MAX_SIGNAL).points).toBeGreaterThan(MIN_INTEREST_POINTS + 4);
+    expect(scoreOf(below, MAX_SIGNAL).breakdown.signals).toBe(6);
+    // El piso se mide sin las señales: son los mismos puntos de antes.
+    expect(floorPoints(scoreOf(below, MAX_SIGNAL))).toBe(scoreOf(below).points);
+    expect(scoreOf(above)).toMatchObject({ warning: null, excluded: null });
+    expect(scoreOf(above).points).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
+    expect(scoreOf(above).points).toBeLessThan(MIN_INTEREST_POINTS + 2);
+    expect(scoreOf(above).points).toBeLessThan(scoreOf(rival).points);
+    expect(scoreOf(above, MAX_SIGNAL).points).toBeGreaterThan(scoreOf(rival).points);
+
+    // Sin señales: el de 39 no entra, y el de 41 va después del rival.
+    expect(ids(await readVideoPicks(fakeSite().admin, NOW, 6))).toEqual([rival.id, above.id]);
+
+    // Con la señal máxima para los dos (clics y puesto, las dos cosas que se pueden fabricar desde afuera).
+    const forged = fakeSite({
+      clicks: [...clicksOf(below.id, 500), ...clicksOf(above.id, 500)],
+      candidates: [candidate(below.ml_product_id, 1), candidate(above.ml_product_id, 1)],
+    });
+    const plan = await readVideoPicks(forged.admin, NOW, 6);
+    // El de 39 sigue fuera, aunque con las señales sume más que todos; el de 41 pasa adelante.
+    expect(ids(plan)).toEqual([above.id, rival.id]);
+    expect(plan.picks[0].score.breakdown.signals).toBe(6);
+    expect(plan.picks[0].score.points).toBeGreaterThan(plan.picks[1].score.points);
+    expect(plan.picks[0].reason).toContain('figuró 1.º entre los más vendidos de su categoría');
+  });
+
+  it('doce clics mandados con doce navegadores distintos no meten al plan un producto que no llega al piso', async () => {
+    const below = hood();
+    catalog([below]);
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([[below.id, stats(below.price)]]));
+    // Lo que hizo la revisión: una sola persona, doce llaves de cliente distintas.
+    const clicks: Row[] = Array.from({ length: 12 }, (_, i) => ({
+      product_id: below.id,
+      client_key: `llave-${i}`,
+      created_at: daysAgo(1),
+    }));
+    expect(scoreOf(below, { recentClicks: 12 }).points).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
+
+    const plan = await readVideoPicks(fakeSite({ clicks }).admin, NOW, 6);
+    expect(plan.picks).toEqual([]);
   });
 });

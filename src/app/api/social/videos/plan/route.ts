@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { SITE_URL } from '@/lib/site';
-import { shortProductName } from '@/lib/text';
 import {
   VIDEO_PLAN_MAX,
   VIDEO_RULES,
@@ -27,6 +26,13 @@ import {
  * borra los videos de hace más de tres días. De un producto cuyo video de hoy
  * ya está arriba (`ya_existe`) no entrega dónde subir: no hay que rehacerlo.
  *
+ * `archivo` es "AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>". La huella
+ * resume lo demás que el video lleva escrito (nombre_corto, marca,
+ * precio_lista, descuento, baja_historial, envio_gratis y full, tal como van
+ * en esta respuesta) y la calcula solo el sitio: el generador usa el nombre
+ * tal cual. `ya_existe` es true solo si está ese nombre exacto: si al
+ * producto le cambió algo de eso, es otro archivo y se arma de nuevo.
+ *
  * Las direcciones de `subir` son un permiso de escritura que dura dos horas:
  * quien llama no las imprime ni las guarda.
  */
@@ -36,20 +42,23 @@ export const dynamic = 'force-dynamic';
 
 function describe(item: VideoPick, uploads: { video: string; cover: string } | null) {
   const p = item.product;
+  // Lo que el video dice sale de videos.ts (videoClaims), ya calculado: es lo
+  // mismo sobre lo que se sacó la huella de `archivo`. Acá no se arma de
+  // nuevo, para que lo que se dibuja y el nombre del archivo no se separen.
+  const says = item.claims;
   return {
     id: p.id,
     slug: p.slug,
     nombre: p.name,
-    nombre_corto: shortProductName(p.name),
-    marca: p.brand || null,
+    nombre_corto: says.nombre_corto,
+    marca: says.marca,
     categoria: p.category,
     precio: p.price,
-    precio_lista: item.discount > 0 ? p.original_price : null,
-    descuento: item.discount,
-    baja_historial: item.drop === null ? null : Math.round(item.drop),
-    // Como booleanos: el generador escribe "Envío gratis" y "Full" solo con un sí explícito.
-    envio_gratis: p.offer_info?.free_shipping === true,
-    full: p.offer_info?.is_full === true,
+    precio_lista: says.precio_lista,
+    descuento: says.descuento,
+    baja_historial: says.baja_historial,
+    envio_gratis: says.envio_gratis,
+    full: says.full,
     precio_revisado: p.price_checked_at,
     puntos: item.score.points,
     motivo: item.score.reason,

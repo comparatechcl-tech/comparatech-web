@@ -23,6 +23,8 @@ const db = vi.hoisted(() => ({
   /** Tablas cuya lectura falla (para probar que la marca se anota igual). */
   failSelect: new Set<string>(),
   failUpdate: false,
+  /** Corre justo después de cada lectura: lo que otra pestaña alcanza a hacer entre una lectura y la escritura que sigue. */
+  afterSelect: null as (() => void) | null,
   ops: [] as unknown[],
   nextId: 1000,
   present: true,
@@ -55,7 +57,10 @@ function run(op: Op): { data: unknown; error: { code?: string; message: string }
     return { data: hit, error: null };
   }
   if (op.limit !== null) hit = hit.slice(0, op.limit);
-  return { data: hit, error: null };
+  // Una copia: lo que cambie después en la base no cambia lo ya leído.
+  const read = hit.map((row) => ({ ...row }));
+  db.afterSelect?.();
+  return { data: read, error: null };
 }
 
 /** Lo justo del cliente de Supabase que usan las acciones. */
@@ -147,6 +152,7 @@ beforeEach(() => {
   db.tables = { products: [product()], social_posts: [] };
   db.failSelect = new Set();
   db.failUpdate = false;
+  db.afterSelect = null;
   db.ops = [];
   db.nextId = 1000;
   db.present = true;
@@ -317,7 +323,9 @@ describe('undoVideoPosted', () => {
       target: PRODUCT,
       after: { video: 'deshecho', red: 'tiktok' },
     });
+    // Tampoco regenera páginas: /hoy toma las marcas sola, cada minuto, y la lista no se rearma bajo el dedo.
     expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
+    expect(vi.mocked(revalidateTag)).not.toHaveBeenCalled();
   });
 
   it('solo deshace marcas de video: nunca una historia, una publicación del feed ni un mensaje de Telegram', async () => {
@@ -329,6 +337,8 @@ describe('undoVideoPosted', () => {
       post({ id: 4, channel: 'telegram' }),
       // Una marca de video ya deshecha.
       post({ id: 5, status: 'error', error: 'Marcada por error' }),
+      // Y una vigente del mismo producto y la misma red: con el id de cualquiera de las de arriba tampoco se anula esta.
+      post({ id: 6 }),
     ];
     const before = posts().map((row) => ({ ...row }));
 
@@ -345,6 +355,125 @@ describe('undoVideoPosted', () => {
     db.failUpdate = true;
     expect(await undoVideoPosted(7)).toEqual({ ok: false, error: 'se cayó' });
     expect(posts()[0].status).toBe('publicado');
+
+    // Tampoco si lo que falla es la lectura de la marca: no se escribe nada.
+    db.failUpdate = false;
+    db.failSelect.add('social_posts');
+    db.ops = [];
+    expect(await undoVideoPosted(7)).toEqual({ ok: false, error: 'se cayó' });
+    expect(writes()).toHaveLength(0);
+    expect(posts()[0].status).toBe('publicado');
+    expect(vi.mocked(logAdminEvent)).not.toHaveBeenCalled();
+  });
+
+  it('dos marcas hechas en el mismo instante se anulan juntas: al recargar la red no vuelve a figurar subida', async () => {
+    // Dos pestañas (o dos teléfonos) marcan la misma red a la vez: ninguna ve la marca de la otra.
+    const [a, b] = await Promise.all([markVideoPosted(PRODUCT, 'instagram', 49_990), markVideoPosted(PRODUCT, 'instagram', 49_990)]);
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(a.postId).not.toBe(b.postId);
+    expect(posts().filter((row) => row.status === 'publicado')).toHaveLength(2);
+    db.ops = [];
+    vi.mocked(logAdminEvent).mockClear();
+
+    // La página muestra una sola de las dos, y esa es la que se deshace.
+    expect(await undoVideoPosted(a.postId)).toEqual({ ok: true });
+    expect(posts().map((row) => [row.id, row.status, row.error])).toEqual([
+      [a.postId, 'error', 'Marcada por error'],
+      [b.postId, 'error', 'Marcada por error'],
+    ]);
+    // De una sola escritura: o se anulan las dos o ninguna.
+    expect(writes().map((op) => [op.table, op.kind])).toEqual([['social_posts', 'update']]);
+    // Una línea en la bitácora, que dice que eran dos.
+    expect(vi.mocked(logAdminEvent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toEqual({
+      actor: 'cristopher',
+      action: 'marcar_rrss',
+      target: PRODUCT,
+      after: { video: 'deshecho', red: 'instagram', marcas: 2 },
+    });
+
+    // La otra ya no existe como marca vigente: deshacerla no hace nada más.
+    expect(await undoVideoPosted(b.postId)).toEqual({ ok: false, error: 'Esa marca ya no existe.', gone: true });
+    // Y volver a marcar deja una sola.
+    expect((await markVideoPosted(PRODUCT, 'instagram', 49_990)).ok).toBe(true);
+    expect(posts().filter((row) => row.status === 'publicado')).toHaveLength(1);
+  });
+
+  it('también anula la marca que una pestaña vieja dejó con otro precio', async () => {
+    db.tables.social_posts = [
+      post({ id: 1, posted_price: 49_990, posted_at: new Date(Date.now() - 5 * 86_400_000).toISOString() }),
+      post({ id: 2, posted_price: 45_990 }),
+    ];
+    expect(await undoVideoPosted(2)).toEqual({ ok: true });
+    expect(posts().map((row) => row.status)).toEqual(['error', 'error']);
+  });
+
+  it('no toca nada más: otra red, otro producto, lo que no es video ni las marcas que ya no cuentan', async () => {
+    db.tables.social_posts = [
+      post({ id: 1 }),
+      post({ id: 2 }),
+      // Las demás redes del mismo producto.
+      post({ id: 3, channel: 'tiktok' }),
+      post({ id: 4, channel: 'youtube' }),
+      post({ id: 5, channel: 'facebook' }),
+      // La misma red en otro producto.
+      post({ id: 6, product_id: OTHER }),
+      // Del mismo producto y la misma red, pero no son marcas de video.
+      post({ id: 7, caption: 'historia' }),
+      post({ id: 8, caption: 'Parlante JBL a $49.990', external_id: 'abc-123' }),
+      post({ id: 9, caption: null }),
+      // Una marca de hace más de 14 días ya no cuenta para nada: queda como registro de lo que se subió.
+      post({ id: 10, posted_at: new Date(Date.now() - 15 * 86_400_000).toISOString() }),
+      // Una ya deshecha conserva su fecha de anulación.
+      post({ id: 11, status: 'error', error: 'Marcada por error', updated_at: '2026-10-01T00:00:00.000Z' }),
+    ];
+    const before = posts().map((row) => ({ ...row }));
+
+    expect(await undoVideoPosted(1)).toEqual({ ok: true });
+    expect(posts().slice(0, 2).map((row) => row.status)).toEqual(['error', 'error']);
+    expect(posts().slice(2)).toEqual(before.slice(2));
+    expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toMatchObject({ after: { video: 'deshecho', red: 'instagram', marcas: 2 } });
+  });
+
+  it('la marca que se pide deshacer se anula siempre, aunque ya haya pasado el plazo', async () => {
+    // Una pestaña que quedó abierta muestra una marca que acaba de cumplir los 14 días.
+    db.tables.social_posts = [
+      post({ id: 1, posted_at: new Date(Date.now() - 20 * 86_400_000).toISOString() }),
+      post({ id: 2, posted_at: new Date(Date.now() - 14 * 86_400_000 - 60_000).toISOString() }),
+      post({ id: 3, posted_at: new Date(Date.now() - 86_400_000).toISOString() }),
+    ];
+    expect(await undoVideoPosted(2)).toEqual({ ok: true });
+    // La suya y las más nuevas; la anterior a ella queda como estaba.
+    expect(posts().map((row) => row.status)).toEqual(['publicado', 'error', 'error']);
+  });
+
+  it('si otra pestaña la deshace justo antes, queda como ya deshecha y no se anota dos veces', async () => {
+    db.tables.social_posts = [post({ id: 7 })];
+    // Entre que esta acción lee la marca y la anula, la otra pestaña ya la anuló.
+    db.afterSelect = () => {
+      posts()[0].status = 'error';
+    };
+    expect(await undoVideoPosted(7)).toEqual({ ok: false, error: 'Esa marca ya no existe.', gone: true });
+    expect(vi.mocked(logAdminEvent)).not.toHaveBeenCalled();
+  });
+
+  it('una marca sin producto se anula sola, por su id', async () => {
+    db.tables.social_posts = [post({ id: 1, product_id: null }), post({ id: 2, product_id: null })];
+    expect(await undoVideoPosted(1)).toEqual({ ok: true });
+    expect(posts().map((row) => row.status)).toEqual(['error', 'publicado']);
+    expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toEqual({
+      actor: 'cristopher',
+      action: 'marcar_rrss',
+      target: undefined,
+      after: { video: 'deshecho', red: 'instagram' },
+    });
+  });
+
+  it('una marca sin fecha también se anula, sola: sin fecha no se puede buscar a las demás', async () => {
+    db.tables.social_posts = [post({ id: 1, posted_at: null }), post({ id: 2 })];
+    expect(await undoVideoPosted(1)).toEqual({ ok: true });
+    expect(posts().map((row) => row.status)).toEqual(['error', 'publicado']);
   });
 
   it('rechaza lo que no es el id de una marca, sin tocar la base', async () => {

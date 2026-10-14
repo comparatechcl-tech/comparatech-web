@@ -3,15 +3,17 @@ import Link from 'next/link';
 import { Flame, Megaphone, Send } from 'lucide-react';
 import { getSupabase } from '@/lib/supabase/client';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
+import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { getAllProducts, getDeals } from '@/lib/queries/products';
+import { readVideoMarks } from '@/lib/social/videos';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import type { Product } from '@/lib/types';
 
 /**
  * Landing del link de la bio (Instagram y TikTok no permiten links en los
  * posts): primero lo que se mostró en redes esta semana, para que quien
- * viene de un post encuentre ese producto sin buscarlo, y después las
- * mejores ofertas del día.
+ * viene de un post o de un reel encuentre ese producto sin buscarlo, y
+ * después las mejores ofertas del día.
  *
  * Fuera de Google: es una página para quien llega desde redes y repite lo
  * que ya está en /ofertas.
@@ -28,6 +30,8 @@ export const metadata: Metadata = {
 export const revalidate = 60;
 
 const SOCIAL_WINDOW_DAYS = 7;
+/** Cuántos productos caben en "Lo que mostramos en redes", vengan del feed o de un video. */
+const SOCIAL_MAX = 24;
 const TOP_DEALS = 12;
 
 /**
@@ -44,15 +48,20 @@ function telegramUrl(): string | null {
   }
 }
 
+/** La fecha como número, o null si no se entiende. */
+function timeOf(iso: string | null | undefined): number | null {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
 /**
- * Ids de lo publicado en redes en los últimos 7 días, del más reciente al
- * más antiguo. Sin la migración 0017 (o si falla la lectura) la sección no
- * se muestra y la página sigue con las ofertas.
+ * Lo publicado en el feed de las redes en los últimos 7 días: producto →
+ * fecha. Sin la migración 0017 (o si falla la lectura), nada.
  */
-async function recentSocialIds(): Promise<string[]> {
+async function readFeedDates(since: Date): Promise<Map<string, number>> {
+  const dates = new Map<string, number>();
   const supabase = getSupabase();
-  if (!supabase) return [];
-  const since = new Date(Date.now() - SOCIAL_WINDOW_DAYS * 86_400_000).toISOString();
+  if (!supabase) return dates;
   // Lo programado en Metricool lleva la fecha en que sale (a lo más dos días
   // adelante) y se muestra desde ya: esta página se regenera cuando alguien
   // la pide, así que esperar a la hora exacta la dejaría sin el producto
@@ -60,14 +69,69 @@ async function recentSocialIds(): Promise<string[]> {
   const { data, error } = await supabase
     .from('products')
     .select('id, rrss_published_at')
-    .gte('rrss_published_at', since)
+    .gte('rrss_published_at', since.toISOString())
     .order('rrss_published_at', { ascending: false })
-    .limit(24);
+    .limit(SOCIAL_MAX);
   if (error) {
     if (!isMissingSchemaError(error)) console.warn('[hoy] no se pudo leer lo publicado en redes:', error.message);
-    return [];
+    return dates;
   }
-  return ((data ?? []) as { id: string }[]).map((r) => r.id);
+  for (const row of (data ?? []) as { id: string; rrss_published_at: string | null }[]) {
+    // Una fecha que no se entiende no saca al producto: va al final de la lista.
+    dates.set(row.id, timeOf(row.rrss_published_at) ?? since.getTime());
+  }
+  return dates;
+}
+
+/**
+ * Los videos marcados como subidos en /admin/videos en los últimos 7 días:
+ * producto → la marca más reciente de cualquier red.
+ *
+ * Los textos de los reels mandan al link del perfil, que es esta página: sin
+ * esto, quien llega desde un reel no encuentra el producto, porque subir un
+ * video no deja fecha en el producto (eso es del plan del feed). Las marcas
+ * viven en social_posts, que el cliente público no puede leer: se leen con el
+ * de servicio, que solo existe en el servidor. Si no está o la lectura falla,
+ * la sección sale con lo del feed, como antes.
+ */
+async function readVideoDates(since: Date): Promise<Map<string, number>> {
+  const dates = new Map<string, number>();
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin) return dates;
+    for (const [productId, posted] of await readVideoMarks(admin, since)) {
+      let latest: number | null = null;
+      for (const mark of Object.values(posted)) {
+        const at = timeOf(mark?.at);
+        if (at !== null && (latest === null || at > latest)) latest = at;
+      }
+      if (latest !== null) dates.set(productId, latest);
+    }
+  } catch (err) {
+    console.warn('[hoy] no se pudo leer los videos subidos:', err instanceof Error ? err.message : String(err));
+    return new Map();
+  }
+  return dates;
+}
+
+/**
+ * Ids de lo mostrado en redes en los últimos 7 días, en el feed o en un video,
+ * del más reciente al más antiguo y sin repetir: de un producto que salió por
+ * los dos lados vale su fecha más nueva.
+ */
+async function recentSocialIds(): Promise<string[]> {
+  const since = new Date(Date.now() - SOCIAL_WINDOW_DAYS * 86_400_000);
+  const [feed, videos] = await Promise.all([readFeedDates(since), readVideoDates(since)]);
+
+  const latest = new Map(feed);
+  for (const [id, at] of videos) {
+    const known = latest.get(id);
+    if (known === undefined || at > known) latest.set(id, at);
+  }
+  return Array.from(latest)
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .slice(0, SOCIAL_MAX)
+    .map(([id]) => id);
 }
 
 export default async function HoyPage() {

@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPriceStatsManyChecked, type CheckedPriceStats } from '@/lib/queries/price-history';
 import { interestEvidence } from '@/lib/social/evidence';
 import type { InterestEvidence } from '@/lib/social/interest';
-import { readInterestSignals } from '@/lib/social/signals';
+import { readInterestSignals, type InterestSignals, type SignalOptions } from '@/lib/social/signals';
 
 /**
  * Lo que el historial de precios dice de cada candidato a redes: la baja que
@@ -53,8 +53,9 @@ export async function readInterestEvidence<
  * redes (historias, plan de publicaciones, Telegram y videos): así un mismo
  * producto tiene los mismos puntos y el mismo motivo en todos.
  *
- * Las señales solo suman. Si no se pudieron leer, la evidencia queda como la
- * del historial solo. Nunca lanza.
+ * Las señales solo suman, y solo al orden: el piso de interés se mide sin
+ * ellas (lib/social/interest). Si no se pudieron leer, la evidencia queda
+ * como la del historial solo. Nunca lanza.
  */
 export async function readSocialEvidence<
   T extends { id: string; price: number; original_price: number | null; ml_product_id?: string | null },
@@ -64,11 +65,45 @@ export async function readSocialEvidence<
     readInterestEvidence(candidates, now),
     readInterestSignals(admin, candidates, now),
   ]);
+  return withSignals(evidence, signals);
+}
+
+/** La evidencia del historial con las señales de cada producto encima. La de quien no tiene historial leído no se inventa. */
+function withSignals(
+  evidence: Map<string, InterestEvidence>,
+  signals: Map<string, InterestSignals>
+): Map<string, InterestEvidence> {
   for (const [id, signal] of signals) {
     const known = evidence.get(id);
     if (known) evidence.set(id, { ...known, mlPosition: signal.mlPosition, recentClicks: signal.recentClicks });
   }
   return evidence;
+}
+
+/**
+ * Lo mismo que readSocialEvidence, en dos pasos, para quien ya leyó el
+ * historial (readInterestEvidence) y con él decidió con cuáles productos se
+ * queda: les suma las señales a esos y devuelve su evidencia completa, sin
+ * tocar la que recibió.
+ *
+ * Lo usa el tablero de videos, que primero necesita la baja de cada producto
+ * para saber qué videos siguen diciendo la verdad, y recién ahí sabe de
+ * cuáles vale la pena preguntar los clics. Son pocos, así que por defecto se
+ * piden solo los suyos (SignalOptions.onlyTheirClicks). Nunca lanza.
+ */
+export async function addInterestSignals<T extends { id: string; ml_product_id?: string | null }>(
+  admin: SupabaseClient,
+  rows: T[],
+  history: ReadonlyMap<string, InterestEvidence>,
+  now: Date,
+  options: SignalOptions = { onlyTheirClicks: true }
+): Promise<Map<string, InterestEvidence>> {
+  const evidence = new Map<string, InterestEvidence>();
+  for (const p of rows) {
+    const known = history.get(p.id);
+    if (known) evidence.set(p.id, known);
+  }
+  return withSignals(evidence, await readInterestSignals(admin, rows, now, options));
 }
 
 /** De cuántos candidatos no se pudo leer el historial. Para decirlo en la respuesta de quien publica. */

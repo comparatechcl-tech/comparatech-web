@@ -11,10 +11,11 @@ import { VIDEO_MARK, VIDEO_NETWORKS, VIDEO_RULES, type VideoNetwork } from '@/li
  * Lo que se anota cuando un video se sube a mano desde /admin/videos: una
  * marca por red, porque el mismo archivo se sube a cada una por separado.
  *
- * Ninguna de las dos acciones regenera páginas, a propósito: un video subido
- * no cambia nada del sitio público, y regenerar haría que la lista se arme de
- * nuevo después de cada toque (las tarjetas se corren bajo el dedo y el video
- * ya bajado para compartir se pierde).
+ * Ninguna de las dos acciones regenera páginas, a propósito: regenerar haría
+ * que la lista se arme de nuevo después de cada toque (las tarjetas se corren
+ * bajo el dedo y el video ya bajado para compartir se pierde). La única página
+ * pública que mira estas marcas es /hoy, adonde lleva el link del perfil, y
+ * se regenera sola cada minuto: el producto aparece ahí sin pedirlo desde acá.
  *
  * Tampoco tocan el producto (rrss_status y compañía): eso es del plan de
  * publicaciones del feed, que lleva su propia cuenta.
@@ -104,7 +105,15 @@ export async function markVideoPosted(productId: string, network: VideoNetwork, 
 
 /**
  * Deshace una marca hecha por error: el video vuelve a figurar como pendiente
- * en esa red. La fila no se borra: queda anulada, igual que las historias.
+ * en esa red. Las filas no se borran: quedan anuladas, igual que las historias.
+ *
+ * Anula todas las marcas vigentes de ese producto en esa red, no solo la del
+ * id. Puede haber más de una (dos pestañas o dos teléfonos que marcaron en el
+ * mismo instante, o una pestaña vieja que marcó con otro precio), y la página
+ * muestra una sola: si quedara otra en pie, al recargar la red volvería a
+ * figurar como subida y el producto seguiría sin sugerirse. Vigente es lo que
+ * todavía cuenta (los últimos 14 días): una marca más antigua ya no cambia
+ * nada y queda como registro de lo que se subió entonces.
  */
 export async function undoVideoPosted(postId: number): Promise<UndoResult> {
   const actor = await requireAdmin();
@@ -116,26 +125,51 @@ export async function undoVideoPosted(postId: number): Promise<UndoResult> {
   if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
 
   // Solo marcas de video todavía vigentes: nunca una publicación del feed, una historia ni un mensaje de Telegram.
-  const { data, error } = await admin
+  const found = await admin
     .from('social_posts')
-    .update({ status: 'error', error: 'Marcada por error', updated_at: new Date().toISOString() })
+    .select('product_id, channel, posted_at')
     .eq('id', postId)
     .in('channel', [...VIDEO_NETWORKS])
     .eq('caption', VIDEO_MARK)
     .eq('status', 'publicado')
-    .select('product_id, channel');
-  if (error) return { ok: false, error: error.message };
-  const rows = (data ?? []) as { product_id: string | null; channel: string }[];
+    .limit(1);
+  if (found.error) return { ok: false, error: found.error.message };
+  const target = ((found.data ?? []) as { product_id: string | null; channel: string; posted_at: string | null }[])[0];
   // Pasa cuando la respuesta de un primer intento se perdió en el camino o se
   // desmarcó desde otra pestaña: la página lo distingue para no dejar el botón
   // marcado para siempre.
-  if (rows.length === 0) return { ok: false, error: 'Esa marca ya no existe.', gone: true };
+  const gone: UndoResult = { ok: false, error: 'Esa marca ya no existe.', gone: true };
+  if (!target) return gone;
+
+  // Una sola escritura para todas: o se anulan juntas o no se anula ninguna.
+  let undo = admin
+    .from('social_posts')
+    .update({ status: 'error', error: 'Marcada por error', updated_at: new Date().toISOString() })
+    .in('channel', [...VIDEO_NETWORKS])
+    .eq('caption', VIDEO_MARK)
+    .eq('status', 'publicado');
+  const own = target.posted_at ? new Date(target.posted_at).getTime() : NaN;
+  if (target.product_id && Number.isFinite(own)) {
+    // Desde el inicio del plazo, o desde la fecha de esta marca si es anterior: la del id se anula siempre.
+    const windowStart = Date.now() - VIDEO_RULES.repeatAfterDays * 86_400_000;
+    const since = new Date(Math.min(own, windowStart)).toISOString();
+    undo = undo.eq('product_id', target.product_id).eq('channel', target.channel).gte('posted_at', since);
+  } else {
+    // Sin producto o sin fecha no hay cómo encontrar a las demás: se anula esa sola.
+    undo = undo.eq('id', postId);
+  }
+  const { data, error } = await undo.select('id');
+  if (error) return { ok: false, error: error.message };
+  const undone = ((data ?? []) as { id: number }[]).length;
+  // Alguien la deshizo entre la lectura y la escritura.
+  if (undone === 0) return gone;
 
   await logAdminEvent(admin, {
     actor,
     action: 'marcar_rrss',
-    target: rows[0].product_id ?? undefined,
-    after: { video: 'deshecho', red: rows[0].channel },
+    target: target.product_id ?? undefined,
+    // Si eran varias queda dicho: explica por qué cambió más de una fila con un solo toque.
+    after: undone > 1 ? { video: 'deshecho', red: target.channel, marcas: undone } : { video: 'deshecho', red: target.channel },
   });
   return { ok: true };
 }

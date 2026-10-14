@@ -4,8 +4,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 /**
  * /admin/videos dibujada a HTML estático: lo que la página le explica al
  * dueño, lo que trae cada tarjeta y cómo queda anotado en la bitácora. Lo
- * que pasa al tocar (bajar el archivo, compartir, marcar) no se puede probar
- * sin un navegador: de eso se prueban las piezas puras.
+ * que pasa al tocar (bajar el archivo, compartir, copiar, marcar) está en
+ * video-page-gestures.test.tsx, con dobles del navegador.
  */
 
 // Las acciones escriben en la base: acá solo se mira lo que la página dibuja.
@@ -23,7 +23,7 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/admin/videos' }));
 
 import ActividadPage from '@/app/admin/actividad/page';
 import { AdminTabs } from '@/app/admin/AdminTabs';
-import VideosPage from '@/app/admin/videos/page';
+import VideosPage, * as videosPageModule from '@/app/admin/videos/page';
 import {
   VideoList,
   fetchVideoFile,
@@ -36,7 +36,7 @@ import {
 } from '@/app/admin/videos/VideoList';
 import { readAdminEvents, type AdminEventRow } from '@/lib/admin-audit';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
-import { readVideoBoard, type ReadyVideo, type VideoBoard } from '@/lib/social/videos';
+import { VIDEO_RULES, readVideoBoard, type ReadyVideo, type VideoBoard } from '@/lib/social/videos';
 
 const NOW = new Date('2026-10-13T15:00:00Z');
 const STORAGE = 'https://abcd1234.supabase.co/storage/v1/object/public/reels';
@@ -69,8 +69,8 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
     discount: 50,
     checkedAt: new Date(NOW.getTime() - 20 * 60_000).toISOString(),
     template: 'estudio',
-    videoUrl: `${STORAGE}/2026-10-13/${id}-49990-estudio.mp4`,
-    coverUrl: `${STORAGE}/2026-10-13/${id}-49990-estudio.jpg`,
+    videoUrl: `${STORAGE}/2026-10-13/${id}-49990-estudio-0a1b2c3d.mp4`,
+    coverUrl: `${STORAGE}/2026-10-13/${id}-49990-estudio-0a1b2c3d.jpg`,
     fileName: `comparatech-producto-${seq}-reel.mp4`,
     renderedAt: '2026-10-13T11:05:00.000Z',
     points: 62.5,
@@ -120,6 +120,23 @@ function buttons(html: string): { attrs: string; label: string }[] {
 
 /** ¿El botón viene apagado? El atributo, no la clase disabled:opacity-50 que llevan todos. */
 const isOff = (b: { attrs: string }) => /\sdisabled=""/.test(b.attrs);
+
+/** Un elemento de React ya armado, sin dibujar. */
+interface El {
+  type: unknown;
+  key: string | null;
+  props: Record<string, unknown> & { children?: unknown };
+}
+
+/** Todos los elementos del árbol que devuelve la página, sin entrar en los componentes. */
+function elements(node: unknown, out: El[] = []): El[] {
+  if (Array.isArray(node)) for (const child of node) elements(child, out);
+  else if (typeof node === 'object' && node !== null && 'props' in node) {
+    out.push(node as El);
+    elements((node as El).props.children, out);
+  }
+  return out;
+}
 
 function board(over: Partial<VideoBoard> = {}): VideoBoard {
   return { videos: [], stale: 0, lastRenderedAt: null, storageReady: true, ...over };
@@ -262,9 +279,11 @@ describe('VideoList: la tarjeta de un video', () => {
       ['YouTube', 'true'],
       ['Facebook', 'false'],
     ]);
-    // El grupo tiene nombre para quien no ve la pantalla.
+    // El grupo tiene nombre para quien no ve la pantalla, igual que el de los textos.
     expect(html).toContain(`role="group" aria-labelledby="subido-${item.id}"`);
     expect(html).toContain(`id="subido-${item.id}"`);
+    expect(html).toContain(`role="group" aria-labelledby="textos-${item.id}"`);
+    expect(html).toContain(`id="textos-${item.id}"`);
     // Subido lleva un visto y pendiente un círculo vacío: dos íconos distintos, no solo otro color.
     const icons = (group.match(/lucide-[a-z-]+/g) ?? []).filter((name) => name !== 'lucide-icon');
     expect(icons).toEqual(['lucide-check', 'lucide-circle', 'lucide-check', 'lucide-circle']);
@@ -420,31 +439,58 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
     expect(html).toMatch(/<a href="\/admin\/videos" class="[^"]*\bmin-h-11\b[^"]*">Actualizar<\/a>/);
   });
 
-  it('explica el método completo, en cinco pasos numerados', async () => {
+  it('explica el método completo, en cinco pasos numerados: el texto se copia antes de Compartir', async () => {
     const html = await page();
     const list = /<ol[^>]*>([\s\S]*?)<\/ol>/.exec(html);
     expect(list?.[0]).toContain('list-decimal');
     const steps = (list?.[1] ?? '').split('</li>').slice(0, -1).map((step) => text(step).trim());
     expect(steps).toEqual([
       'Elige uno o dos videos al día. Para una cuenta que parte de cero vale más subir uno todos los días que muchos de una vez.',
-      'Toca Compartir y elige Instagram (Reel), TikTok o YouTube. Sube este mismo archivo a cada red: un video bajado de otra red lleva su marca de agua y se muestra menos.',
-      'Antes de publicar, ponle un audio de la biblioteca de la app. Los videos en silencio se muestran menos.',
-      'Pega el texto de esa red con su botón. En TikTok activa "Contenido comercial" y elige "Contenido de marca".',
+      // Antes de Compartir: Compartir manda solo el archivo, y en la app ya no hay de dónde copiar.
+      'Copia el texto de la red donde lo vas a subir, con su botón: queda copiado en el teléfono.',
+      // Las cuatro redes de la tarjeta, Facebook incluida.
+      'Toca Compartir y elige Instagram (Reel), TikTok, YouTube o Facebook. Sube este mismo archivo a cada red: un video bajado de otra red lleva su marca de agua y se muestra menos.',
+      'En la app, pega el texto y ponle un audio de la biblioteca de la app: los videos en silencio se muestran menos. En TikTok activa "Contenido comercial" y elige "Contenido de marca".',
       'Marca en qué redes lo subiste: lo que ya subiste no se vuelve a sugerir en 14 días.',
     ]);
   });
 
-  it('avisa que el reel no lleva link y manda a Historias', async () => {
+  it('avisa que el reel no lleva link, que el del perfil ya lleva a Lo de hoy y para qué sirve Copiar link', async () => {
     const html = await page();
     expect(text(html)).toContain(
-      'Un reel no lleva link que se pueda tocar. El link va en tu perfil y en la historia del mismo producto (pestaña Historias).'
+      'Un reel no lleva link que se pueda tocar. El link de tu perfil ya lleva a la página Lo de hoy del sitio, donde aparecen los productos de los videos que marcas como subidos: no lo cambies. Copiar link sirve para el sticker de la historia de este producto.'
     );
-    expect(html).toMatch(/<a[^>]*href="\/admin\/historias"[^>]*>Historias<\/a>/);
+    // La página Lo de hoy queda a un toque, para mirar que el producto esté.
+    expect(html).toMatch(/<a[^>]*href="\/hoy"[^>]*>Lo de hoy<\/a>/);
+    // No manda a la pestaña Historias: llevan otra selección y el producto del reel puede no estar ahí.
+    expect(html).not.toContain('href="/admin/historias"');
     // Después del método y antes de la lista.
     expect(html.indexOf('Un reel no lleva link')).toBeGreaterThan(html.indexOf('</ol>'));
   });
 
-  it('con videos, dibuja la lista y le pasa el plazo del precio', async () => {
+  it('es dinámica: se arma en cada visita, no una vez al construir el sitio', () => {
+    expect(videosPageModule.dynamic).toBe('force-dynamic');
+  });
+
+  it('le pasa a la lista el plazo del precio y la hora de esta carga, que además es su key', async () => {
+    vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: [video(), video()] }));
+    const before = Date.now();
+    const lists = elements(await VideosPage()).filter((el) => el.type === VideoList);
+    expect(lists).toHaveLength(1);
+    const [list] = lists;
+    // El plazo es el de las reglas: con otro, la lista nunca daría un precio por viejo.
+    expect(list.props.maxPriceAgeMs).toBe(6 * 3600_000);
+    expect(list.props.maxPriceAgeMs).toBe(VIDEO_RULES.maxPriceAgeMs);
+    // La hora de la carga identifica la visita (lo marcado al volver con "atrás")...
+    expect(list.props.renderedAt).toBeGreaterThanOrEqual(before);
+    expect(list.props.renderedAt).toBeLessThanOrEqual(Date.now());
+    // ...y es la key: con datos nuevos del servidor la lista se monta de cero y los toma.
+    expect(list.key).toBe(String(list.props.renderedAt));
+    // La misma hora con que se leyó el tablero.
+    expect(vi.mocked(readVideoBoard).mock.calls[0][1].getTime()).toBe(list.props.renderedAt);
+  });
+
+  it('con videos, dibuja la lista', async () => {
     const items = [video(), video()];
     vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: items, lastRenderedAt: '2026-10-13T11:05:00.000Z' }));
     const html = await page();
@@ -475,20 +521,30 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
     expect(read).not.toContain('Último video generado');
   });
 
-  it('cuenta los videos que quedaron viejos, en singular y en plural', async () => {
+  it('cuenta los videos que dejaron de mostrarse, en singular y en plural, sin prometer que se rehacen', async () => {
     vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: [video()], stale: 3 }));
-    expect(text(await page())).toContain(
-      '3 videos quedaron viejos porque el producto cambió de precio: se rehacen solos en la próxima pasada.'
+    const many = text(await page());
+    expect(many).toContain(
+      '3 videos ya no se muestran porque el producto cambió (de precio, de oferta o salió del sitio). Si sigue entre los sugeridos, se arma uno nuevo en la próxima pasada.'
     );
 
     vi.mocked(readVideoBoard).mockResolvedValue(board({ stale: 1 }));
     const one = text(await page());
-    expect(one).toContain('1 video quedó viejo porque el producto cambió de precio: se rehace solo en la próxima pasada.');
+    expect(one).toContain(
+      '1 video ya no se muestra porque el producto cambió (de precio, de oferta o salió del sitio). Si sigue entre los sugeridos, se arma uno nuevo en la próxima pasada.'
+    );
     // Sin videos vigentes se ven los dos mensajes: por qué no hay y cuándo vuelven.
     expect(one).toContain('Ahora no hay videos listos');
 
+    // Lo que no se rehace (ya subido, fuera del sitio, sin oferta que alcance) no se promete.
+    for (const read of [many, one]) {
+      expect(read).not.toMatch(/se rehacen? solos?/);
+      expect(read).not.toMatch(/qued(ó|aron) viejos?/);
+      expect(read).not.toMatch(AVOIDED);
+    }
+
     vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: [video()] }));
-    expect(text(await page())).not.toMatch(/qued(ó|aron) viejos?/);
+    expect(text(await page())).not.toMatch(/ya no se muestran?/);
   });
 
   it('al pie dice cuándo se generó el último, en hora de Chile, y con qué criterio se eligen', async () => {
@@ -502,6 +558,8 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
     expect(foot).toContain('lo que figura entre los más vendidos de Mercado Libre');
     expect(foot).toContain('lo que recibe más clics en el sitio');
     expect(foot).toContain('Solo ofertas sin avisos y con el precio revisado en las últimas 6 horas');
+    // No solo el precio: también lo que el video dice de la oferta (precio de lista, descuento, envío).
+    expect(foot).toContain('Si un producto cambia de precio o de oferta, su video deja de mostrarse');
     // Un aviso que aparece después de armado el video no contradice lo anterior: se explica.
     expect(foot).toContain('si después de armado aparece algo que mirar, la tarjeta lo dice con un "Ojo"');
     expect(foot).not.toMatch(AVOIDED);

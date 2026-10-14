@@ -37,6 +37,7 @@ import { estimateCommission } from '@/lib/commission';
 import { MIN_INTEREST_POINTS } from '@/lib/social/interest';
 import { NETWORK_RULES } from '@/lib/social/networks';
 import { STORY_RULES } from '@/lib/social/stories';
+import { VIDEO_RULES } from '@/lib/social/videos';
 import {
   SOCIAL_BASE_COLUMNS,
   TELEGRAM_RULES,
@@ -417,9 +418,54 @@ describe('las reglas de cada canal', () => {
   it('ninguna regla de canal salta el piso ni la exclusión', () => {
     const low = scored(MIN_INTEREST_POINTS - 15);
     const excluded = scored(95, { category: 'gaming' }, { excluded: 'sin precio válido' });
-    for (const rules of [TELEGRAM_RULES, NETWORK_RULES, STORY_RULES]) {
+    for (const rules of [TELEGRAM_RULES, NETWORK_RULES, STORY_RULES, VIDEO_RULES]) {
       expect(pickByRules([low, excluded], opts(), rules)).toEqual([]);
     }
+  });
+
+  // Los clics del sitio y el puesto entre los más vendidos se pueden fabricar
+  // desde afuera. Ordenan lo que ya entra, pero no hacen entrar nada.
+  describe('las señales no habilitan en ningún canal', () => {
+    /** Un producto con `own` puntos propios más `signals` de señales: lo que se ve es la suma. */
+    const lifted = (own: number, signals: number, over: Partial<SocialProduct> = {}) =>
+      scored(own + signals, over, { breakdown: { signals } });
+    const CHANNELS: [string, PickRules][] = [
+      ['Telegram, que publica solo', TELEGRAM_RULES],
+      ['el feed', NETWORK_RULES],
+      ['las historias', STORY_RULES],
+      ['los videos', VIDEO_RULES],
+    ];
+
+    it.each(CHANNELS)('en %s, 39 puntos con la señal máxima no entran; 41 sí, y la señal lo sube en el orden', (_channel, rules) => {
+      const below = lifted(MIN_INTEREST_POINTS - 1, 6, { category: 'audio' });
+      const above = lifted(MIN_INTEREST_POINTS + 1, 6, { category: 'gaming' });
+      const rival = scored(MIN_INTEREST_POINTS + 4, { category: 'hogar' });
+
+      // El de 39 suma 45 con las señales, más que el rival, y aun así no entra.
+      const picks = pickByRules([below, rival, above], opts(), rules);
+      expect(ids(picks)).toEqual([above.id, rival.id]);
+      expect(picks.map((pick) => pick.score.points)).toEqual([MIN_INTEREST_POINTS + 7, MIN_INTEREST_POINTS + 4]);
+      // Solo y con cupos de sobra, tampoco.
+      expect(pickByRules([below], opts(), rules)).toEqual([]);
+
+      // El mismo de 41 sin la señal va después del rival: la señal ordena.
+      const plain = scored(MIN_INTEREST_POINTS + 1, { category: 'gaming' });
+      expect(ids(pickByRules([plain, rival], opts(), rules))).toEqual([rival.id, plain.id]);
+    });
+
+    it.each(CHANNELS)('en %s, el piso se mide justo: 40 propios entran con o sin señales, 39,9 no', (_channel, rules) => {
+      const exact = lifted(MIN_INTEREST_POINTS, 3.4, { category: 'audio' });
+      const short = lifted(MIN_INTEREST_POINTS - 0.1, 6, { category: 'gaming' });
+      expect(ids(pickByRules([short, exact], opts(), rules))).toEqual([exact.id]);
+    });
+
+    it('lo elegido a mano sale igual: ahí no corre el piso, y el puntaje va a la vista con sus señales', () => {
+      const below = lifted(MIN_INTEREST_POINTS - 1, 6);
+      const [pick] = pickByRules([below], opts(), { ...NETWORK_RULES, anyScore: true });
+      expect(pick.product.id).toBe(below.id);
+      expect(pick.score.points).toBe(MIN_INTEREST_POINTS + 5);
+      expect(pick.score.breakdown.signals).toBe(6);
+    });
   });
 });
 

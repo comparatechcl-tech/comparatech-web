@@ -11,7 +11,7 @@ vi.mock('@/lib/queries/price-history', () => {
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PriceStats } from '@/lib/deals';
 import { getPriceStatsMany, getPriceStatsManyChecked } from '@/lib/queries/price-history';
-import { countUnreadHistory, readInterestEvidence, readSocialEvidence } from '@/lib/social/drops';
+import { addInterestSignals, countUnreadHistory, readInterestEvidence, readSocialEvidence } from '@/lib/social/drops';
 
 const NOW = new Date('2026-10-12T15:00:00Z');
 const NO_HISTORY = { drop: null, min30: null, daysTracked: 0, historyUnread: false };
@@ -337,5 +337,109 @@ describe('readSocialEvidence', () => {
     expect(evidence.get(a.id)).toEqual({ ...NO_HISTORY, historyUnread: true, mlPosition: 2, recentClicks: null });
     expect(countUnreadHistory(evidence)).toBe(1);
     warn.mockRestore();
+  });
+});
+
+describe('addInterestSignals', () => {
+  type Row = Record<string, unknown>;
+
+  /** Una base de mentira que filtra por .in() y anota cada consulta: a qué tabla y con qué lista. */
+  function fakeAdmin(seed: { clicks?: Row[]; candidates?: Row[]; broken?: boolean }) {
+    const asked: { table: string; column: string | null; ids: unknown[] | null }[] = [];
+    const admin = {
+      from(table: string) {
+        if (seed.broken) throw new Error('sin conexión');
+        const query: { table: string; column: string | null; ids: unknown[] | null } = { table, column: null, ids: null };
+        const builder = {
+          select: () => builder,
+          gte: () => builder,
+          order: () => builder,
+          not: () => builder,
+          range: () => builder,
+          in(column: string, values: unknown[]) {
+            query.column = column;
+            query.ids = values;
+            return builder;
+          },
+          then<T>(resolve: (value: { data: Row[]; error: null }) => T) {
+            asked.push(query);
+            const all = (table === 'outbound_clicks' ? seed.clicks : seed.candidates) ?? [];
+            const column = query.column;
+            const rows = column === null ? all : all.filter((row) => query.ids?.includes(row[column]));
+            return Promise.resolve({ data: rows, error: null }).then(resolve);
+          },
+        };
+        return builder;
+      },
+    };
+    return { admin: admin as unknown as SupabaseClient, asked };
+  }
+
+  const recent = new Date(NOW.getTime() - 3 * 86_400_000).toISOString();
+  const clicks = (productId: string, n: number): Row[] =>
+    Array.from({ length: n }, () => ({ product_id: productId, client_key: null }));
+  const quietAt = (price: number) => stats(price, price, { previousPrice: null, lastChangeAt: null });
+
+  it('les suma las señales a los productos que quedan, sobre el historial ya leído, pidiendo solo sus clics', async () => {
+    const kept = { ...row(60_000, 100_000), ml_product_id: 'MLC1' };
+    const plain = { ...row(70_000, 100_000), ml_product_id: 'MLC2' };
+    const dropped = { ...row(80_000, 100_000), ml_product_id: 'MLC3' };
+    vi.mocked(getPriceStatsMany).mockResolvedValueOnce(new Map([[kept.id, quietAt(60_000)]]));
+    const history = await readInterestEvidence([kept, plain, dropped], NOW);
+    const { admin, asked } = fakeAdmin({
+      clicks: [...clicks(kept.id, 14), ...clicks(dropped.id, 30)],
+      candidates: [
+        { ml_product_id: 'MLC1', highlight_position: 3, prospected_at: recent, checked_at: recent },
+        { ml_product_id: 'MLC3', highlight_position: 1, prospected_at: recent, checked_at: recent },
+      ],
+    });
+
+    const evidence = await addInterestSignals(admin, [kept, plain], history, NOW);
+    // Solo los que se pidieron: del tercero no se pregunta ni se devuelve nada.
+    expect([...evidence.keys()]).toEqual([kept.id, plain.id]);
+    expect(evidence.get(kept.id)).toEqual({ drop: null, min30: 60_000, daysTracked: 20, ...CALM, mlPosition: 3, recentClicks: 14 });
+    expect(evidence.get(plain.id)).toEqual(NO_HISTORY);
+    expect(asked).toHaveLength(2);
+    expect(asked.find((q) => q.table === 'outbound_clicks')).toEqual({ table: 'outbound_clicks', column: 'product_id', ids: [kept.id, plain.id] });
+    expect(asked.find((q) => q.table === 'product_candidates')?.ids).toEqual(['MLC1', 'MLC2']);
+    // Da lo mismo que leerlo todo junto.
+    vi.mocked(getPriceStatsMany).mockResolvedValueOnce(new Map([[kept.id, quietAt(60_000)]]));
+    expect([...(await readSocialEvidence(admin, [kept, plain], NOW))]).toEqual([...evidence]);
+
+    // La evidencia que se le pasó queda como estaba: sin señales y con los tres.
+    expect(history.size).toBe(3);
+    expect(history.get(kept.id)).toEqual({ drop: null, min30: 60_000, daysTracked: 20, ...CALM });
+  });
+
+  it('a un producto cuyo historial no se leyó no le inventa una evidencia', async () => {
+    const known = { ...row(60_000, 100_000), ml_product_id: 'MLC1' };
+    const unknown = { ...row(70_000, 100_000), ml_product_id: 'MLC2' };
+    const history = await readInterestEvidence([known], NOW);
+    const { admin } = fakeAdmin({ clicks: clicks(unknown.id, 9) });
+
+    const evidence = await addInterestSignals(admin, [known, unknown], history, NOW);
+    expect([...evidence.keys()]).toEqual([known.id]);
+  });
+
+  it('si las señales no se pudieron leer, queda la evidencia del historial y no lanza', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const a = { ...row(80_000, 100_000), ml_product_id: 'MLC1' };
+    vi.mocked(getPriceStatsMany).mockResolvedValueOnce(new Map([[a.id, quietAt(80_000)]]));
+    const history = await readInterestEvidence([a], NOW);
+
+    const evidence = await addInterestSignals(fakeAdmin({ broken: true }).admin, [a], history, NOW);
+    expect(evidence.get(a.id)).toEqual({ drop: null, min30: 80_000, daysTracked: 20, ...CALM });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('si se le pide, lee la semana entera de clics como la selección completa', async () => {
+    const a = { ...row(60_000, 100_000), ml_product_id: null };
+    const history = await readInterestEvidence([a], NOW);
+    const { admin, asked } = fakeAdmin({ clicks: clicks(a.id, 5) });
+
+    const evidence = await addInterestSignals(admin, [a], history, NOW, { onlyTheirClicks: false });
+    expect(evidence.get(a.id)?.recentClicks).toBe(5);
+    expect(asked).toEqual([{ table: 'outbound_clicks', column: null, ids: null }]);
   });
 });

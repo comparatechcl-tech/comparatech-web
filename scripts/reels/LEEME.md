@@ -27,15 +27,40 @@ node scripts/reels/generar.mjs --seco     pide el plan y dice qué haría, sin a
    todo salió bien, o no había nada que hacer, con código 0.
 
 Cada video queda en el almacén `reels` como dos archivos con el mismo nombre:
-`{fecha}/{producto}-{precio}-{plantilla}.mp4` y `.jpg` (la portada).
+`{fecha}/{producto}-{precio}-{plantilla}-{huella}.mp4` y `.jpg` (la portada).
+
+**La huella** son 8 signos (del 0 al 9 y de la a a la f) que resumen lo que el video dice además del precio:
+el nombre corto, la marca, el precio de lista, el descuento, la baja del historial, "Envío gratis" y "Full".
+Así, si cambia cualquiera de esas cosas sin que cambie el precio, el nombre es otro: el video anterior deja
+de ofrecerse y se arma uno nuevo. **La calcula solo el sitio** (`src/lib/social/videos.ts`). El generador no
+la recalcula: usa el nombre tal como llega en `archivo` y solo revisa que el producto, el precio y la
+plantilla del nombre sean los de ese elemento, que la huella tenga su forma y que las dos direcciones de
+subida terminen en ese mismo nombre. Si el nombre llega sin huella, el sitio que respondió es de la versión
+anterior: ese producto falla con "el sitio y el generador no son de la misma versión" y no se sube nada con
+el nombre antiguo. Se arregla publicando la última versión del sitio.
 
 **El secreto** (`CRON_SECRET`) se toma de las variables de entorno (así llega en GitHub Actions) y, si no
 está, de `.env.local` (así corre en el PC). Solo se manda al sitio publicado, cuya dirección está escrita en
 `generar.mjs`, o a un servidor local con `--sitio http://localhost:3000`. Nunca a la foto ni a las subidas.
+Un `--sitio` vacío (por ejemplo `--sitio "$VARIABLE"` con la variable sin definir) es un error: no se toma
+como "entonces el sitio publicado".
+
+**Si el sitio redirige** (el día en que el dominio propio quede de principal y el anterior mande para allá),
+el pedido del plan no sigue la redirección, porque el secreto iría a parar a otra dirección. Termina al tiro
+con código 1 y lo dice: "el sitio redirige a otro dominio (…): hay que actualizar la dirección de producción
+(PRODUCTION) en scripts/reels/generar.mjs". La misma dirección está en `scripts/redes.mjs`.
 
 **Lo que imprime es público** (los registros de GitHub Actions de este repositorio lo son): por cada video, el
 nombre, el precio, la plantilla, cuánto demoró y cuánto pesa. Todo pasa por un filtro que tapa el secreto,
-las direcciones firmadas y sus tokens, también en los mensajes de error.
+las direcciones firmadas y sus tokens, también en los mensajes de error. Los textos que vienen de afuera (el
+nombre de un producto, el mensaje de error de otro servidor) salen en un solo renglón, sin signos de control
+ni signos que no se ven, y con las órdenes de GitHub Actions rotas con un espacio: `##[error]` sale como
+`# #[error]`, y un `::error::` al comienzo del renglón, como `: :error::`. Así un nombre no puede anotar un
+error falso ni tapar texto en el registro.
+
+**Si se corta a la mitad** (Ctrl+C, la consola que se cierra, Actions cancelando la corrida), antes de salir
+corta a ffmpeg y borra la carpeta temporal del video que estaba armando. Lo que ya se había subido queda
+arriba, y la corrida siguiente completa lo que falte.
 
 Corre en GitHub Actions con `.github/workflows/reels.yml`, cerca de las 08:10, 13:10 y 18:10 de Chile, y se
 puede lanzar a mano desde la pestaña Actions.
@@ -142,9 +167,11 @@ Todo sale del dato del producto; no hay frases de venta escritas a mano.
   en la variable `FFMPEG` o donde lo deja WinGet).
 - `plantillas/`: las plantillas. `plantillas/estudio/`: su escena (medidas, tiempos y el dibujo de cada
   cuadro) y sus fondos.
-- `*.test.ts` y `pruebas/sitio-de-mentira.mjs`: las pruebas (`npx vitest run scripts/reels`). El proceso del
-  día se prueba contra un sitio de mentira en 127.0.0.1, sin salir a la red; la prueba que arma un video de
-  verdad se salta si no hay ffmpeg.
+- `*.test.ts` y `pruebas/`: las pruebas (`npx vitest run scripts/reels`). El proceso del día se prueba contra
+  un sitio de mentira en 127.0.0.1 (`pruebas/sitio-de-mentira.mjs`, que entrega los nombres con su huella
+  igual que el sitio de verdad), sin salir a la red: cuando una prueba lanza el comando en otro proceso, lo
+  hace con `pruebas/sin-red.mjs`, que deja pasar solo lo que va a ese sitio de mentira. La prueba que arma un
+  video de verdad se salta si no hay ffmpeg.
 
 Solo necesita `sharp` y `next`, que ya están en el proyecto, y ffmpeg instalado.
 
@@ -158,3 +185,13 @@ Solo necesita `sharp` y `next`, que ya están en el proyecto, y ffmpeg instalado
   precio de lista).
 - **La foto manda**: una foto chica se ve chica, y los letreros que traiga pegados salen tal cual.
 - **Revisado cuadro a cuadro, no en un teléfono** ni dentro de las apps. La música se probó con tonos de prueba.
+- **El corte a la mitad se probó avisando la señal desde dentro del proceso**, no con un Ctrl+C de consola ni
+  con una cancelación de Actions de verdad. En Windows, un proceso que otro programa mata (no Ctrl+C) no
+  alcanza a enterarse, y ahí la carpeta temporal queda.
+- **Las órdenes de Actions quedan rotas, los "detectores de errores" no**: `setup-node` deja activos unos
+  detectores que anotan como error cualquier renglón con la forma de un error de tsc o de eslint. Un nombre de
+  producto escrito a propósito con esa forma podría dejar una anotación falsa en la corrida (no expone nada).
+  Si alguna vez pasa, se apagan en `reels.yml` con `echo "::remove-matcher owner=tsc::"` (y lo mismo con
+  `eslint-compact` y `eslint-stylish`) antes de correr el generador. Nada de esto se pudo probar dentro de
+  Actions: que las órdenes rotas ya no se obedecen sale de cómo las lee el programa de GitHub, no de una
+  corrida.

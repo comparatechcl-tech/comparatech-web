@@ -1,13 +1,13 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { PRODUCTION, generate, parseArgs, readSecret, resolveSite } from './generar.mjs';
-import { sampleItems, startFakeSite } from './pruebas/sitio-de-mentira.mjs';
+import { PRODUCTION, discardOpenWork, generate, parseArgs, readSecret, resolveSite } from './generar.mjs';
+import { fileName, sampleItems, startFakeSite } from './pruebas/sitio-de-mentira.mjs';
 import { buscarFfmpeg } from './video.mjs';
 
 /**
@@ -22,13 +22,22 @@ type Call = { host: string; method: string; authorization: string | null };
 const SECRET = 'secreto-de-prueba-0123456789abcdef-0123456789';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const TMP = mkdtempSync(path.join(os.tmpdir(), 'comparatech-generar-test-'));
+// Las pruebas que lanzan el comando más de una vez: en un equipo ocupado cada arranque puede pasar del segundo.
+const SLOW = 30_000;
 afterAll(() => rmSync(TMP, { recursive: true, force: true }));
 
 let site: FakeSite | null = null;
+/** Un segundo sitio de mentira, para las pruebas en que el primero manda para allá. */
+let otherSite: FakeSite | null = null;
 afterEach(async () => {
   await site?.close();
+  await otherSite?.close();
   site = null;
+  otherSite = null;
 });
+
+/** Las carpetas temporales de videos a medias que hay ahora en la carpeta de las pruebas. */
+const openDirs = () => readdirSync(TMP).filter((name) => name.startsWith('comparatech-reel-'));
 
 /** Una foto de producto inventada: un rectángulo oscuro sobre blanco, como las de Mercado Libre. */
 async function fakePhoto(): Promise<Buffer> {
@@ -90,12 +99,17 @@ function expectPublic(printed: string) {
   for (const token of site?.tokens.values() ?? []) expect(printed).not.toContain(token);
 }
 
-/** Corre el comando de verdad (otro proceso). Siempre con --sitio apuntando al sitio de mentira. */
-function runCli(args: string[]): Promise<{ code: number | null; out: string }> {
+/**
+ * Corre el comando de verdad (otro proceso), con la red cortada: la precarga pruebas/sin-red.mjs deja pasar
+ * solo lo que va al sitio de mentira, así que ninguna de estas pruebas puede llegar al sitio publicado ni
+ * por error. La carpeta temporal del proceso es la de las pruebas, para poder mirar qué deja.
+ */
+function runCli(args: string[], { script = 'scripts/reels/generar.mjs', env = {} }: { script?: string; env?: Record<string, string> } = {}): Promise<{ code: number | null; out: string }> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(ROOT, 'scripts/reels/generar.mjs'), ...args], {
+    const offline = pathToFileURL(path.join(ROOT, 'scripts/reels/pruebas/sin-red.mjs')).href;
+    const child = spawn(process.execPath, ['--import', offline, path.resolve(ROOT, script), ...args], {
       cwd: ROOT,
-      env: { ...process.env, CRON_SECRET: SECRET },
+      env: { ...process.env, CRON_SECRET: SECRET, TEMP: TMP, TMP, TMPDIR: TMP, ...env },
     });
     let out = '';
     child.stdout.on('data', (chunk) => (out += chunk));
@@ -118,6 +132,15 @@ describe('parseArgs', () => {
     for (const bad of [['--n', '0'], ['--n', '7'], ['--n', 'dos'], ['--n'], ['--sitio'], ['--sitio', '--seco'], ['--todo'], ['4'], ['--seco=si']]) {
       expect(() => parseArgs(bad), bad.join(' ')).toThrow();
     }
+  });
+
+  it('un --sitio vacío es un error: no puede terminar apuntando al sitio publicado sin avisar', () => {
+    // Es lo que llega con --sitio "$VARIABLE" cuando la variable no existe.
+    for (const bad of [['--sitio', ''], ['--sitio='], ['--sitio', '   '], ['--seco', '--sitio', '']]) {
+      expect(() => parseArgs(bad), JSON.stringify(bad)).toThrow('Falta el valor de --sitio');
+    }
+    expect(() => parseArgs(['--n', ''])).toThrow('Falta el valor de --n');
+    expect(() => parseArgs(['--n='])).toThrow('Falta el valor de --n');
   });
 });
 
@@ -154,7 +177,12 @@ describe('readSecret', () => {
 describe('resolveSite', () => {
   it('sin --sitio es el sitio publicado', () => {
     expect(resolveSite(null)).toBe(PRODUCTION);
+    expect(resolveSite(undefined)).toBe(PRODUCTION);
     expect(resolveSite(`${PRODUCTION}/cualquier/ruta`)).toBe(PRODUCTION);
+  });
+
+  it('un sitio vacío no es "sin --sitio": es un error', () => {
+    for (const empty of ['', '   ']) expect(() => resolveSite(empty), JSON.stringify(empty)).toThrow('--sitio llegó vacío');
   });
 
   it('acepta un servidor local', () => {
@@ -186,13 +214,14 @@ describe('generate: lo que arma y lo que salta', () => {
     const { result, calls, lines, printed } = await run();
 
     expect(result).toEqual({ ok: true, made: 2, existing: 1, failed: 0, pending: 0 });
-    // Subió portada y video de los dos que faltaban; del que ya existía, nada.
+    // Subió portada y video de los dos que faltaban; del que ya existía, nada. Cada archivo queda con el
+    // nombre que mandó el sitio, huella incluida (escrita aquí a mano: es la del contrato para estos datos).
     const stored = Array.from(site.stored.keys());
     expect(stored).toEqual([
-      `2026-10-13/${items[0].id}-219990-estudio.jpg`,
-      `2026-10-13/${items[0].id}-219990-estudio.mp4`,
-      `2026-10-13/${items[2].id}-189990-estudio.jpg`,
-      `2026-10-13/${items[2].id}-189990-estudio.mp4`,
+      `2026-10-13/${items[0].id}-219990-estudio-05758542.jpg`,
+      `2026-10-13/${items[0].id}-219990-estudio-05758542.mp4`,
+      `2026-10-13/${items[2].id}-189990-estudio-ce5849cd.jpg`,
+      `2026-10-13/${items[2].id}-189990-estudio-ce5849cd.mp4`,
     ]);
     expect(site.stored.get(stored[1])?.toString()).toBe('video de mentira');
     // Tampoco bajó la foto del que ya existía.
@@ -248,11 +277,27 @@ describe('generate: lo que arma y lo que salta', () => {
     const items = sampleItems().slice(0, 1);
     site = await startFakeSite({ secret: SECRET, items });
     // La portada quedó subida en un intento anterior que no alcanzó a subir el video.
-    site.stored.set(`2026-10-13/${items[0].id}-219990-estudio.jpg`, Buffer.from('portada anterior'));
+    site.stored.set(`${fileName(items[0])}.jpg`, Buffer.from('portada anterior'));
     const { result } = await run();
 
     expect(result).toMatchObject({ ok: true, made: 1, failed: 0 });
-    expect(site.stored.get(`2026-10-13/${items[0].id}-219990-estudio.mp4`)?.toString()).toBe('video de mentira');
+    expect(site.stored.get(`${fileName(items[0])}.mp4`)?.toString()).toBe('video de mentira');
+  });
+
+  it('si cambia lo que el video dice sin cambiar el precio, el nombre es otro y se arma de nuevo', async () => {
+    const items = sampleItems().slice(0, 1);
+    site = await startFakeSite({ secret: SECRET, items });
+    const before = fileName(items[0]);
+    expect((await run()).result).toMatchObject({ made: 1, existing: 0 });
+    expect((await run()).result).toMatchObject({ made: 0, existing: 1 });
+
+    // Mismo precio, pero ya no llega con envío gratis: el sitio manda otra huella y ese video no existe.
+    items[0].envio_gratis = false;
+    const after = fileName(items[0]);
+    expect(after).not.toBe(before);
+    expect(after.slice(0, -8)).toBe(before.slice(0, -8));
+    expect((await run()).result).toMatchObject({ made: 1, existing: 0 });
+    expect(Array.from(site.stored.keys())).toEqual([`${before}.jpg`, `${before}.mp4`, `${after}.jpg`, `${after}.mp4`]);
   });
 
   it('no deja carpetas temporales, ni cuando un producto falla', async () => {
@@ -263,7 +308,38 @@ describe('generate: lo que arma y lo que salta', () => {
         return fakeRender(job);
       },
     });
-    expect(readdirSync(TMP).filter((name) => name.startsWith('comparatech-reel-'))).toEqual([]);
+    expect(openDirs()).toEqual([]);
+  });
+
+  it('si cortan el proceso a la mitad, discardOpenWork borra la carpeta del video que se estaba armando', async () => {
+    site = await startFakeSite({ secret: SECRET, items: sampleItems().slice(0, 1) });
+    let started = () => {};
+    let release = () => {};
+    const rendering = new Promise<void>((resolve) => (started = resolve));
+    const held = new Promise<void>((resolve) => (release = resolve));
+    // El armador deja sus dos archivos y se queda ahí, como un video a medio armar.
+    const running = run({
+      render: async (job) => {
+        const done = await fakeRender(job);
+        started();
+        await held;
+        return done;
+      },
+    });
+    await rendering;
+    expect(openDirs()).toHaveLength(1);
+    expect(readdirSync(path.join(TMP, openDirs()[0])).sort()).toEqual(['foto.jpg', 'portada.jpg', 'reel.mp4']);
+
+    expect(discardOpenWork()).toBe(0);
+    expect(openDirs()).toEqual([]);
+    // Con nada a medias no hay nada que borrar, y tampoco es un problema.
+    expect(discardOpenWork()).toBe(0);
+
+    // En la vida real aquí el proceso sale. En la prueba se lo deja seguir: ya no tiene qué subir.
+    release();
+    expect((await running).result).toMatchObject({ ok: false, made: 0, failed: 1 });
+    expect(site.stored.size).toBe(0);
+    expect(openDirs()).toEqual([]);
   });
 });
 
@@ -290,8 +366,25 @@ describe('generate: el secreto', () => {
     const { code, out } = await runCli(['--seco', '--sitio', 'https://evil.example']);
     expect(code).toBe(1);
     expect(out).toContain('--sitio solo acepta un servidor local');
+    expect(out).not.toContain('[prueba] intento de salir a la red');
     expect(out).not.toContain(SECRET);
   });
+
+  it('con un --sitio vacío no se va al sitio publicado: es un error antes de hablarle a nadie', async () => {
+    const calls: Call[] = [];
+    const never = offlineFetch(calls, () => new Response(null, { status: 500 }));
+    await expect(generate({ site: '', secret: SECRET, fetch: never, log: () => {}, render: fakeRender })).rejects.toThrow('--sitio llegó vacío');
+    expect(calls).toEqual([]);
+
+    for (const args of [['--seco', '--sitio', ''], ['--seco', '--sitio=']]) {
+      const { code, out } = await runCli(args);
+      expect(code, JSON.stringify(args)).toBe(1);
+      expect(out).toContain('Falta el valor de --sitio.');
+      expect(out).toContain('Uso: node scripts/reels/generar.mjs');
+      expect(out).not.toContain('[prueba] intento de salir a la red');
+      expect(out).not.toContain(SECRET);
+    }
+  }, SLOW);
 
   it('si el sitio rechaza el secreto, lo dice y no hace nada más', async () => {
     site = await startFakeSite({ secret: 'otro-secreto-distinto-0123456789abcdef' });
@@ -373,7 +466,7 @@ describe('generate: cuando algo falla', () => {
     expect(products[2]).toMatch(/^3\/3 Tablet Lenovo Tab 128gb .* armado y subido en /);
     expect(lines[lines.length - 1]).toBe('Resumen: 1 video nuevo, 0 que ya estaban, 2 que no se pudieron.');
     // El tercero quedó completo; del primero no quedó el video (la portada se rechazó antes).
-    expect(Array.from(site.stored.keys())).toEqual([`2026-10-13/${items[2].id}-189990-estudio.jpg`, `2026-10-13/${items[2].id}-189990-estudio.mp4`]);
+    expect(Array.from(site.stored.keys())).toEqual([`${fileName(items[2])}.jpg`, `${fileName(items[2])}.mp4`]);
     // El almacén de mentira repite la dirección firmada y el token en su mensaje de error: no pueden salir.
     expectPublic(printed);
   });
@@ -383,7 +476,8 @@ describe('generate: cuando algo falla', () => {
     site = await startFakeSite({
       secret: SECRET,
       items: [
-        { ...items[0], archivo: `2026-10-13/${items[1].id}-1-estudio` },
+        // El nombre es el de otro producto, a otro precio.
+        { ...items[0], archivo: fileName({ ...items[1], precio: 1 }) },
         { ...items[1], plantilla: 'otra' },
         { ...items[2], subir: { video: 'https://evil.example/reels/x.mp4?token=abc', portada: 'https://evil.example/reels/x.jpg?token=abc' } },
         { ...items[2], id: 'c65c6a4c-42c4-42fd-b14f-8b908ca1e2b3', nombre_corto: 'Uno que sí\n::error::se arma' },
@@ -399,6 +493,92 @@ describe('generate: cuando algo falla', () => {
     expect(products[3]).toMatch(/^4\/4 Uno que sí ::error::se arma · /);
     expect(lines.every((line) => !line.includes('\n'))).toBe(true);
     expect(calls.map((call) => call.host)).not.toContain('evil.example');
+    expectPublic(printed);
+  });
+
+  it('un nombre de archivo sin huella es de un sitio de otra versión: no arma nada con ese nombre y lo dice', async () => {
+    const items = sampleItems();
+    const old = (item: Record<string, any>) => `2026-10-13/${item.id}-${item.precio}-${item.plantilla}`;
+    site = await startFakeSite({
+      secret: SECRET,
+      items: [
+        { ...items[0], archivo: old(items[0]) },
+        // Tampoco se da por hecho uno que "ya existe" con el nombre anterior: ese video no lo mostraría nadie.
+        { ...items[1], archivo: old(items[1]), ya_existe: true, subir: null },
+        // La huella tiene que venir con su forma: aquí no se calcula, pero tampoco se acepta cualquier cosa.
+        { ...items[2], archivo: `${old(items[2])}-CE5849CD` },
+      ],
+    });
+    const { result, calls, products, printed } = await run();
+
+    expect(result).toEqual({ ok: false, made: 0, existing: 0, failed: 3, pending: 0 });
+    const mismatch = 'NO SE PUDO: el sitio y el generador no son de la misma versión: el nombre del archivo llegó sin la huella de la oferta.';
+    expect(products[0]).toContain(mismatch);
+    expect(products[1]).toContain(mismatch);
+    expect(products[2]).toContain('NO SE PUDO: el nombre del archivo no trae una huella válida');
+    // Solo se pidió el plan: ni fotos ni subidas.
+    expect(calls).toHaveLength(1);
+    expect(site.stored.size).toBe(0);
+    expectPublic(printed);
+  });
+
+  it('las direcciones de subida tienen que terminar en el nombre con huella que mandó el sitio', async () => {
+    const [item] = sampleItems();
+    const file = fileName(item);
+    // Direcciones firmadas del nombre anterior (sin huella) para un archivo que sí la trae.
+    const oldUpload = (extension: string) => `http://127.0.0.1:9/storage/v1/object/upload/sign/reels/${file.slice(0, -9)}.${extension}?token=abcdefgh`;
+    site = await startFakeSite({ secret: SECRET, items: [{ ...item, archivo: file, subir: { video: oldUpload('mp4'), portada: oldUpload('jpg') } }] });
+    const { result, calls, products } = await run();
+
+    expect(result).toMatchObject({ ok: false, made: 0, failed: 1 });
+    expect(products[0]).toContain('NO SE PUDO: la dirección de subida no es la de este archivo');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('un nombre de producto no puede dar órdenes al registro de Actions', async () => {
+    const items = sampleItems();
+    site = await startFakeSite({
+      secret: SECRET,
+      items: [
+        { ...items[0], nombre_corto: 'Parlante ##[error]Falla inventada' },
+        { ...items[1], nombre_corto: 'Audífonos ##[add-mask]182' },
+        { ...items[2], nombre_corto: `Tablet #${String.fromCharCode(0x200b)}#[warning]con un signo que no se ve` },
+      ],
+      // El mensaje de error del sitio también es texto ajeno.
+      planFailures: [{ status: 500, body: { error: '##[error]Falla del sitio\n::error::otra' } }],
+    });
+    const failed = await run();
+    expect(failed.lines).toEqual(['No se pudo pedir el plan de videos: el sitio respondió 500: # #[error]Falla del sitio ::error::otra']);
+
+    const { result, lines, products } = await run();
+    expect(result).toMatchObject({ ok: true, made: 3 });
+    expect(products[0]).toMatch(/^1\/3 Parlante # #\[error\]Falla inventada · \$219\.990 · /);
+    expect(products[1]).toMatch(/^2\/3 Audífonos # #\[add-mask\]182 · \$182\.990 · /);
+    expect(products[2]).toMatch(/^3\/3 Tablet # #\[warning\]con un signo que no se ve · /);
+    // Ningún renglón trae la forma antigua de orden ("##[") ni empieza con la nueva ("::").
+    for (const line of [...failed.lines, ...lines]) {
+      expect(line).not.toContain('##[');
+      expect(line).not.toMatch(/^\s*::/);
+    }
+  });
+
+  it('tampoco queda armada una orden al tapar un secreto', async () => {
+    site = await startFakeSite({ secret: SECRET, items: sampleItems().slice(0, 1) });
+    const photo = await fakePhoto();
+    const calls: Call[] = [];
+    const offline = offlineFetch(calls, () => jpegResponse(photo));
+    // El almacén responde un error que pega "##" justo antes del token de la subida: suelto no es una orden,
+    // pero al taparlo quedaría "##[oculto]".
+    const storageFails: typeof fetch = async (input, init) => {
+      if (init?.method !== 'PUT') return offline(input, init);
+      const token = new URL(String(input)).searchParams.get('token');
+      return new Response(JSON.stringify({ statusCode: '500', error: 'Internal', message: `no se pudo guardar ##${token}` }), { status: 500 });
+    };
+    const { result, products, printed } = await run({ fetch: storageFails });
+
+    expect(result).toMatchObject({ ok: false, failed: 1 });
+    expect(products[0]).toContain('NO SE PUDO: el almacén respondió 500 al subir: no se pudo guardar # #[oculto]');
+    expect(printed).not.toContain('##[');
     expectPublic(printed);
   });
 
@@ -425,6 +605,58 @@ describe('generate: cuando algo falla', () => {
     const down = await run();
     expect(down.result).toMatchObject({ ok: false, made: 0 });
     expect(down.printed).toContain('el sitio respondió 503');
+  });
+
+  it('si el sitio redirige a otro dominio lo dice de una vez: no reintenta, no sigue la redirección y no manda el secreto allá', async () => {
+    for (const status of [301, 302, 303, 307, 308]) {
+      await site?.close();
+      await otherSite?.close();
+      otherSite = await startFakeSite({ secret: SECRET });
+      site = await startFakeSite({ secret: SECRET, planFailures: [{ status, headers: { location: `${otherSite.origin}/api/social/videos/plan?n=4` } }] });
+      const { result, calls, lines, printed } = await run();
+
+      expect(result, String(status)).toEqual({ ok: false, made: 0, existing: 0, failed: 0, pending: 0 });
+      // Un solo pedido: una redirección no se arregla insistiendo (antes eran tres, con 40 segundos de espera).
+      expect(calls).toEqual([{ host: new URL(site.origin).host, method: 'GET', authorization: `Bearer ${SECRET}` }]);
+      expect(site.requests).toHaveLength(1);
+      // Al otro sitio no le llegó nada: ni el pedido ni el secreto.
+      expect(otherSite.requests).toEqual([]);
+      expect(lines).toEqual([
+        `No se pudo pedir el plan de videos: el sitio redirige a otro dominio (${otherSite.origin}): hay que revisar la dirección que se pasó en --sitio. No se siguió la redirección: el secreto solo se manda a la dirección pedida`,
+      ]);
+      expectPublic(printed);
+    }
+  });
+
+  it('si el que redirige es el sitio publicado, dice que hay que cambiar la dirección de producción', async () => {
+    const calls: Call[] = [];
+    const lines: string[] = [];
+    // Sin red: el "sitio publicado" es este fetch, que responde como el dominio antiguo mandando al nuevo.
+    const moved: typeof fetch = async (input, init) => {
+      const url = new URL(String(input));
+      calls.push({ host: url.host, method: init?.method ?? 'GET', authorization: new Headers(init?.headers).get('authorization') });
+      return new Response(null, { status: 308, headers: { location: `https://comparatech.example${url.pathname}${url.search}&clave=no-debe-salir` } });
+    };
+    const result = await generate({ secret: SECRET, fetch: moved, log: (line: string) => lines.push(line), render: fakeRender, retryDelayMs: 0 });
+
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([{ host: new URL(PRODUCTION).host, method: 'GET', authorization: `Bearer ${SECRET}` }]);
+    // Del destino sale solo el dominio, no la dirección completa.
+    expect(lines).toEqual([
+      'No se pudo pedir el plan de videos: el sitio redirige a otro dominio (https://comparatech.example): hay que actualizar la dirección de producción (PRODUCTION) en scripts/reels/generar.mjs. No se siguió la redirección: el secreto solo se manda a la dirección pedida',
+    ]);
+  });
+
+  it('una redirección dentro del mismo sitio, o sin destino, tampoco se sigue ni se reintenta', async () => {
+    for (const headers of [{ location: '/login' }, undefined]) {
+      await site?.close();
+      site = await startFakeSite({ secret: SECRET, planFailures: [{ status: 307, headers }] });
+      const { result, calls, printed } = await run();
+      expect(result.ok).toBe(false);
+      expect(calls).toHaveLength(1);
+      expect(site.requests.map((request) => request.path)).toEqual(['/api/social/videos/plan']);
+      expect(printed).toContain('el sitio respondió con una redirección (307) en vez del plan');
+    }
   });
 
   it('una respuesta que no es un plan no arma nada', async () => {
@@ -481,6 +713,61 @@ describe('el comando generar.mjs', () => {
     expect(out).toContain('el sitio rechazó el secreto (401)');
     expectPublic(out);
   });
+
+  it('si el sitio redirige termina con código 1 al tiro, con un mensaje que dice qué hacer', async () => {
+    otherSite = await startFakeSite({ secret: SECRET });
+    site = await startFakeSite({ secret: SECRET, planFailures: [{ status: 308, headers: { location: `${otherSite.origin}/api/social/videos/plan?n=4` } }] });
+    const started = Date.now();
+    const { code, out } = await runCli(['--sitio', site.origin]);
+
+    expect(code).toBe(1);
+    expect(out).toContain(`el sitio redirige a otro dominio (${otherSite.origin})`);
+    expect(out).not.toContain('fetch failed');
+    expect(otherSite.requests).toEqual([]);
+    // Sin los dos reintentos de 20 segundos que hacía antes.
+    expect(Date.now() - started).toBeLessThan(15_000);
+    expectPublic(out);
+  }, SLOW);
+
+  it('lanzado a través de un enlace de carpeta también corre: antes no hacía nada y terminaba con código 0', async () => {
+    // El enlace apunta a una COPIA del generador hecha aquí mismo, no a la carpeta del proyecto: así, pase lo
+    // que pase al limpiar, lo único que hay detrás del enlace es desechable. --seco no necesita más que eso.
+    const copy = path.join(TMP, 'copia', 'scripts', 'reels');
+    cpSync(path.join(ROOT, 'scripts/reels'), copy, { recursive: true });
+    const link = path.join(TMP, 'enlace');
+    // En Windows, un enlace de carpeta que no pide permisos especiales; en Linux y macOS, uno simbólico.
+    symlinkSync(copy, link, 'junction');
+
+    site = await startFakeSite({ secret: SECRET });
+    const { code, out } = await runCli(['--seco', '--sitio', site.origin], { script: path.join(link, 'generar.mjs') });
+    expect(out).toContain('Resumen: 3 por armar, 0 que ya estaban.');
+    expect(code).toBe(0);
+    expect(site.requests.map((request) => `${request.method} ${request.path}`)).toEqual(['GET /api/social/videos/plan']);
+    expectPublic(out);
+
+    // hacer.mjs no tiene esa comparación (siempre corre), pero se comprueba igual: por el enlace también
+    // lee la línea de comando y reclama lo que falta.
+    const manual = await runCli([], { script: path.join(link, 'hacer.mjs') });
+    expect(manual.code).toBe(1);
+    expect(manual.out).toContain('No se pudo armar el video: Faltan datos.');
+  }, SLOW);
+
+  it('si lo cortan a la mitad (SIGINT o SIGTERM) borra la carpeta temporal en curso antes de salir', async () => {
+    for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]] as const) {
+      await site?.close();
+      site = await startFakeSite({ secret: SECRET, items: sampleItems().slice(0, 1) });
+      // La precarga hace de quien corta: cuando el comando ya creó la carpeta del video y está bajando la
+      // foto, deja un archivo a medias dentro y avisa la señal.
+      const { code, out } = await runCli(['--n', '1', '--sitio', site.origin], { env: { REELS_PRUEBA_CORTE: signal } });
+
+      expect(out, signal).toContain('[prueba] carpetas temporales al cortar: 1');
+      expect(out, signal).toContain(`Corrida cortada antes de terminar (${signal}). No quedaron archivos temporales.`);
+      expect(code, signal).toBe(exitCode);
+      expect(openDirs(), signal).toEqual([]);
+      expect(site.stored.size).toBe(0);
+      expectPublic(out);
+    }
+  }, SLOW);
 });
 
 /** ffmpeg no viene instalado en el job de CI: ahí la prueba que arma un video de verdad se salta. */
@@ -507,7 +794,8 @@ describe('de punta a punta, con ffmpeg', () => {
       expect(products[0]).toMatch(/^1\/1 Moto G86 power 256GB · \$219\.990 · plantilla estudio · armado y subido en \d+,\d s · \d,\d MB/);
       expectPublic(printed);
 
-      const base = `2026-10-13/${items[0].id}-219990-estudio`;
+      const base = fileName(items[0]);
+      expect(Array.from(site.stored.keys())).toEqual([`${base}.jpg`, `${base}.mp4`]);
       const cover = site.stored.get(`${base}.jpg`)!;
       expect(await sharp(cover).metadata()).toMatchObject({ format: 'jpeg', width: 1080, height: 1920 });
 

@@ -6,7 +6,7 @@ vi.mock('@/lib/settings', () => ({ readAffiliateSettings: vi.fn() }));
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DISCLOSURE } from '@/lib/content/captions';
 import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
-import type { InterestEvidence } from '@/lib/social/interest';
+import { MIN_INTEREST_POINTS, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
 import { pickByRules, TELEGRAM_RULES, type PickRules, type SocialProduct } from '@/lib/social/telegram';
 import {
   NETWORK_RULES,
@@ -16,6 +16,7 @@ import {
   VIDEO_MARK,
   buildPlanItem,
   isHandMark,
+  notPublishableReason,
   parsePostRecords,
   parseRetirements,
   pendingIssue,
@@ -123,6 +124,47 @@ describe('NETWORK_RULES', () => {
     // No es que le falten puntos: donde alguien mira antes de publicar, sale, con su aviso.
     const seen = pickByRules([doubtful, fine], { ...opts, evidence }, { ...NETWORK_RULES, cleanOnly: false });
     expect(seen.find((pick) => pick.product.id === doubtful.id)?.score.warning).toEqual(expect.any(String));
+  });
+});
+
+describe('notPublishableReason', () => {
+  const score = (points: number, over: Partial<InterestScore> = {}): InterestScore => ({
+    points,
+    reason: '',
+    warning: null,
+    excluded: null,
+    typeKey: '',
+    brandKey: '',
+    breakdown: {},
+    ...over,
+  });
+
+  it('lo que llega al piso por sí solo no trae nada; lo excluido dice por qué', () => {
+    expect(notPublishableReason(score(MIN_INTEREST_POINTS))).toBeNull();
+    expect(notPublishableReason(score(75, { breakdown: { signals: 6 } }))).toBeNull();
+    expect(notPublishableReason(score(90, { excluded: 'sin precio válido' }))).toBe('sin precio válido');
+    // La exclusión manda sobre el piso.
+    expect(notPublishableReason(score(10, { excluded: 'sin precio válido' }))).toBe('sin precio válido');
+  });
+
+  it('bajo el piso lo dice con los puntos que cuentan, que son los propios', () => {
+    expect(MIN_INTEREST_POINTS).toBe(40);
+    expect(notPublishableReason(score(39.2))).toBe('no llega al piso de interés (39,2 de 40 puntos)');
+    expect(notPublishableReason(score(12))).toBe('no llega al piso de interés (12 de 40 puntos)');
+  });
+
+  it('las señales no hacen pasar el piso, y la frase explica por qué los puntos no calzan con los que se ven', () => {
+    // 39,2 propios más 6 de clics y más vendidos: se ven 45,2, pero no llega.
+    expect(notPublishableReason(score(45.2, { breakdown: { signals: 6 } }))).toBe(
+      'no llega al piso de interés (39,2 de 40 puntos; los clics y el puesto entre los más vendidos no cuentan para el piso)'
+    );
+    // Los puntos propios van con un decimal, sin restos de la resta (45,2 − 5,3 no da 39,9 justo).
+    expect(notPublishableReason(score(45.2, { breakdown: { signals: 5.3 } }))).toBe(
+      'no llega al piso de interés (39,9 de 40 puntos; los clics y el puesto entre los más vendidos no cuentan para el piso)'
+    );
+    // Con 40 propios sí llega, tenga las señales que tenga.
+    expect(notPublishableReason(score(46, { breakdown: { signals: 6 } }))).toBeNull();
+    expect(notPublishableReason(score(41.4, { breakdown: { signals: 1.4 } }))).toBeNull();
   });
 });
 

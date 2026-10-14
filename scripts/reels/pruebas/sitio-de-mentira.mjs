@@ -1,5 +1,6 @@
 // Un sitio de mentira para probar generar.mjs sin red. Hace de las dos cosas con las que habla el generador:
-//   - el sitio:   GET /api/social/videos/plan?n=4, con el secreto de los crons (lo acordado con la ruta real)
+//   - el sitio:   GET /api/social/videos/plan?n=4, con el secreto de los crons (lo acordado con la ruta real);
+//                 cada elemento trae su "archivo" = AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>
 //   - el almacén: PUT /storage/v1/object/upload/sign/reels/<archivo>?token=..., como las subidas firmadas de
 //                 Supabase Storage (responde { Key } y, si el archivo ya existe, el error "Duplicate")
 // Escucha solo en 127.0.0.1, en un puerto libre, y anota todo lo que le llega para que el test lo revise.
@@ -22,6 +23,30 @@ function readBody(req) {
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+/**
+ * La huella de la oferta, calculada como la calcula el sitio de verdad (src/lib/social/videos.ts): los
+ * primeros 8 signos, en hexadecimal, del SHA-256 de lo que el video dice además del precio, con los mismos
+ * valores que el plan entrega en esos campos. El generador no la calcula nunca: esto existe solo para que el
+ * sitio de mentira entregue nombres de archivo como los de verdad.
+ *
+ * @param {Record<string, any>} item
+ */
+export function offerFingerprint(item) {
+  const said = [item.nombre_corto, item.marca ?? null, item.precio_lista ?? null, item.descuento, item.baja_historial ?? null, item.envio_gratis, item.full];
+  return crypto.createHash('sha256').update(JSON.stringify(said)).digest('hex').slice(0, 8);
+}
+
+/**
+ * El nombre del archivo de un producto como lo entrega el plan, sin la extensión:
+ * "AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>".
+ *
+ * @param {Record<string, any>} item
+ * @param {string} [date]
+ */
+export function fileName(item, date = '2026-10-13') {
+  return `${date}/${item.id}-${item.precio}-${item.plantilla}-${offerFingerprint(item)}`;
 }
 
 /**
@@ -98,13 +123,17 @@ export function sampleItems() {
  *   items         los productos del plan (ver sampleItems); un item puede traer sus propios `archivo`,
  *                 `ya_existe` o `subir` para simular un plan raro
  *   existing      ids de productos cuyo video "ya existe" (ya_existe: true, subir: null)
- *   planFailures  respuestas que da la ruta del plan antes de responder bien: [{ status, body }]
+ *   planFailures  respuestas que da la ruta del plan antes de responder bien: [{ status, body, headers }]
+ *                 (con status 3xx y headers.location hace de sitio que redirige)
  *   rejectUploads ids de productos cuyas subidas se rechazan; el mensaje de error repite la dirección firmada,
  *                 para probar que el generador no la deja pasar a lo que imprime
  *
+ * El nombre de cada archivo lleva su huella (ver fileName), y un video "ya existe" solo si están arriba su
+ * .mp4 y su .jpg con ese nombre exacto, igual que en el sitio de verdad.
+ *
  * Devuelve { origin, requests, stored, tokens, close }.
  *
- * @param {{ secret: string, items?: Record<string, any>[], date?: string, existing?: string[], planFailures?: { status: number, body?: unknown }[], rejectUploads?: string[], deleted?: number, unreadHistory?: number }} options
+ * @param {{ secret: string, items?: Record<string, any>[], date?: string, existing?: string[], planFailures?: { status: number, body?: unknown, headers?: Record<string, string> }[], rejectUploads?: string[], deleted?: number, unreadHistory?: number }} options
  */
 export async function startFakeSite({ secret, items = sampleItems(), date = '2026-10-13', existing = [], planFailures = [], rejectUploads = [], deleted = 0, unreadHistory = 0 }) {
   /** @type {{ method: string, path: string, authorization: string | null, contentType: string | null, cacheControl: string | null, upsert: string | null, bytes: number }[]} */
@@ -122,16 +151,16 @@ export async function startFakeSite({ secret, items = sampleItems(), date = '202
   };
 
   const planItem = (item) => {
-    const archivo = item.archivo ?? `${date}/${item.id}-${item.precio}-${item.plantilla}`;
-    const yaExiste = item.ya_existe ?? (existing.includes(item.id) || stored.has(`${archivo}.mp4`));
+    const archivo = item.archivo ?? fileName(item, date);
+    const yaExiste = item.ya_existe ?? (existing.includes(item.id) || (stored.has(`${archivo}.mp4`) && stored.has(`${archivo}.jpg`)));
     const subir = 'subir' in item ? item.subir : yaExiste ? null : { video: signedUrl(`${archivo}.mp4`), portada: signedUrl(`${archivo}.jpg`) };
     return { ...item, archivo, ya_existe: yaExiste, subir };
   };
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, origin);
-    const json = (status, body) => {
-      res.writeHead(status, { 'content-type': 'application/json' });
+    const json = (status, body, headers = {}) => {
+      res.writeHead(status, { 'content-type': 'application/json', ...headers });
       res.end(JSON.stringify(body));
     };
     const body = await readBody(req);
@@ -148,7 +177,7 @@ export async function startFakeSite({ secret, items = sampleItems(), date = '202
     if (req.method === 'GET' && url.pathname === PLAN_PATH) {
       if (req.headers.authorization !== `Bearer ${secret}`) return json(401, { error: 'Unauthorized' });
       const failure = pendingFailures.shift();
-      if (failure) return json(failure.status, failure.body ?? { error: 'falla de prueba' });
+      if (failure) return json(failure.status, failure.body ?? { error: 'falla de prueba' }, failure.headers);
       const asked = Number(url.searchParams.get('n'));
       const count = Number.isInteger(asked) && asked >= 1 ? Math.min(asked, 6) : 4;
       return json(200, {

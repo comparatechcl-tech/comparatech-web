@@ -18,7 +18,8 @@
  *   reach       0-15  precio que mucha gente puede pagar
  *   commission  0-10  lo que deja, en escala logarítmica
  *   delivery    0-8   envío gratis, Full, lo vende Mercado Libre, garantía
- *   signals     0-6   (opcional) más vendidos de Mercado Libre y clics propios
+ *   signals     0-6   (opcional) más vendidos de Mercado Libre y clics en el sitio.
+ *                     Ordenan, pero no habilitan: el piso se mide sin ellas.
  *   penalties         lo que haría pasar vergüenza: ya estuvo más barato, otro vendedor
  *                     lo tiene a menos, vendedor casi sin ventas, precio que se
  *                     mueve (varios cambios en dos días, o muchos vendedores en
@@ -33,6 +34,8 @@
  *   - si el vendedor casi no tiene ventas y además otro lo ofrece a menos,
  *     tampoco se publica;
  *   - bajo MIN_INTEREST_POINTS no se publica nada, aunque falten candidatos.
+ *     El piso se mide sin el bloque de señales (floorPoints): un clic se
+ *     puede fabricar desde afuera, y con eso no se entra.
  *
  * Puro: sin I/O, sin fecha y sin azar. La misma entrada da siempre la misma
  * salida, en el servidor, en el navegador y en los tests. Las tablas y los
@@ -123,7 +126,11 @@ export interface InterestEvidence {
   historyUnread?: boolean | null;
   /** Puesto en los más vendidos de su categoría en Mercado Libre. */
   mlPosition?: number | null;
-  /** Clics recientes en el sitio, sin contar los del administrador. */
+  /**
+   * Clics recientes en el sitio. Un dato que viene de afuera: puede traer los
+   * del propio dueño y se puede inflar a propósito, así que solo ordena (el
+   * piso se mide sin él, ver floorPoints).
+   */
   recentClicks?: number | null;
 }
 
@@ -152,6 +159,34 @@ export const HISTORY_UNREAD_WARNING = 'hoy no se pudo leer su historial de preci
  * mejor una historia menos que rellenar con el fondo de la lista.
  */
 export const MIN_INTEREST_POINTS: number = 40;
+
+/**
+ * Los puntos con que se mide el piso: los del puntaje SIN el bloque de
+ * señales.
+ *
+ * Los clics del sitio los puede mandar cualquiera (cambiando el navegador que
+ * dice ser, una misma persona cuenta como doce), y el puesto entre los más
+ * vendidos lo mueve quien vende. Si alcanzaran para pasar el piso, alguien de
+ * afuera podría hacer que el sitio publique solo un producto que por lo suyo
+ * no publicaría. Por eso las señales ordenan a los que ya pasan, y a ninguno
+ * lo hacen pasar.
+ *
+ * Va con un decimal, como los puntos: es el número que se le muestra al dueño.
+ */
+export function floorPoints(score: Pick<InterestScore, 'points' | 'breakdown'>): number {
+  const signals = score.breakdown ? score.breakdown.signals : undefined;
+  const extra = typeof signals === 'number' && Number.isFinite(signals) && signals > 0 ? signals : 0;
+  return round1(score.points - extra);
+}
+
+/**
+ * ¿Llega al piso de interés? Es la única forma de preguntarlo: quien compare
+ * `points` a mano estaría contando las señales. Un puntaje que no es un
+ * número no llega.
+ */
+export function meetsInterestFloor(score: Pick<InterestScore, 'points' | 'breakdown'>, floor: number = MIN_INTEREST_POINTS): boolean {
+  return floorPoints(score) >= floor;
+}
 
 /** Los bloques del desglose, con el nombre que se le muestra al dueño. */
 export const BREAKDOWN_LABELS: Record<string, string> = {
@@ -876,10 +911,11 @@ export function compareByInterest(
 /**
  * Qué se publica de la lista: los de más puntos, sin repetir.
  *
- * Quedan fuera los excluidos y los que no llegan al piso. Después se toman
- * hasta `max`, con a lo más `perCategory` por categoría del sitio,
- * `perType` por tipo de producto, `perBrand` por marca y uno por familia
- * (dos colores del mismo modelo son el mismo post).
+ * Quedan fuera los excluidos y los que no llegan al piso (medido sin las
+ * señales, ver floorPoints: las señales solo cambian el orden entre los que
+ * ya entraron). Después se toman hasta `max`, con a lo más `perCategory` por
+ * categoría del sitio, `perType` por tipo de producto, `perBrand` por marca y
+ * uno por familia (dos colores del mismo modelo son el mismo post).
  *
  * Si así no se junta la cantidad pedida (un día con pocas ofertas), una
  * segunda vuelta deja repetir tipo y marca. La categoría, la familia, los
@@ -895,7 +931,7 @@ export function pickVaried<
   const floor = limits.minPoints ?? MIN_INTEREST_POINTS;
   const seen = new Set<string>();
   const sorted = candidates
-    .filter((c) => c.score.excluded === null && Number.isFinite(c.score.points) && c.score.points >= floor)
+    .filter((c) => c.score.excluded === null && Number.isFinite(c.score.points) && meetsInterestFloor(c.score, floor))
     .sort(compareByInterest)
     // El mismo producto dos veces en la entrada cuenta una sola.
     .filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));

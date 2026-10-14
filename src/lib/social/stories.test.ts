@@ -20,7 +20,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PriceStats } from '@/lib/deals';
 import { getPriceStatsMany } from '@/lib/queries/price-history';
 import { readAffiliateSettings } from '@/lib/settings';
-import { MIN_INTEREST_POINTS, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
+import { MIN_INTEREST_POINTS, floorPoints, interestScore, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
 import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
 import { NETWORK_RULES, STORY_MARK, VIDEO_MARK, postedOnNetworks } from '@/lib/social/networks';
 import {
@@ -388,6 +388,74 @@ describe('las señales de ganadores y tendencia llegan a las historias', () => {
     expect(byId.get(plain.id)?.reason).not.toMatch(/figuró|clics/);
     // Las tres ofertas son iguales: el orden lo deciden las señales.
     expect(items.map((item) => item.id)).toEqual([winner.id, trending.id, plain.id]);
+  });
+
+  it('pero no habilitan: lo que no llega al piso por sí solo no se muestra por más clics y puesto que tenga', async () => {
+    const info = (over: Record<string, unknown> = {}) =>
+      ({ free_shipping: true, is_full: true, official_store: true, sold_by_ml: false, is_lowest: true, ...over }) as SocialProduct['offer_info'];
+    // Una campana de cocina de marca conocida con 45% de lista: sin avisos y justo bajo el piso (39 puntos y fracción).
+    const hood = (over: Partial<SocialProduct> = {}) =>
+      strong({
+        name: 'Campana De Cocina Retráctil Mademsa 60 cm',
+        brand: 'Mademsa',
+        category: 'electrodomesticos',
+        price: 59_990,
+        original_price: 109_990,
+        offer_info: info(),
+        ...over,
+      });
+    const below = hood({ ml_product_id: 'MLC901' });
+    // Un frigobar sin envío gratis ni Full: justo sobre el piso (41 puntos).
+    const above = strong({
+      name: 'Refrigerador frigobar Libero LFB-90 color rojo',
+      brand: 'Libero',
+      category: 'electrodomesticos',
+      price: 99_990,
+      original_price: 149_990,
+      ml_product_id: 'MLC902',
+      offer_info: info({ free_shipping: false, is_full: false }),
+    });
+    // La misma campana vendida por Mercado Libre, en otra categoría: unos puntos sobre el frigobar.
+    const rival = hood({ category: 'hogar', ml_product_id: 'MLC903', offer_info: info({ sold_by_ml: true }) });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [below, above, rival], error: null });
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([below, above, rival].map((p) => [p.id, stats(p.price)])));
+
+    // Si los pesos del puntaje se afinan y esto deja de cumplirse, hay que elegir otros productos.
+    const scoreOf = (p: SocialProduct, signals: { mlPosition?: number; recentClicks?: number } = {}) =>
+      interestScore(p, { drop: null, min30: p.price, daysTracked: 20, ...signals });
+    const MAX_SIGNAL = { mlPosition: 1, recentClicks: 400 };
+    expect(scoreOf(below)).toMatchObject({ warning: null, excluded: null });
+    expect(scoreOf(below).points).toBeLessThan(MIN_INTEREST_POINTS);
+    expect(scoreOf(below).points).toBeGreaterThan(MIN_INTEREST_POINTS - 2);
+    expect(scoreOf(below, MAX_SIGNAL).points).toBeGreaterThan(MIN_INTEREST_POINTS + 4);
+    expect(floorPoints(scoreOf(below, MAX_SIGNAL))).toBe(scoreOf(below).points);
+    expect(scoreOf(above).points).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
+    expect(scoreOf(above).points).toBeLessThan(scoreOf(rival).points);
+    expect(scoreOf(above, MAX_SIGNAL).points).toBeGreaterThan(scoreOf(rival).points);
+
+    const plain = await readStoryPicks(filteringAdmin({}), NOW, KEY);
+    expect(plain.map((item) => item.id)).toEqual([rival.id, above.id]);
+
+    // La señal más alta que existe para los dos: primero entre los más vendidos y 400 clics.
+    // (La base de mentira no entrega por páginas: con mil filas o más la lectura quedaría cortada.)
+    const recent = new Date(NOW.getTime() - 2 * 86_400_000).toISOString();
+    const clicks: Row[] = [];
+    for (const p of [below, above]) for (let i = 0; i < 400; i++) clicks.push({ product_id: p.id, client_key: null, created_at: recent });
+    const forged = filteringAdmin({
+      product_candidates: [below, above].map((p) => ({
+        ml_product_id: p.ml_product_id,
+        highlight_position: 1,
+        prospected_at: recent,
+        checked_at: recent,
+      })),
+      outbound_clicks: clicks,
+    });
+    const items = await readStoryPicks(forged, NOW, KEY);
+    // El de 39 sigue fuera aunque con las señales sume más que todos; el de 41 pasa adelante.
+    expect(items.map((item) => item.id)).toEqual([above.id, rival.id]);
+    expect(items[0].points).toBe(scoreOf(above, MAX_SIGNAL).points);
+    expect(items[0].points).toBeGreaterThan(items[1].points);
+    expect(items[0].reason).toContain('figuró 1.º entre los más vendidos de su categoría');
   });
 });
 

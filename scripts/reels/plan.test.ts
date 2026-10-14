@@ -3,9 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { resolverProducto } from './datos.mjs';
-import { oneLine, photoUrlProblem, planItemProblem, readPlan, reelInput, uploadUrlProblem } from './plan.mjs';
+import { noCommands, oneLine, photoUrlProblem, planItemProblem, readPlan, reelInput, uploadUrlProblem } from './plan.mjs';
 import { cargarPlantilla, existePlantilla, nombresDePlantillas } from './plantillas/index.mjs';
-import { sampleItems } from './pruebas/sitio-de-mentira.mjs';
+import { fileName, offerFingerprint, sampleItems } from './pruebas/sitio-de-mentira.mjs';
 
 /**
  * El plan llega por la red y de él salen una descarga, un video público y dos subidas. Aquí se prueba que se
@@ -18,7 +18,10 @@ writeFileSync(PHOTO, 'aquí solo se mira que el archivo exista');
 afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 
 const ID = 'bb2d3803-a43b-4aa2-bd82-f73ae7ecb246';
-const FILE = `2026-10-13/${ID}-219990-estudio`;
+/** El nombre que tenía el archivo antes de llevar huella. */
+const OLD_FILE = `2026-10-13/${ID}-219990-estudio`;
+/** El de ahora: lo mismo más la huella de la oferta, que calcula el sitio. */
+const FILE = `${OLD_FILE}-05758542`;
 const STORAGE = 'https://abcdefgh.supabase.co/storage/v1/object/upload/sign/reels';
 
 /** Un elemento del plan como lo entrega el sitio para un video que falta. */
@@ -68,11 +71,64 @@ describe('planItemProblem', () => {
   });
 
   it('el nombre del archivo tiene que ser el de ese producto, a ese precio y con esa plantilla', () => {
-    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-199990-estudio` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-219990-otra` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `${ID}-219990-estudio` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `13-10-2026/${ID}-219990-estudio` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `2026-10-13/../${ID}-219990-estudio` }))).toContain('no calza');
+    const other = 'bb540d67-d995-4efd-893d-29d7cef9f4d3';
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-199990-estudio-05758542` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-219990-otra-05758542` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${other}-219990-estudio-05758542` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `${ID}-219990-estudio-05758542` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `13-10-2026/${ID}-219990-estudio-05758542` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/../${ID}-219990-estudio-05758542` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `${FILE}\n` }))).toContain('no calza');
+    // El precio del nombre se compara tal cual: "0219990" no es 219990.
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-0219990-estudio-05758542` }))).toContain('no calza');
+  });
+
+  it('la huella no se calcula aquí, pero tiene que venir y con su forma: 8 signos del 0 al 9 y de la a a la f', () => {
+    // Cualquier huella bien formada vale: cuál es la correcta lo sabe solo el sitio.
+    for (const good of ['05758542', '00000000', 'ffffffff', 'a1b2c3d4']) {
+      expect(planItemProblem(planItem({ archivo: `${OLD_FILE}-${good}` })), good).toBeNull();
+    }
+    for (const bad of ['0575854', '057585421', '0575854g', '05758542-05758542', '', '05758542/x', '../../otro', ' 05758542', '05758542.mp4']) {
+      expect(planItemProblem(planItem({ archivo: `${OLD_FILE}-${bad}` })), JSON.stringify(bad)).toContain('no trae una huella válida');
+    }
+    // En mayúsculas tampoco: el almacén las distingue, y sería otro archivo.
+    expect(planItemProblem(planItem({ archivo: `${OLD_FILE}-ABCDEF12` }))).toContain('no trae una huella válida');
+  });
+
+  it('un nombre con la forma anterior, sin huella, se rechaza diciendo que el sitio es de otra versión', () => {
+    const problem = planItemProblem(planItem({ archivo: OLD_FILE }));
+    expect(problem).toContain('el sitio y el generador no son de la misma versión');
+    expect(problem).toContain('sin la huella de la oferta');
+    // También cuando el sitio dice que ese video ya existe: con el nombre anterior no lo mostraría nadie.
+    expect(planItemProblem(planItem({ archivo: OLD_FILE, ya_existe: true, subir: null }))).toContain('no son de la misma versión');
+    // Y aunque el resto del nombre tampoco calce: la forma anterior es lo primero que hay que arreglar.
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-199990-estudio` }))).toContain('no son de la misma versión');
+  });
+});
+
+describe('el sitio de mentira', () => {
+  it('calcula la huella como dice el contrato con el sitio: 8 signos del SHA-256 de lo que el video dice', () => {
+    // Escritas a mano, sacadas con otra herramienta (sha256sum) sobre el texto del contrato:
+    // JSON.stringify([nombre_corto, marca, precio_lista, descuento, baja_historial, envio_gratis, full]).
+    const [phone, tv, tablet] = sampleItems();
+    expect(offerFingerprint(phone)).toBe('05758542'); // ["Moto G86 power 256GB","Motorola",399990,45,null,true,true]
+    expect(offerFingerprint(tv)).toBe('571e62bb');
+    expect(offerFingerprint(tablet)).toBe('ce5849cd'); // ["Tablet Lenovo Tab 128gb","Lenovo",null,0,12,false,false]
+    expect(fileName(phone)).toBe(FILE);
+    expect(fileName(tablet, '2026-10-14')).toBe('2026-10-14/c65c6a4c-42c4-42fd-b14f-8b908ca1e2b2-189990-estudio-ce5849cd');
+  });
+
+  it('la huella cambia con cada cosa que el video dice, y no con lo que no dice', () => {
+    const [phone] = sampleItems();
+    const base = offerFingerprint(phone);
+    const said = { nombre_corto: 'Moto G86', marca: null, precio_lista: 259990, descuento: 15, baja_historial: 8, envio_gratis: false, full: false };
+    for (const [field, value] of Object.entries(said)) {
+      expect(offerFingerprint({ ...phone, [field]: value }), field).not.toBe(base);
+    }
+    // El precio va aparte en el nombre; el motivo, los puntos y la hora de revisión no cambian el archivo.
+    expect(offerFingerprint({ ...phone, precio: 1, motivo: 'otro', puntos: 1, precio_revisado: '2026-10-14T00:00:00Z', foto: 'https://http2.mlstatic.com/otra.jpg' })).toBe(base);
+    // Sin marca o sin precio de lista, el valor es null (como lo entrega el plan), no un campo que falta.
+    expect(offerFingerprint({ ...phone, marca: undefined })).toBe(offerFingerprint({ ...phone, marca: null }));
   });
 });
 
@@ -188,6 +244,52 @@ describe('oneLine', () => {
     const cut = oneLine('a'.repeat(200), 20);
     expect(cut).toHaveLength(20);
     expect(cut.endsWith('…')).toBe(true);
+  });
+
+  it('rompe la forma antigua de las órdenes de GitHub Actions ("##[orden]"), que vale en cualquier parte del renglón', () => {
+    expect(oneLine('Parlante ##[error]Falla inventada')).toBe('Parlante # #[error]Falla inventada');
+    expect(oneLine('Audífonos ##[add-mask]219')).toBe('Audífonos # #[add-mask]219');
+    // Con más signos, repetida o pegada a otra: en lo que sale no queda ningún "##[".
+    for (const text of ['###[error]x', '####[error]x', '##[##[error]x', '##[error]##[warning]x', '#' + '#[group]x', 'x##[', '##[[error]]']) {
+      expect(oneLine(text), text).not.toContain('##[');
+    }
+    // Lo demás no se toca: un "#" suelto, dos sin corchete o un corchete sin "##" son texto corriente.
+    expect(oneLine('Cable #1 [2 m] ## USB-C #[negro]')).toBe('Cable #1 [2 m] ## USB-C #[negro]');
+  });
+
+  it('tampoco deja la orden partida con un signo que no se ve', () => {
+    // Guion opcional, espacios y uniones de ancho cero, marcas de dirección, selector de variante, BOM.
+    for (const code of [0xad, 0x200b, 0x200c, 0x200d, 0x200e, 0x202e, 0x2060, 0x2066, 0xfe0f, 0xfeff]) {
+      const hidden = String.fromCharCode(code);
+      expect(oneLine(`a #${hidden}#[error]x`), code.toString(16)).toBe('a # #[error]x');
+      expect(oneLine(`a ##${hidden}[error]x`), code.toString(16)).toBe('a ## [error]x');
+      expect(oneLine(`${hidden}::error::x`), code.toString(16)).toBe(': :error::x');
+    }
+  });
+
+  it('rompe la forma nueva ("::orden::") cuando el texto empieza con ella, que es cuando vale', () => {
+    expect(oneLine('::error::Falla inventada')).toBe(': :error::Falla inventada');
+    expect(oneLine('  \t::warning file=a.ts::x')).toBe(': :warning file=a.ts::x');
+    expect(oneLine('\n::add-mask::219')).toBe(': :add-mask::219');
+    expect(oneLine(':::error::x')).toBe(': ::error::x');
+    // En medio del renglón no es una orden y se deja como está.
+    expect(oneLine('Moto G86 ::error::algo')).toBe('Moto G86 ::error::algo');
+    expect(oneLine('C++ std::vector')).toBe('C++ std::vector');
+  });
+});
+
+describe('noCommands', () => {
+  it('revisa cada renglón de un texto de varios', () => {
+    expect(noCommands('No conozco la opción ##[error]x.\n::error::y\r\n  ::notice::z\rUso: node generar.mjs')).toBe(
+      'No conozco la opción # #[error]x.\n: :error::y\r\n  : :notice::z\rUso: node generar.mjs'
+    );
+  });
+
+  it('no toca un renglón corriente, tampoco una dirección local con "::"', () => {
+    const line = 'Aviso: el plan se pidió a un servidor local (http://[::1]:3000), no al sitio publicado.';
+    expect(noCommands(line)).toBe(line);
+    expect(noCommands('1/3 Moto G86 power 256GB · $219.990 · plantilla estudio · ya estaba, no se rehace')).toBe('1/3 Moto G86 power 256GB · $219.990 · plantilla estudio · ya estaba, no se rehace');
+    expect(noCommands('')).toBe('');
   });
 });
 

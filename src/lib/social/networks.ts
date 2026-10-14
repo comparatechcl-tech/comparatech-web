@@ -6,7 +6,7 @@ import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import type { AffiliateSettings } from '@/lib/settings';
 import { shortProductName } from '@/lib/text';
-import { MIN_INTEREST_POINTS } from '@/lib/social/interest';
+import { MIN_INTEREST_POINTS, floorPoints, meetsInterestFloor, type InterestScore } from '@/lib/social/interest';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
 import {
   TELEGRAM_RULES,
@@ -163,9 +163,9 @@ export interface PlanItem {
   aviso: string | null;
   /**
    * Por qué el puntaje no lo publicaría (está excluido o no llega al piso
-   * de interés). En el plan normal es siempre null, porque eso no llega;
-   * solo trae texto cuando el producto se pidió por su id, para que quien
-   * lo eligió a mano lo lea antes de programarlo.
+   * de interés, que se mide sin las señales). En el plan normal es siempre
+   * null, porque eso no llega; solo trae texto cuando el producto se pidió
+   * por su id, para que quien lo eligió a mano lo lea antes de programarlo.
    */
   no_publicar: string | null;
   precio_revisado: string | null;
@@ -217,6 +217,23 @@ export function singleParagraph(text: string, max = TIKTOK_TEXT_MAX): string {
     .map((part, i) => (i === 0 ? part : `${/[.!?]$/.test(parts[i - 1]) ? ' ' : ' · '}${part}`))
     .join('')
     .slice(0, max);
+}
+
+/**
+ * Por qué el puntaje no publicaría este producto, o null. Puro.
+ *
+ * El piso se mide sin las señales (clics del sitio y más vendidos): por eso
+ * los puntos de la frase pueden ser menos que los de `puntos`, y cuando es
+ * así la frase lo explica en vez de dejar dos números que no calzan.
+ */
+export function notPublishableReason(score: InterestScore): string | null {
+  if (score.excluded !== null) return score.excluded;
+  if (meetsInterestFloor(score)) return null;
+  const counted = floorPoints(score);
+  const comma = (points: number) => String(points).replace('.', ',');
+  return counted === score.points
+    ? `no llega al piso de interés (${comma(counted)} de ${MIN_INTEREST_POINTS} puntos)`
+    : `no llega al piso de interés (${comma(counted)} de ${MIN_INTEREST_POINTS} puntos; los clics y el puesto entre los más vendidos no cuentan para el piso)`;
 }
 
 /** Campos comunes de `info` en Metricool para una pieza de producto. */
@@ -329,11 +346,7 @@ export function buildPlanItem(
     puntos: pick.score.points,
     motivo: pick.score.reason,
     aviso: pick.score.warning,
-    no_publicar:
-      pick.score.excluded ??
-      (pick.score.points < MIN_INTEREST_POINTS
-        ? `no llega al piso de interés (${String(pick.score.points).replace('.', ',')} de ${MIN_INTEREST_POINTS} puntos)`
-        : null),
+    no_publicar: notPublishableReason(pick.score),
     precio_revisado: p.price_checked_at,
     programar_antes_de: new Date(opts.now.getTime() + SCHEDULE_AHEAD_MS).toISOString(),
     ficha: `${site}/producto/${p.slug}`,

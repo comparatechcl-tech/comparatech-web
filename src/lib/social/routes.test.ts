@@ -51,7 +51,7 @@ vi.mock('@/lib/social/networks', async (original) => ({
 import { NextRequest } from 'next/server';
 import type { PriceStats } from '@/lib/deals';
 import { getPriceStatsMany, getPriceStatsManyChecked } from '@/lib/queries/price-history';
-import { MIN_INTEREST_POINTS } from '@/lib/social/interest';
+import { MIN_INTEREST_POINTS, floorPoints, interestScore } from '@/lib/social/interest';
 import { postedOnNetworks } from '@/lib/social/networks';
 import { readFreshSocialProducts, type SocialProduct } from '@/lib/social/telegram';
 import { GET as planRoute } from '@/app/api/social/plan/route';
@@ -445,5 +445,125 @@ describe('/api/cron/social-telegram?dry=1', () => {
     }
     // El historial se lee de todos, también de los que ya traen descuento de lista.
     expect(vi.mocked(getPriceStatsMany)).toHaveBeenLastCalledWith([filler.id, doubtful.id, headphones.id, bigDrop.id]);
+  });
+});
+
+// Los clics del sitio y el puesto entre los más vendidos se pueden fabricar
+// desde afuera: ordenan lo que entra, pero no hacen entrar nada. Acá con el
+// puntaje de verdad y las dos rutas que publican o programan solas.
+describe('las señales no habilitan: ni el plan de publicaciones ni el bot de Telegram', () => {
+  const info = (over: Record<string, unknown> = {}) =>
+    ({ free_shipping: true, is_full: true, official_store: true, sold_by_ml: false, is_lowest: true, ...over }) as SocialProduct['offer_info'];
+  /** Una campana de cocina de marca conocida, de tienda oficial y con 45% de lista: sin avisos y justo bajo el piso (39 puntos y fracción). */
+  const hood = (over: Partial<SocialProduct> = {}) =>
+    strong({
+      name: 'Campana De Cocina Retráctil Mademsa 60 cm',
+      brand: 'Mademsa',
+      category: 'electrodomesticos',
+      price: 59_990,
+      original_price: 109_990,
+      offer_info: info(),
+      ...over,
+    });
+  /** Un frigobar sin envío gratis ni Full: justo sobre el piso (41 puntos). */
+  const fridge = (over: Partial<SocialProduct> = {}) =>
+    strong({
+      name: 'Refrigerador frigobar Libero LFB-90 color rojo',
+      brand: 'Libero',
+      category: 'electrodomesticos',
+      price: 99_990,
+      original_price: 149_990,
+      offer_info: info({ free_shipping: false, is_full: false }),
+      ...over,
+    });
+  const scoreOf = (p: SocialProduct, signals: { mlPosition?: number; recentClicks?: number } = {}) =>
+    interestScore(p, { drop: null, min30: p.price, daysTracked: 20, ...signals });
+  const MAX_SIGNAL = { mlPosition: 1, recentClicks: 400 };
+
+  /** Los tres productos, con 20 días de historial quieto. */
+  function lineup() {
+    const below = hood({ ml_product_id: 'MLC901' });
+    const above = fridge({ ml_product_id: 'MLC902' });
+    // La misma campana vendida por Mercado Libre, en otra categoría: unos puntos sobre el frigobar.
+    const rival = hood({ category: 'hogar', ml_product_id: 'MLC903', offer_info: info({ sold_by_ml: true }) });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [below, above, rival], error: null });
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([below, above, rival].map((p) => [p.id, stats(p.price)])));
+    return { below, above, rival };
+  }
+
+  /**
+   * La señal más alta que existe (primero entre los más vendidos y 400 clics)
+   * para esos productos. La base de mentira no entrega por páginas: con mil
+   * filas o más la lectura no terminaría nunca de pedir la siguiente.
+   */
+  function forgeSignals(products: SocialProduct[]) {
+    const recent = new Date(NOW.getTime() - 2 * 86_400_000).toISOString();
+    fakeAdmin.rows.product_candidates = products.map((p) => ({
+      ml_product_id: p.ml_product_id,
+      highlight_position: 1,
+      prospected_at: recent,
+      checked_at: recent,
+    }));
+    const clicks: unknown[] = [];
+    for (const p of products) for (let i = 0; i < 400; i++) clicks.push({ product_id: p.id, client_key: null });
+    fakeAdmin.rows.outbound_clicks = clicks;
+  }
+
+  it('los productos de prueba quedan donde el test los necesita: uno bajo el piso que con señales lo pasaría, y uno justo sobre él', () => {
+    // Si los pesos del puntaje se afinan y esto deja de cumplirse, hay que elegir otros productos.
+    const { below, above, rival } = lineup();
+    expect(scoreOf(below)).toMatchObject({ warning: null, excluded: null });
+    expect(scoreOf(below).points).toBeLessThan(MIN_INTEREST_POINTS);
+    expect(scoreOf(below).points).toBeGreaterThan(MIN_INTEREST_POINTS - 2);
+    expect(scoreOf(below, MAX_SIGNAL).points).toBeGreaterThan(MIN_INTEREST_POINTS + 4);
+    expect(floorPoints(scoreOf(below, MAX_SIGNAL))).toBe(scoreOf(below).points);
+    expect(scoreOf(above)).toMatchObject({ warning: null, excluded: null });
+    expect(scoreOf(above).points).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
+    expect(scoreOf(above).points).toBeLessThan(scoreOf(rival).points);
+    expect(scoreOf(above, MAX_SIGNAL).points).toBeGreaterThan(scoreOf(rival).points);
+  });
+
+  it('el plan de publicaciones no propone lo que no llega al piso por más señales que tenga; pedido por su id, dice por qué', async () => {
+    const { below, above, rival } = lineup();
+
+    const plain = await selection(await planRoute(request('/api/social/plan?n=5')));
+    expect(plain.rows.map((row) => row.id)).toEqual([rival.id, above.id]);
+
+    forgeSignals([below, above]);
+    const forged = await selection(await planRoute(request('/api/social/plan?n=5')));
+    // El de 39 sigue fuera, aunque con las señales sume más que los otros dos; el de 41 pasa adelante.
+    expect(forged.rows.map((row) => row.id)).toEqual([above.id, rival.id]);
+    expect(forged.rows[0].puntos).toBe(scoreOf(above, MAX_SIGNAL).points);
+    expect(forged.rows[0].puntos).toBeGreaterThan(forged.rows[1].puntos);
+    expect(forged.rows[0].motivo).toContain('figuró 1.º entre los más vendidos de su categoría');
+    for (const row of forged.rows) expect(row.no_publicar).toBeNull();
+
+    // Pedido por su id sale, con sus puntos a la vista y la explicación de por qué no se publicaría solo.
+    const asked = (await selection(await planRoute(request(`/api/social/plan?producto=${below.id}`)))).rows[0];
+    expect(asked.id).toBe(below.id);
+    expect(asked.puntos).toBeGreaterThan(MIN_INTEREST_POINTS + 4);
+    const own = String(scoreOf(below).points).replace('.', ',');
+    expect(asked.no_publicar).toBe(
+      `no llega al piso de interés (${own} de ${MIN_INTEREST_POINTS} puntos; los clics y el puesto entre los más vendidos no cuentan para el piso)`
+    );
+    const fine = (await selection(await planRoute(request(`/api/social/plan?producto=${above.id}`)))).rows[0];
+    expect(fine.no_publicar).toBeNull();
+  });
+
+  it('el bot de Telegram, que publica solo, tampoco: lo que no llega al piso por sí mismo no sale', async () => {
+    const { below, above, rival } = lineup();
+
+    const plain = await selection(await telegramRoute(request('/api/cron/social-telegram?dry=1')));
+    expect(plain.rows.map((row) => row.id)).toEqual([rival.id, above.id]);
+
+    forgeSignals([below, above]);
+    const forged = await selection(await telegramRoute(request('/api/cron/social-telegram?dry=1')));
+    expect(forged.rows.map((row) => row.id)).toEqual([above.id, rival.id]);
+    expect(forged.rows[0].puntos).toBeGreaterThan(forged.rows[1].puntos);
+    for (const row of forged.rows) expect(row.aviso).toBeNull();
+
+    // Solo, con los cinco cupos libres y la señal al máximo: nada.
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [below], error: null });
+    expect((await selection(await telegramRoute(request('/api/cron/social-telegram?dry=1')))).rows).toEqual([]);
   });
 });

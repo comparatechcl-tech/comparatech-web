@@ -13,8 +13,9 @@ type DbError = { code?: string; message: string };
 interface Asked {
   table: string;
   columns: string;
-  /** Los ids pedidos con .in(), si los hubo. */
+  /** Los ids pedidos con .in(), si los hubo, y por qué columna. */
   ids: unknown[] | null;
+  inColumn: string | null;
   gte: [string, unknown] | null;
   range: [number, number] | null;
 }
@@ -30,7 +31,7 @@ function fakeDb(seed: { clicks?: Row[]; candidates?: Row[]; fail?: (asked: Asked
 
   const admin = {
     from(table: string) {
-      const query: Asked = { table, columns: '', ids: null, gte: null, range: null };
+      const query: Asked = { table, columns: '', ids: null, inColumn: null, gte: null, range: null };
       const filters: ((row: Row) => boolean)[] = [];
       const run = () => {
         asked.push(query);
@@ -59,6 +60,7 @@ function fakeDb(seed: { clicks?: Row[]; candidates?: Row[]; fail?: (asked: Asked
         },
         in(column: string, values: unknown[]) {
           query.ids = values;
+          query.inColumn = column;
           filters.push((row) => values.includes(row[column]));
           return builder;
         },
@@ -136,6 +138,95 @@ describe('readInterestSignals: clics recientes en el sitio', () => {
     const read = asked.find((q) => q.table === 'outbound_clicks')!;
     expect(CLICK_WINDOW_DAYS).toBe(7);
     expect(read.gte).toEqual(['created_at', daysAgo(7)]);
+    // Si no se pide otra cosa, lee la semana entera de una vez: es lo que necesita la selección completa.
+    expect(read.ids).toBeNull();
+    expect(asked.filter((q) => q.table === 'outbound_clicks')).toHaveLength(1);
+  });
+
+  it('con onlyTheirClicks le pide a la base solo los clics de esos productos, y cuenta lo mismo', async () => {
+    const a = product();
+    const b = product();
+    const quiet = product();
+    const clicks = [
+      click(a.id, 0.2, 'llave-1'),
+      click(a.id, 0.2, 'llave-1'), // La misma persona el mismo día: uno solo.
+      click(a.id, 1, 'llave-2'),
+      click(a.id, 8), // Hace más de una semana.
+      click(b.id, 2),
+      // Una semana de clics de otros productos: sin el filtro serían tres páginas más.
+      ...Array.from({ length: 2_600 }, (_, i) => click(`00000000-0000-4000-9000-${String(i % 40).padStart(12, '0')}`, 1)),
+    ];
+
+    const whole = fakeDb({ clicks });
+    const everything = await readInterestSignals(whole.admin, [a, b, quiet], NOW);
+    expect(whole.asked.filter((q) => q.table === 'outbound_clicks').map((q) => q.range)).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+    ]);
+
+    const narrow = fakeDb({ clicks });
+    const theirs = await readInterestSignals(narrow.admin, [a, b, quiet], NOW, { onlyTheirClicks: true });
+    const asked = narrow.asked.filter((q) => q.table === 'outbound_clicks');
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ inColumn: 'product_id', ids: [a.id, b.id, quiet.id], range: [0, 999], gte: ['created_at', daysAgo(7)] });
+
+    expect(theirs.get(a.id)).toEqual({ mlPosition: null, recentClicks: 2 });
+    expect(theirs.get(b.id)).toEqual({ mlPosition: null, recentClicks: 1 });
+    expect(theirs.has(quiet.id)).toBe(false);
+    expect([...theirs]).toEqual([...everything]);
+  });
+
+  it('con onlyTheirClicks los ids van por tandas de 40, y lo que no es un id de producto no viaja', async () => {
+    const rows = Array.from({ length: 90 }, () => product());
+    const weird = [{ id: 'no-es-un-id', ml_product_id: null }, { id: `${rows[0].id}),or=(id.gt.0`, ml_product_id: null }, { id: '', ml_product_id: null }];
+    const { admin, asked } = fakeDb({ clicks: [click(rows[0].id, 1), click(rows[45].id, 1), click(rows[89].id, 1), click('no-es-un-id', 1)] });
+
+    const signals = await readInterestSignals(admin, [...rows, ...weird], NOW, { onlyTheirClicks: true });
+    const read = asked.filter((q) => q.table === 'outbound_clicks');
+    expect(read.map((q) => q.ids?.length)).toEqual([40, 40, 10]);
+    const sent = read.reduce<unknown[]>((all, q) => all.concat(q.ids ?? []), []);
+    expect(sent).toEqual(rows.map((p) => p.id));
+    expect([...signals.keys()]).toEqual([rows[0].id, rows[45].id, rows[89].id]);
+
+    // Sin ningún id que valga no hay nada que preguntar.
+    const none = fakeDb({ clicks: [click('no-es-un-id', 1)] });
+    expect((await readInterestSignals(none.admin, weird, NOW, { onlyTheirClicks: true })).size).toBe(0);
+    expect(none.asked.filter((q) => q.table === 'outbound_clicks')).toEqual([]);
+  });
+
+  it('con onlyTheirClicks, sin la columna de la llave se da cuenta una vez y sigue sin ella', async () => {
+    const rows = Array.from({ length: 50 }, () => product());
+    const { admin, asked } = fakeDb({
+      clicks: [click(rows[0].id, 1, 'x'), click(rows[0].id, 1, 'x'), click(rows[49].id, 2, 'x')],
+      fail: (q) => (q.table === 'outbound_clicks' && q.columns.includes('client_key') ? MISSING_COLUMN : null),
+    });
+
+    const signals = await readInterestSignals(admin, rows, NOW, { onlyTheirClicks: true });
+    expect(signals.get(rows[0].id)?.recentClicks).toBe(2);
+    expect(signals.get(rows[49].id)?.recentClicks).toBe(1);
+    expect(asked.filter((q) => q.table === 'outbound_clicks').map((q) => [q.columns, q.ids?.length])).toEqual([
+      ['product_id, client_key', 40],
+      ['product_id', 40],
+      ['product_id', 10],
+    ]);
+  });
+
+  it('con onlyTheirClicks tampoco afirma nada si la lectura llega al tope, o si una tanda falla', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const a = product();
+    const flooded = fakeDb({ clicks: Array.from({ length: 20_000 }, () => click(a.id, 1)) });
+    expect((await readInterestSignals(flooded.admin, [a], NOW, { onlyTheirClicks: true })).has(a.id)).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    // Si la segunda tanda falla, lo leído en la primera no se entrega a medias.
+    const rows = Array.from({ length: 50 }, () => product());
+    const broken = fakeDb({
+      clicks: [click(rows[0].id, 1), click(rows[0].id, 1), click(rows[0].id, 1)],
+      fail: (q) => (q.table === 'outbound_clicks' && q.ids?.includes(rows[49].id) ? { code: '500', message: 'se cayó' } : null),
+    });
+    expect((await readInterestSignals(broken.admin, rows, NOW, { onlyTheirClicks: true })).size).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it('la misma persona cuenta una vez por producto y por día', async () => {

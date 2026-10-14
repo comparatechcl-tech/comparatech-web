@@ -12,6 +12,11 @@
  * con la plantilla pedida y sube los dos archivos. Lo que ya existe no se rehace. Si un producto falla, sigue
  * con los demás y termina con código 1.
  *
+ * El nombre de cada archivo también lo decide el sitio ("AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>") y
+ * aquí se usa tal como llega: la huella resume lo que el video dice además del precio, y solo el sitio la
+ * calcula. Si el sitio manda el nombre sin huella es que no es de la misma versión que este proceso, y no se
+ * arma nada con ese nombre.
+ *
  * Corre tres veces al día en GitHub Actions (.github/workflows/reels.yml) y también a mano en el PC.
  * Lee CRON_SECRET de las variables de entorno (así llega en GitHub Actions) y, si no está, de .env.local
  * (así corre en el PC). Nunca lo imprime, y solo lo manda al sitio en producción o a un servidor local
@@ -24,7 +29,7 @@
  * dirección firmada, el secreto ni la respuesta del plan.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,6 +38,7 @@ import { precio as formatPrice, resolverProducto } from './datos.mjs';
 import { existePlantilla } from './plantillas/index.mjs';
 import {
   isLocalHost,
+  noCommands,
   oneLine,
   photoUrlProblem,
   planItemProblem,
@@ -49,6 +55,8 @@ const DEFAULT_COUNT = 4;
 const MAX_COUNT = 6;
 const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
 const PLAN_ATTEMPTS = 3;
+/** Las respuestas con que un servidor manda a otra dirección. */
+const REDIRECTS = [301, 302, 303, 307, 308];
 const HIDDEN = '[oculto]';
 const USAGE = 'Uso: node scripts/reels/generar.mjs [--n 4] [--seco] [--sitio http://localhost:3000]';
 
@@ -65,10 +73,13 @@ export function parseArgs(argv) {
     const eq = arg.indexOf('=');
     const key = eq > 0 ? arg.slice(0, eq) : arg;
     const value = () => {
-      if (eq > 0) return arg.slice(eq + 1);
-      const next = argv[++i];
-      if (next === undefined || next.startsWith('--')) throw new Error(`Falta el valor de ${key}.\n${USAGE}`);
-      return next;
+      const given = eq > 0 ? arg.slice(eq + 1) : argv[++i];
+      // Un valor vacío también es un valor que falta: pasa con --sitio "$VARIABLE" cuando la variable no
+      // existe, y sin este aviso la corrida se iría callada al sitio publicado.
+      if (given === undefined || given.trim() === '' || (eq < 0 && given.startsWith('--'))) {
+        throw new Error(`Falta el valor de ${key}.\n${USAGE}`);
+      }
+      return given;
     };
     if (key === '--seco' && eq < 0) {
       options.dry = true;
@@ -112,9 +123,13 @@ export function readSecret({ env = process.env, envFile = ENV_FILE } = {}) {
   return secret;
 }
 
-/** A qué sitio se le habla (y se le manda el secreto): producción, o un servidor local si se pide con --sitio. */
+/**
+ * A qué sitio se le habla (y se le manda el secreto): producción, o un servidor local si se pide con --sitio.
+ * Producción es solo cuando no se pidió ninguno; un --sitio vacío es un error y no un "entonces producción".
+ */
 export function resolveSite(override) {
-  if (!override) return PRODUCTION;
+  if (override === null || override === undefined) return PRODUCTION;
+  if (typeof override !== 'string' || override.trim() === '') throw new Error('--sitio llegó vacío: falta la dirección del servidor local.');
   let url;
   try {
     url = new URL(override);
@@ -146,7 +161,34 @@ function publicText(secrets) {
   };
 }
 
-/** Pide el plan al sitio. Reintenta solo ante caídas de red o de pasarela; un 500 es el sitio diciendo que algo salió mal. */
+/**
+ * Qué decir cuando el sitio responde al pedido del plan con una redirección. Pasa el día en que el dominio
+ * propio queda de principal y el anterior manda para allá: desde ahí todas las corridas fallan hasta que se
+ * cambie la dirección escrita acá, así que el mensaje dice eso mismo. Del destino se muestra solo el dominio.
+ */
+function redirectProblem(origin, res) {
+  let target = null;
+  try {
+    const location = res.headers.get('location');
+    if (location) target = new URL(location, `${origin}${PLAN_PATH}`).origin;
+  } catch {
+    // un destino que no se puede leer se trata como que no vino
+  }
+  const fix =
+    origin === PRODUCTION
+      ? 'hay que actualizar la dirección de producción (PRODUCTION) en scripts/reels/generar.mjs'
+      : 'hay que revisar la dirección que se pasó en --sitio';
+  const notFollowed = 'No se siguió la redirección: el secreto solo se manda a la dirección pedida';
+  if (target && target !== 'null' && target !== origin) {
+    return `el sitio redirige a otro dominio (${oneLine(target, 120)}): ${fix}. ${notFollowed}`;
+  }
+  return `el sitio respondió con una redirección (${res.status}) en vez del plan: si cambió de dominio, ${fix}. ${notFollowed}`;
+}
+
+/**
+ * Pide el plan al sitio. Reintenta solo ante caídas de red o de pasarela; un 500 es el sitio diciendo que algo
+ * salió mal, y una redirección no se arregla insistiendo.
+ */
 async function requestPlan({ origin, secret, count, fetchFn, retryDelayMs }) {
   for (let attempt = 1; ; attempt++) {
     const last = attempt >= PLAN_ATTEMPTS;
@@ -154,14 +196,20 @@ async function requestPlan({ origin, secret, count, fetchFn, retryDelayMs }) {
     try {
       res = await fetchFn(`${origin}${PLAN_PATH}?n=${count}`, {
         headers: { Authorization: `Bearer ${secret}` },
-        // Sin seguir redirecciones: el secreto va solo a la dirección pedida.
-        redirect: 'error',
+        // Las redirecciones no se siguen (el secreto va solo a la dirección pedida), pero tampoco se tratan
+        // como una caída: con 'manual' llega la respuesta y se puede decir a dónde manda el sitio.
+        redirect: 'manual',
         signal: AbortSignal.timeout(70_000),
       });
     } catch (err) {
       if (last) throw new Error(`no se pudo hablar con el sitio (${reason(err)})`);
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       continue;
+    }
+    if (REDIRECTS.includes(res.status) || res.type === 'opaqueredirect') {
+      // Lo que no se va a leer se suelta, para no dejar la conexión esperando.
+      await res.body?.cancel().catch(() => {});
+      throw new Error(redirectProblem(origin, res));
     }
     const text = await res.text();
     if ([502, 503, 504].includes(res.status) && !last) {
@@ -272,15 +320,51 @@ async function uploadSigned(fetchFn, url, file, contentType) {
  * los hilos, que --seco no necesita.
  */
 async function renderReel({ product, template, video, cover }) {
-  const { prepararReel } = await import('./armar.mjs');
+  const [{ prepararReel }, { cortarVideos }] = await Promise.all([import('./armar.mjs'), import('./video.mjs')]);
+  stopEncoders = cortarVideos;
   const reel = await prepararReel(product, { plantilla: template });
   const result = await reel.armar({ salida: video, portada: cover });
   return { bytes: result.peso, lowered: result.calidadBajada, notes: reel.avisos };
 }
 
+/**
+ * Las carpetas temporales de los videos que se están armando en este momento. Cada una se borra al terminar
+ * su video (el `finally` de makeOne); esta lista es para cuando cortan el proceso a la mitad y ese `finally`
+ * no alcanza a correr.
+ */
+const openDirs = new Set();
+/** Corta a los ffmpeg en curso. Queda puesto cuando se carga el armador de verdad (ver renderReel). */
+let stopEncoders = null;
+
+/**
+ * Suelta de inmediato lo que haya a medias: corta a ffmpeg (mientras tenga abierto el video, Windows no deja
+ * borrar la carpeta) y borra las carpetas temporales en curso. Es para cuando cortan el proceso (Ctrl+C, la
+ * consola que se cierra, Actions cancelando la corrida). No espera a nadie, así que después de llamarla hay
+ * que salir. Devuelve cuántas carpetas no se pudieron borrar.
+ */
+export function discardOpenWork() {
+  try {
+    stopEncoders?.();
+  } catch {
+    // si no se pudo cortar a ffmpeg, igual se intenta borrar
+  }
+  let left = 0;
+  for (const dir of [...openDirs]) {
+    try {
+      // Con reintentos cortos: en Windows, ffmpeg demora un instante en soltar el video después de morir.
+      rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 });
+      openDirs.delete(dir);
+    } catch {
+      left++;
+    }
+  }
+  return left;
+}
+
 /** Un producto: baja la foto, arma el video y su portada en una carpeta temporal y sube los dos archivos. */
 async function makeOne(ctx, item) {
   const dir = await mkdtemp(path.join(ctx.tmpRoot, 'comparatech-reel-'));
+  openDirs.add(dir);
   try {
     const photo = await downloadPhoto(ctx.fetchFn, item.foto, dir);
     const product = resolverProducto(reelInput(item), { foto: photo, quien: 'producto' });
@@ -296,6 +380,7 @@ async function makeOne(ctx, item) {
     // Si la carpeta temporal no se deja borrar (en Windows pasa cuando algo la tiene tomada), no es motivo
     // para dar por fallado un video que ya quedó subido.
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
+    openDirs.delete(dir);
   }
 }
 
@@ -333,8 +418,9 @@ export async function generate({
   if (!Number.isInteger(count) || count < 1 || count > MAX_COUNT) throw new Error(`La cantidad de videos va de 1 a ${MAX_COUNT}.`);
   const secrets = new Set([secret]);
   const show = publicText(secrets);
-  // Primero se tapa y después se acorta: al revés, un token cortado a la mitad ya no se reconocería.
-  const say = (line) => log(clip(show(line), 600));
+  // Primero se tapa y después se acorta: al revés, un token cortado a la mitad ya no se reconocería. Y al
+  // final, con el renglón ya armado, se revisa de nuevo que no lleve una orden para el registro de Actions.
+  const say = (line) => log(noCommands(clip(show(line), 600)));
   const totals = { ok: false, made: 0, existing: 0, failed: 0, pending: 0 };
 
   let plan;
@@ -429,15 +515,51 @@ export async function generate({
   return totals;
 }
 
+/**
+ * ¿Este archivo es el comando que se lanzó, y no un módulo que otro importó? Se comparan las rutas reales:
+ * Node carga el archivo por su ruta real, así que cuando el comando se lanza a través de un enlace de carpeta
+ * la ruta escrita y la cargada no son la misma. Comparando lo escrito, el proceso no hacía nada y terminaba
+ * con código 0, como si hubiera salido todo bien.
+ */
 function isMainModule() {
   if (!process.argv[1]) return false;
-  const asked = path.resolve(process.argv[1]);
-  const self = fileURLToPath(import.meta.url);
+  const real = (file) => {
+    try {
+      return realpathSync(file);
+    } catch {
+      return path.resolve(file);
+    }
+  };
+  const asked = real(process.argv[1]);
+  const self = real(fileURLToPath(import.meta.url));
   return process.platform === 'win32' ? asked.toLowerCase() === self.toLowerCase() : asked === self;
+}
+
+/**
+ * Si cortan el proceso a la mitad (Ctrl+C, la consola que se cierra, Actions cancelando la corrida), el
+ * `finally` que borra la carpeta temporal no alcanza a correr: aquí se borra antes de salir. El código de
+ * salida es el de costumbre para un proceso cortado por una señal: 128 más el número de la señal.
+ */
+function cleanUpWhenCut() {
+  const signals = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15, SIGBREAK: 21 };
+  for (const [signal, number] of Object.entries(signals)) {
+    process.on(signal, () => {
+      const left = discardOpenWork();
+      const note = left ? 'Quedó una carpeta temporal que no se pudo borrar.' : 'No quedaron archivos temporales.';
+      try {
+        // Directo y sin esperar: con process.exit, lo que va por console puede no alcanzar a salir.
+        writeSync(2, `Corrida cortada antes de terminar (${signal}). ${note}\n`);
+      } catch {
+        // sin dónde escribir, se sale igual
+      }
+      process.exit(128 + number);
+    });
+  }
 }
 
 if (isMainModule()) {
   let show = (text) => text;
+  cleanUpWhenCut();
   try {
     const options = parseArgs(process.argv.slice(2));
     const secret = readSecret();
@@ -446,7 +568,7 @@ if (isMainModule()) {
     // Sin process.exit: así lo último que se imprimió alcanza a salir completo.
     process.exitCode = result.ok ? 0 : 1;
   } catch (err) {
-    console.error(show(reason(err)));
+    console.error(noCommands(show(reason(err))));
     process.exitCode = 1;
   }
 }

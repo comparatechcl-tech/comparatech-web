@@ -64,29 +64,37 @@ export default async function VideosPage() {
           Elige <strong>uno o dos videos al día</strong>. Para una cuenta que parte de cero vale más subir uno todos
           los días que muchos de una vez.
         </li>
+        {/* Antes de Compartir: Compartir manda solo el archivo, y una vez en la app ya no hay de dónde copiar. */}
         <li>
-          Toca <strong>Compartir</strong> y elige Instagram (Reel), TikTok o YouTube. Sube este mismo archivo a cada
-          red: un video bajado de otra red lleva su marca de agua y se muestra menos.
+          <strong>Copia el texto</strong> de la red donde lo vas a subir, con su botón: queda copiado en el teléfono.
         </li>
         <li>
-          Antes de publicar, ponle un <strong>audio de la biblioteca de la app</strong>. Los videos en silencio se
-          muestran menos.
+          Toca <strong>Compartir</strong> y elige Instagram (Reel), TikTok, YouTube o Facebook. Sube este mismo archivo
+          a cada red: un video bajado de otra red lleva su marca de agua y se muestra menos.
         </li>
         <li>
-          Pega el texto de esa red con su botón. En TikTok activa <strong>&quot;Contenido comercial&quot;</strong> y
-          elige <strong>&quot;Contenido de marca&quot;</strong>.
+          En la app, pega el texto y ponle un <strong>audio de la biblioteca de la app</strong>: los videos en silencio
+          se muestran menos. En TikTok activa <strong>&quot;Contenido comercial&quot;</strong> y elige{' '}
+          <strong>&quot;Contenido de marca&quot;</strong>.
         </li>
         <li>
           Marca en qué redes lo subiste: lo que ya subiste no se vuelve a sugerir en {VIDEO_RULES.repeatAfterDays}{' '}
           días.
         </li>
       </ol>
+      {/*
+        El link del perfil lleva a /hoy, que suma por su cuenta los productos
+        con un video marcado como subido. No se manda a Historias: llevan otra
+        selección, y el producto del reel puede no estar ahí.
+      */}
       <p className="mt-3 text-sm text-muted">
-        Un reel no lleva link que se pueda tocar. El link va en tu perfil y en la historia del mismo producto (pestaña{' '}
-        <Link href="/admin/historias" className="font-medium text-fg underline underline-offset-2">
-          Historias
-        </Link>
-        ).
+        Un reel no lleva link que se pueda tocar. El link de tu perfil ya lleva a la página{' '}
+        <Link href="/hoy" className="font-medium text-fg underline underline-offset-2">
+          Lo de hoy
+        </Link>{' '}
+        del sitio, donde aparecen los productos de los videos que marcas como subidos: no lo cambies.{' '}
+        <strong className="font-medium text-fg">Copiar link</strong> sirve para el sticker de la historia de este
+        producto.
       </p>
 
       {error && (
@@ -103,16 +111,31 @@ export default async function VideosPage() {
         </p>
       )}
 
+      {/*
+        Sin prometer que se rehace: un video deja de mostrarse también cuando
+        el producto salió del sitio o ya no entra entre los sugeridos, y esos
+        no vuelven.
+      */}
       {stale > 0 && (
         <p className="mt-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          {stale === 1
-            ? '1 video quedó viejo porque el producto cambió de precio: se rehace solo en la próxima pasada.'
-            : `${stale} videos quedaron viejos porque el producto cambió de precio: se rehacen solos en la próxima pasada.`}
+          {stale === 1 ? '1 video ya no se muestra' : `${stale} videos ya no se muestran`} porque el producto cambió (de
+          precio, de oferta o salió del sitio). Si sigue entre los sugeridos, se arma uno nuevo en la próxima pasada.
         </p>
       )}
 
+      {/*
+        La key es la hora de esta carga: con datos nuevos del servidor la lista
+        se monta de cero y los toma (su estado se lee una sola vez, al montar).
+        Volver con "atrás" trae esta misma carga, con la misma key, y conserva
+        lo marcado.
+      */}
       {videos.length > 0 && (
-        <VideoList videos={videos} maxPriceAgeMs={VIDEO_RULES.maxPriceAgeMs} renderedAt={now.getTime()} />
+        <VideoList
+          key={now.getTime()}
+          videos={videos}
+          maxPriceAgeMs={VIDEO_RULES.maxPriceAgeMs}
+          renderedAt={now.getTime()}
+        />
       )}
 
       {!error && (
@@ -121,8 +144,9 @@ export default async function VideosPage() {
           Se eligen por lo que más puede interesar (qué es, la marca, qué tan comprobada está la oferta y que el precio
           esté al alcance), sumando lo que figura entre los más vendidos de Mercado Libre y lo que recibe más clics en
           el sitio. Solo ofertas sin avisos y con el precio revisado en las últimas {maxAgeHours} horas. Si un producto
-          cambia de precio, su video deja de mostrarse; si después de armado aparece algo que mirar, la tarjeta lo dice
-          con un &quot;Ojo&quot;. Lo que marcas acá no cuenta para las publicaciones del feed ni para las historias.
+          cambia de precio o de oferta, su video deja de mostrarse; si después de armado aparece algo que mirar, la
+          tarjeta lo dice con un &quot;Ojo&quot;. Lo que marcas acá no cuenta para las publicaciones del feed ni para
+          las historias.
         </p>
       )}
     </div>

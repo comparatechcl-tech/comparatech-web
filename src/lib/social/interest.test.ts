@@ -3,10 +3,12 @@ import { stripDiacritics } from '@/lib/text';
 import {
   MIN_INTEREST_POINTS,
   compareByInterest,
+  floorPoints,
   hasForbiddenWord,
   interestBrand,
   interestScore,
   interestType,
+  meetsInterestFloor,
   pickVaried,
   type InterestEvidence,
   type InterestProduct,
@@ -294,9 +296,16 @@ function candidate(p: InterestProduct, ev: InterestEvidence): Candidate {
   };
 }
 
-/** Un candidato con el puntaje ya puesto, para probar solo la selección. */
-function scored(id: string, points: number, over: Partial<Candidate> & { type?: string; brand?: string; excluded?: string } = {}): Candidate {
-  const { type, brand, excluded, ...rest } = over;
+/**
+ * Un candidato con el puntaje ya puesto, para probar solo la selección.
+ * `signals`: cuántos de esos puntos vienen del bloque de señales.
+ */
+function scored(
+  id: string,
+  points: number,
+  over: Partial<Candidate> & { type?: string; brand?: string; excluded?: string; signals?: number } = {}
+): Candidate {
+  const { type, brand, excluded, signals, ...rest } = over;
   return {
     id,
     category: 'audio',
@@ -309,7 +318,7 @@ function scored(id: string, points: number, over: Partial<Candidate> & { type?: 
       excluded: excluded ?? null,
       typeKey: type ?? `tipo-${id}`,
       brandKey: brand ?? `marca-${id}`,
-      breakdown: {},
+      breakdown: signals === undefined ? {} : { signals },
     },
     ...rest,
   };
@@ -1977,6 +1986,63 @@ describe('pickVaried: qué se publica', () => {
     // El piso se puede cambiar, pero los excluidos no entran nunca.
     expect(ids(pickVaried(list, { ...LIMITS, perCategory: 9, minPoints: 0 }))).toEqual(['bueno', 'justo', 'fondo']);
     expect(ids(pickVaried(list, { ...LIMITS, perCategory: 9, minPoints: 75 }))).toEqual([]);
+  });
+
+  it('las señales ordenan, pero no hacen pasar el piso: se mide sin ellas', () => {
+    const list = [
+      // 39 puntos propios y 6 de señales: con todo sumado sería el segundo de la lista.
+      scored('inflado', 45, { signals: 6 }),
+      // Justo 40 propios: entra, y las señales lo dejan primero.
+      scored('justo', 46, { signals: 6 }),
+      scored('limpio', 41),
+      // 39,9 propios: le falta una décima, y un punto de señales no se la da.
+      scored('raspando', 40.9, { signals: 1 }),
+    ];
+    const picks = pickVaried(list, { ...LIMITS, perCategory: 9 });
+    expect(ids(picks)).toEqual(['justo', 'limpio']);
+    // El orden sí usa todos los puntos.
+    expect(picks.map((c) => c.score.points)).toEqual([46, 41]);
+    // Con otro piso es igual: se compara lo propio.
+    expect(ids(pickVaried(list, { ...LIMITS, perCategory: 9, minPoints: 39 }))).toEqual(['justo', 'inflado', 'limpio', 'raspando']);
+    expect(ids(pickVaried(list, { ...LIMITS, perCategory: 9, minPoints: 41 }))).toEqual(['limpio']);
+    // Sin piso (lo elegido a mano) entran todos, en orden de puntos.
+    expect(ids(pickVaried(list, { ...LIMITS, perCategory: 9, minPoints: -Infinity }))).toEqual(['justo', 'inflado', 'limpio', 'raspando']);
+  });
+
+  it('floorPoints: los puntos sin el bloque de señales, que es con lo que se mide el piso', () => {
+    const score = (points: number, breakdown: Record<string, number> = {}) => ({ points, breakdown });
+    expect(floorPoints(score(45, { signals: 6 }))).toBe(39);
+    expect(floorPoints(score(45))).toBe(45);
+    expect(floorPoints(score(45, { signals: 0 }))).toBe(45);
+    expect(floorPoints(score(41.4, { signals: 1.4 }))).toBe(40);
+    // Sin restos de coma flotante: 40,2 − 0,3 son 39,9, no 39,900000000000006 (es el número que se le muestra al dueño).
+    expect(40.2 - 0.3).not.toBe(39.9);
+    expect(floorPoints(score(40.2, { signals: 0.3 }))).toBe(39.9);
+    expect(floorPoints(score(45.2, { signals: 5.3 }))).toBe(39.9);
+    // Un bloque de señales que no es un número válido, o negativo, no cambia nada.
+    for (const odd of [Number.NaN, Infinity, -3]) expect(floorPoints(score(45, { signals: odd }))).toBe(45);
+    expect(floorPoints({ points: 45, breakdown: undefined as unknown as Record<string, number> })).toBe(45);
+
+    expect(meetsInterestFloor(score(MIN_INTEREST_POINTS))).toBe(true);
+    expect(meetsInterestFloor(score(MIN_INTEREST_POINTS - 0.1))).toBe(false);
+    expect(meetsInterestFloor(score(MIN_INTEREST_POINTS + 5.9, { signals: 6 }))).toBe(false);
+    expect(meetsInterestFloor(score(MIN_INTEREST_POINTS + 6, { signals: 6 }))).toBe(true);
+    expect(meetsInterestFloor(score(41.4, { signals: 1.4 }))).toBe(true);
+    expect(meetsInterestFloor(score(Number.NaN))).toBe(false);
+    expect(meetsInterestFloor(score(30), 25)).toBe(true);
+    expect(meetsInterestFloor(score(30, { signals: 6 }), 25)).toBe(false);
+  });
+
+  it('con el puntaje de verdad, las señales suben los puntos y no lo que se mide contra el piso', () => {
+    for (const [p, ev] of [[TCL_TV, TCL_EVIDENCE], [PS5_HERO, PS5_HERO_EVIDENCE], ...USUAL_PICKS] as [InterestProduct, InterestEvidence][]) {
+      const plain = interestScore(p, ev);
+      for (const signals of [{ mlPosition: 1 }, { recentClicks: 4 }, { recentClicks: 12 }, { mlPosition: 1, recentClicks: 500 }, { mlPosition: 37, recentClicks: 7 }]) {
+        const lifted = interestScore(p, { ...ev, ...signals });
+        expect(lifted.points).toBeGreaterThan(plain.points);
+        expect(floorPoints(lifted)).toBe(plain.points);
+        expect(meetsInterestFloor(lifted)).toBe(meetsInterestFloor(plain));
+      }
+    }
   });
 
   it('el piso existe y deja fuera el fondo de la lista', () => {

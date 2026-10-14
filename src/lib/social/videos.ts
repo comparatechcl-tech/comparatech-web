@@ -1,4 +1,5 @@
 import 'server-only';
+import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { chileDateKey, shiftDateKey } from '@/lib/clicks';
 import { buildVideoTexts, captionDiscount, mlPhotoJpg, type VideoTexts } from '@/lib/content/captions';
@@ -6,10 +7,11 @@ import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings } from '@/lib/settings';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { shortProductName } from '@/lib/text';
-import { countUnreadHistory, readSocialEvidence } from '@/lib/social/drops';
+import { addInterestSignals, countUnreadHistory, readInterestEvidence, readSocialEvidence } from '@/lib/social/drops';
 import { interestScore, type InterestEvidence } from '@/lib/social/interest';
 import { NETWORK_RULES, VIDEO_MARK } from '@/lib/social/networks';
 import {
+  evidenceDrop,
   isOnSale,
   pickByRules,
   readFreshSocialProducts,
@@ -31,10 +33,13 @@ import {
  *  - elige (readVideoPicks): la misma puerta de entrada y el mismo puntaje de
  *    interés que las demás redes, con las señales de más vendidos y de clics;
  *  - guarda: bucket público "reels" de Supabase Storage. El nombre de cada
- *    archivo lleva el día, el producto y el PRECIO con que se armó, así un
- *    video cuyo precio ya no es el del sitio se reconoce sin abrirlo;
+ *    archivo lleva el día, el producto, el PRECIO con que se armó y una
+ *    HUELLA de lo demás que el video lleva escrito (precio de lista,
+ *    descuento, baja, envío gratis…), así un video que ya no dice lo mismo
+ *    que el sitio se reconoce sin abrirlo;
  *  - muestra (readVideoBoard): lo que está listo para subir, con el texto de
- *    cada red, y a qué redes ya se subió.
+ *    cada red, y a qué redes ya se subió. Solo los videos cuyo nombre es el
+ *    que saldría ahora mismo para ese producto.
  *
  * Los videos llevan su propia cuenta de "ya subido", aparte del plan de
  * publicaciones y de las historias: una fila en social_posts por red, con
@@ -74,6 +79,11 @@ export const VIDEO_BOARD_MAX = 8;
  */
 export const VIDEO_TEMPLATES = ['estudio'] as const;
 
+/** ¿Es una plantilla que el generador arma hoy? Un video de una que se retiró ya no es el que saldría ahora. */
+function isCurrentTemplate(template: string): boolean {
+  return (VIDEO_TEMPLATES as readonly string[]).includes(template);
+}
+
 /** El bucket público de Supabase Storage donde quedan los videos y sus portadas. */
 export const VIDEO_BUCKET = 'reels';
 
@@ -90,13 +100,16 @@ export interface VideoObject {
   /** Precio que muestra el video, en pesos. */
   price: number;
   template: string;
+  /** Huella de lo demás que el video dice (videoFingerprint): 8 caracteres en hexadecimal. */
+  fingerprint: string;
 }
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const UUID_RE = new RegExp(`^${UUID}$`);
 const TEMPLATE_RE = /^[a-z0-9]{1,24}$/;
+const FINGERPRINT_RE = /^[0-9a-f]{8}$/;
 // Sin ceros a la izquierda: cada precio tiene una sola forma de escribirse.
-const OBJECT_RE = new RegExp(`^(\\d{4}-\\d{2}-\\d{2})/(${UUID})-([1-9]\\d{0,9})-([a-z0-9]{1,24})$`);
+const OBJECT_RE = new RegExp(`^(\\d{4}-\\d{2}-\\d{2})/(${UUID})-([1-9]\\d{0,9})-([a-z0-9]{1,24})-([0-9a-f]{8})$`);
 /** posted_price es un entero de 32 bits en la base. */
 const MAX_PRICE = 2_147_483_647;
 
@@ -109,27 +122,105 @@ function isDateKey(key: string): boolean {
 }
 
 /**
- * "AAAA-MM-DD/<id>-<precio>-<plantilla>": el nombre de un video en el
- * almacén, sin extensión (el video es .mp4 y su portada .jpg). null si algún
- * dato no sirve para un nombre. Puro.
+ * "AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>": el nombre de un video en
+ * el almacén, sin extensión (el video es .mp4 y su portada .jpg). null si
+ * algún dato no sirve para un nombre. Puro.
+ *
+ * La huella la calcula solo el sitio (videoFingerprint). El generador usa el
+ * nombre tal como le llega y no la recalcula.
  */
 export function videoObjectName(video: VideoObject): string | null {
   if (!isDateKey(video.date) || !UUID_RE.test(video.productId) || !TEMPLATE_RE.test(video.template)) return null;
   if (!Number.isSafeInteger(video.price) || video.price <= 0 || video.price > MAX_PRICE) return null;
-  return `${video.date}/${video.productId}-${video.price}-${video.template}`;
+  if (typeof video.fingerprint !== 'string' || !FINGERPRINT_RE.test(video.fingerprint)) return null;
+  return `${video.date}/${video.productId}-${video.price}-${video.template}-${video.fingerprint}`;
 }
 
 /**
  * Lee un nombre armado por videoObjectName. Todo lo que no calce exacto se
  * rechaza (null): en el bucket puede haber cualquier cosa, y de un nombre mal
- * leído saldría un video con el precio de otro. Puro.
+ * leído saldría un video con el precio de otro. Un nombre sin huella (los de
+ * antes de que existiera) tampoco se lee: no se sabe qué dice ese video. Puro.
  */
 export function parseVideoObjectName(name: string): VideoObject | null {
   const match = typeof name === 'string' ? OBJECT_RE.exec(name) : null;
   if (!match) return null;
   const price = Number(match[3]);
   if (price > MAX_PRICE || !isDateKey(match[1])) return null;
-  return { date: match[1], productId: match[2], price, template: match[4] };
+  return { date: match[1], productId: match[2], price, template: match[4], fingerprint: match[5] };
+}
+
+// ---------------------------------------------------------------------------
+// Lo que el video dice.
+
+/**
+ * Lo que el video lleva escrito además del precio, con los mismos nombres y
+ * valores con que la ruta del plan se lo entrega al generador (por eso van en
+ * español: son los campos de esa respuesta).
+ *
+ * Es la única fuente de esos datos: la ruta entrega este objeto y la huella
+ * del nombre del archivo se calcula sobre él. Así lo que se dibuja y lo que
+ * se revisa después no pueden separarse.
+ */
+export interface VideoClaims {
+  nombre_corto: string;
+  marca: string | null;
+  /** Precio de lista, solo si es mayor que el precio. */
+  precio_lista: number | null;
+  /** Descuento sobre el precio de lista, en % entero. 0 si no hay. */
+  descuento: number;
+  /** Baja comprobada con el historial propio, en % entero. null si no hay. */
+  baja_historial: number | null;
+  envio_gratis: boolean;
+  full: boolean;
+}
+
+/**
+ * Lo que diría HOY el video de un producto. `drop` es la baja que confirma
+ * el historial, en % (evidenceDrop), o null. Puro.
+ */
+export function videoClaims(
+  product: Pick<SocialProduct, 'name' | 'brand' | 'price' | 'original_price' | 'offer_info'>,
+  drop: number | null
+): VideoClaims {
+  const discount = captionDiscount(product);
+  return {
+    nombre_corto: shortProductName(product.name),
+    marca: product.brand || null,
+    precio_lista: discount > 0 ? product.original_price : null,
+    descuento: discount,
+    baja_historial: drop === null || !Number.isFinite(drop) ? null : Math.round(drop),
+    // Como booleanos: el generador escribe "Envío gratis" y "Full" solo con un sí explícito.
+    envio_gratis: product.offer_info?.free_shipping === true,
+    full: product.offer_info?.is_full === true,
+  };
+}
+
+/**
+ * La huella de lo que el video dice: los primeros 8 caracteres, en
+ * hexadecimal, del SHA-256 de esos datos escritos siempre en el mismo orden.
+ * Va en el nombre del archivo junto al precio. Pura.
+ *
+ * Sin ella, un video seguía ofreciéndose cuando al producto le cambiaban el
+ * precio de lista o le quitaban el envío gratis sin tocarle el precio: el
+ * video decía "-45%" y la tarjeta de al lado "-15%". Con ella, cualquier
+ * cambio en lo que el video lleva escrito es otro nombre de archivo: el de
+ * antes deja de mostrarse y el plan pide uno nuevo.
+ *
+ * El orden y la forma de escribir los datos son parte del contrato con el
+ * almacén: si cambian, todos los videos guardados dejan de reconocerse.
+ */
+export function videoFingerprint(claims: VideoClaims): string {
+  const said = [
+    claims.nombre_corto,
+    claims.marca ?? null,
+    claims.precio_lista ?? null,
+    claims.descuento,
+    claims.baja_historial ?? null,
+    claims.envio_gratis,
+    claims.full,
+  ];
+  return createHash('sha256').update(JSON.stringify(said)).digest('hex').slice(0, 8);
 }
 
 /** Dirección pública de un archivo del almacén (el bucket es público). */
@@ -400,9 +491,11 @@ export async function readVideoMarks(admin: SupabaseClient, since: Date): Promis
 /** Un elegido para video, con el archivo que le corresponde hoy. */
 export interface VideoPick extends TelegramPick<SocialProduct> {
   template: string;
+  /** Lo que el video lleva escrito además del precio. La huella de `file` sale de acá. */
+  claims: VideoClaims;
   /** Nombre del objeto en el almacén, sin extensión. */
   file: string;
-  /** Ya están el MP4 y su portada con ese nombre: no hay que armarlo de nuevo. */
+  /** Ya están el MP4 y su portada con ese nombre exacto: no hay que armarlo de nuevo. */
   exists: boolean;
 }
 
@@ -436,7 +529,10 @@ export function videoPhoto(imageUrl: string | null | undefined): string | null {
  * revisado, nada con aviso) y el orden del puntaje de interés. No vuelve lo
  * que ya se subió como video a cualquier red en los últimos 14 días.
  *
- * De cada elegido dice si su video de hoy ya está en el almacén. Solo lee.
+ * De cada elegido dice si su video de hoy ya está en el almacén: el que
+ * lleva su precio y su huella de ahora. Uno de hoy que diga otra cosa (le
+ * cambiaron el precio de lista, perdió el envío gratis) no cuenta, y se
+ * propone de nuevo con otro nombre. Solo lee.
  */
 export async function readVideoPicks(admin: SupabaseClient, now: Date, n: number = VIDEO_RULES.maxPosts): Promise<VideoPlan> {
   const max = Number.isInteger(n) && n >= 1 ? Math.min(n, VIDEO_PLAN_MAX) : VIDEO_RULES.maxPosts;
@@ -458,12 +554,19 @@ export async function readVideoPicks(admin: SupabaseClient, now: Date, n: number
   const date = chileDateKey(now);
   const stored = picked.length > 0 ? await listVideoFolder(admin, date) : [];
   const ready = new Set(stored.map((video) => video.file));
-  // La plantilla del video de hoy, si ya existe con el precio de ahora.
+  const said = picked.map((pick) => {
+    const claims = videoClaims(pick.product, pick.drop);
+    return { claims, fingerprint: videoFingerprint(claims) };
+  });
+  // La plantilla del video de hoy, si ya existe diciendo lo mismo que diría ahora.
   const already = new Map<string, string>();
-  for (const pick of picked) {
-    const found = stored.find((video) => video.productId === pick.product.id && video.price === pick.product.price);
+  picked.forEach((pick, i) => {
+    const found = stored.find(
+      (video) =>
+        video.productId === pick.product.id && video.price === pick.product.price && video.fingerprint === said[i].fingerprint
+    );
     if (found) already.set(pick.product.id, found.template);
-  }
+  });
   const templates = assignVideoTemplates(
     picked.map((pick) => pick.product.id),
     date,
@@ -473,8 +576,9 @@ export async function readVideoPicks(admin: SupabaseClient, now: Date, n: number
   const picks: VideoPick[] = [];
   picked.forEach((pick, i) => {
     const template = templates[i];
-    const file = videoObjectName({ date, productId: pick.product.id, price: pick.product.price, template });
-    if (file) picks.push({ ...pick, template, file, exists: ready.has(file) });
+    const { claims, fingerprint } = said[i];
+    const file = videoObjectName({ date, productId: pick.product.id, price: pick.product.price, template, fingerprint });
+    if (file) picks.push({ ...pick, template, claims, file, exists: ready.has(file) });
   });
   return { date, picks, unreadHistory: countUnreadHistory(evidence) };
 }
@@ -513,10 +617,12 @@ export interface VideoBoard {
   /** Primero los que faltan por subir a alguna red, por puntos; al final los que ya están en las cuatro. */
   videos: ReadyVideo[];
   /**
-   * Productos cuyo video de hoy o de ayer quedó viejo: cambió el precio o el
-   * producto salió del sitio. No cuenta lo que se esconde por un rato (precio
-   * sin revisar en las últimas 6 horas: vuelve solo, sin armarlo de nuevo) ni
-   * lo que el puntaje ya no publicaría.
+   * Productos cuyo video de hoy o de ayer ya no se muestra porque el producto
+   * cambió (de precio, o de lo que dice la oferta: precio de lista,
+   * descuento, baja, envío gratis, Full, nombre o marca) o salió del sitio.
+   * No cuenta lo que se esconde por un rato y vuelve solo, sin armarlo de
+   * nuevo (precio sin revisar en las últimas 6 horas, o historial de precios
+   * que no se pudo leer en esta carga), ni lo que el puntaje ya no publicaría.
    */
   stale: number;
   /** Cuándo se subió el último video de hoy o de ayer, sirva o no. */
@@ -560,9 +666,15 @@ async function readProductsById(admin: SupabaseClient, ids: string[]): Promise<M
 
 /**
  * Los videos de hoy y de ayer que se pueden subir ahora, uno por producto: el
- * más nuevo que diga el precio de hoy, y solo si el producto sigue a la venta
- * y su precio se revisó hace poco. Los puntos y el motivo se calculan en este
- * momento, con el mismo historial y las mismas señales que la selección.
+ * más nuevo cuyo nombre sea exactamente el que saldría ahora para ese
+ * producto (el precio, una plantilla que todavía se arma y la huella de lo
+ * que el video dice), y solo si el producto sigue a la venta y su precio se
+ * revisó hace poco. Los puntos y el motivo se calculan en este momento, con
+ * el mismo historial y las mismas señales que la selección.
+ *
+ * La huella lleva la baja que confirma el historial de precios. Si el de un
+ * producto no se pudo leer en esta carga, no se sabe qué diría hoy su video:
+ * no se muestra, y tampoco se da por viejo (a la próxima carga vuelve).
  *
  * Si el bucket no existe todavía no lanza: storageReady va en false. Solo lee.
  */
@@ -589,27 +701,57 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
   }
   const products = await readProductsById(admin, [...byProduct.keys()]);
 
-  // De cada producto, el video más nuevo que diga el precio de ahora.
-  const live: { video: StoredVideo; product: SocialProduct }[] = [];
+  // Lo que se sabe sin el historial: el producto salió del sitio, o ningún
+  // video suyo lleva el precio de ahora con una plantilla que todavía se arma.
+  const priced: { product: SocialProduct; list: StoredVideo[] }[] = [];
   let stale = 0;
-  for (const [productId, list] of byProduct) {
+  for (const [productId, all] of byProduct) {
     const product = products.get(productId);
-    const video = isOnSale(product) ? list.find((item) => item.price === product.price) : undefined;
-    if (!isOnSale(product) || !video) {
+    const list = isOnSale(product)
+      ? all.filter((video) => video.price === product.price && isCurrentTemplate(video.template))
+      : [];
+    if (!isOnSale(product) || list.length === 0) stale++;
+    else priced.push({ product, list });
+  }
+  if (priced.length === 0) return { videos: [], stale, lastRenderedAt, storageReady: true };
+
+  // La baja del historial es parte de lo que el video dice: sin leerlo no se
+  // puede saber cuál es el nombre de hoy.
+  const history = await readInterestEvidence(
+    priced.map((item) => item.product),
+    now
+  );
+  const live: { video: StoredVideo; product: SocialProduct; claims: VideoClaims }[] = [];
+  for (const { product, list } of priced) {
+    const seen = history.get(product.id);
+    // No se pudo leer: ni se muestra ni quedó viejo.
+    if (!seen || seen.historyUnread === true) continue;
+    const claims = videoClaims(product, evidenceDrop(seen));
+    const fingerprint = videoFingerprint(claims);
+    // De cada producto, el video más nuevo que se llame como se llamaría hoy.
+    const video = list.find(
+      (item) =>
+        item.file ===
+        videoObjectName({ date: item.date, productId: product.id, price: product.price, template: item.template, fingerprint })
+    );
+    if (!video) {
       stale++;
       continue;
     }
     // Con el precio sin revisar hace rato no se sabe si el video sigue
     // diciendo la verdad: no se muestra, pero tampoco quedó viejo.
-    if (isFreshlyChecked(product, now)) live.push({ video, product });
+    if (isFreshlyChecked(product, now)) live.push({ video, product, claims });
   }
   if (live.length === 0) return { videos: [], stale, lastRenderedAt, storageReady: true };
 
   const since = new Date(now.getTime() - VIDEO_RULES.repeatAfterDays * DAY_MS);
   const [evidence, marks, settings] = await Promise.all([
-    readSocialEvidence(
+    // Las señales, solo de los que se pueden mostrar: los clics se le piden
+    // a la base por producto, no la semana entera de todo el sitio.
+    addInterestSignals(
       admin,
       live.map((item) => item.product),
+      history,
       now
     ),
     readVideoMarks(admin, since),
@@ -617,22 +759,22 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
   ]);
 
   const videos: ReadyVideo[] = [];
-  for (const { video, product: p } of live) {
+  for (const { video, product: p, claims } of live) {
     const score = interestScore(p, evidence.get(p.id) ?? NO_EVIDENCE);
     // Lo que el puntaje no publicaría (por ejemplo, el sitio lo vio bastante
     // más barato después de armar el video) tampoco se ofrece para subir.
     if (score.excluded !== null) continue;
 
-    const discount = captionDiscount(p);
     const safeSlug = p.slug.toLowerCase().replace(/[^a-z0-9-]+/g, '').slice(0, 80) || 'producto';
     videos.push({
       id: p.id,
       slug: p.slug,
-      name: shortProductName(p.name),
+      // La tarjeta muestra lo mismo que el video lleva escrito.
+      name: claims.nombre_corto,
       brand: p.brand,
       price: p.price,
-      listPrice: discount > 0 ? p.original_price : null,
-      discount,
+      listPrice: claims.precio_lista,
+      discount: claims.descuento,
       checkedAt: p.price_checked_at,
       template: video.template,
       videoUrl: videoPublicUrl(`${video.file}.mp4`),

@@ -9,6 +9,18 @@ import sharp from 'sharp';
 // pesan entre 2 y 4 MB.
 export const CRF_NORMAL = 17;
 
+/**
+ * Los ffmpeg que están comprimiendo en este momento. Se anotan para poder cortarlos de golpe si cortan el
+ * proceso entero (ver cortarVideos): un ffmpeg que queda vivo sigue teniendo abierto el video a medias, y en
+ * Windows eso no deja borrar la carpeta donde está.
+ */
+const enCurso = new Set();
+
+/** Corta todos los ffmpeg en curso, sin esperar a que terminen. Es para cuando el proceso entero se va. */
+export function cortarVideos() {
+  for (const ff of enCurso) ff.kill('SIGKILL');
+}
+
 /** Dónde está ffmpeg en este equipo: el de la variable FFMPEG, el de la consola o el que instaló WinGet. */
 export function buscarFfmpeg() {
   const candidatos = [process.env.FFMPEG, 'ffmpeg'];
@@ -64,6 +76,7 @@ export function abrirVideo(ffmpeg, { salida, ancho, alto, fps, cuadros, musica =
     ],
     { stdio: ['pipe', 'ignore', 'pipe'] }
   );
+  enCurso.add(ff);
   let error = '';
   ff.stderr.on('data', (d) => (error += d));
   ff.stdin.on('error', () => {}); // si ffmpeg muere, el motivo llega por 'close'
@@ -76,10 +89,12 @@ export function abrirVideo(ffmpeg, { salida, ancho, alto, fps, cuadros, musica =
   };
   const fin = new Promise((resolve, reject) => {
     ff.on('error', (e) => {
+      enCurso.delete(ff);
       quitarParcial();
       reject(e);
     });
     ff.on('close', (codigo) => {
+      enCurso.delete(ff);
       if (codigo === 0) {
         try {
           fs.renameSync(parcial, salida);

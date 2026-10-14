@@ -44,8 +44,8 @@ import { discountOf, rankDeals } from '@/lib/deal-rank';
 import type { PriceStats } from '@/lib/deals';
 import { interestEvidence } from '@/lib/social/evidence';
 import {
-  MIN_INTEREST_POINTS,
   interestScore,
+  meetsInterestFloor,
   pickVaried,
   type InterestProduct,
   type InterestScore,
@@ -126,7 +126,8 @@ function blockerOf(
 ): LeadBlocker | null {
   if (score.excluded !== null) return 'excluded';
   // Las comparaciones van negadas a propósito: un número que no es válido no pasa.
-  if (!(score.points >= MIN_INTEREST_POINTS)) return 'low-interest';
+  // El piso es el mismo de las redes y se mide igual, sin las señales.
+  if (!meetsInterestFloor(score)) return 'low-interest';
   if (unread) return 'history-unread';
   if (score.warning !== null) return 'warning';
   if (!ignoreCheckAge && !checkedRecently(product.price_checked_at, now)) return 'stale-check';

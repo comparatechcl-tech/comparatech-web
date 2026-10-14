@@ -159,6 +159,24 @@ describe('leadBlocker: cada regla por separado', () => {
     expect(leadBlocker(clean, scored(NaN), history(), NOW)).toBe('low-interest');
   });
 
+  it('el piso es el mismo de las redes: se mide sin las señales, que se pueden fabricar desde afuera', () => {
+    // 39 puntos propios y 6 de clics y más vendidos: no encabeza la portada.
+    expect(leadBlocker(clean, scored(MIN_INTEREST_POINTS + 5, { breakdown: { signals: 6 } }), history(), NOW)).toBe('low-interest');
+    // Con 40 propios sí, tenga o no señales.
+    expect(leadBlocker(clean, scored(MIN_INTEREST_POINTS + 6, { breakdown: { signals: 6 } }), history(), NOW)).toBeNull();
+    // Tampoco entra al grupo que se turna el primer lugar, aunque sume más que las demás.
+    const inflated = deal('inflada');
+    const honest = deal('honesta', { category: 'gaming' });
+    const scores: Record<string, InterestScore> = {
+      inflada: scored(MIN_INTEREST_POINTS + 5, { breakdown: { signals: 6 } }),
+      honesta: scored(MIN_INTEREST_POINTS + 1),
+    };
+    const picked = selectHomeDeals([inflated, honest], new Map(), NOW, { scoreOf: (p) => scores[p.id] });
+    expect(picked.spotlight?.id).toBe('honesta');
+    // El bloque se rellena igual con la otra (ahí no corre el piso), pero detrás.
+    expect(picked.block.map((p) => p.id)).toEqual(['honesta', 'inflada']);
+  });
+
   it('con el precio revisado hace dos horas o más no encabeza', () => {
     expect(leadBlocker(deal('a', { price_checked_at: minutesAgo(119) }), good, history(), NOW)).toBeNull();
     expect(leadBlocker(deal('a', { price_checked_at: minutesAgo(120) }), good, history(), NOW)).toBe('stale-check');
