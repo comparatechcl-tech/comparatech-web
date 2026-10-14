@@ -4,7 +4,7 @@ import { isCronAuthorized } from '@/lib/cron-auth';
 import { chileDateKey, chileDayStart } from '@/lib/clicks';
 import { readAffiliateSettings } from '@/lib/settings';
 import { SITE_URL } from '@/lib/site';
-import { countUnreadHistory, readInterestEvidence } from '@/lib/social/drops';
+import { countUnreadHistory, readSocialEvidence } from '@/lib/social/drops';
 import { pieceKey } from '@/lib/social/piece-url';
 import { pickByRules, readFreshSocialProducts } from '@/lib/social/telegram';
 import {
@@ -90,10 +90,11 @@ export async function GET(req: NextRequest) {
       readAffiliateSettings(admin),
     ]);
 
-    // El historial se lee solo de lo que puede salir: el producto pedido, o
-    // todo lo que no se publicó hace poco.
+    // El historial y las señales (más vendidos de Mercado Libre, clics en el
+    // sitio) se leen solo de lo que puede salir: el producto pedido, o todo lo
+    // que no se publicó hace poco.
     const wanted = wantedId ? rows.filter((p) => p.id === wantedId) : null;
-    const evidence = await readInterestEvidence(wanted ?? rows, now, wanted ? undefined : posted ?? undefined);
+    const evidence = await readSocialEvidence(admin, wanted ?? rows, now, wanted ? undefined : posted ?? undefined);
 
     const picks = wanted
       ? pickByRules(

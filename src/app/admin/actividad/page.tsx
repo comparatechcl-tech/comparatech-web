@@ -60,6 +60,20 @@ function plural(n: number, one: string, many: string) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** La red de una marca de video, como se escribe. Un registro sin red, o con una que no se conoce, no rompe la línea. */
+const NETWORK_NAMES: Record<string, string> = {
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
+  facebook: 'Facebook',
+};
+
+function networkName(value: unknown): string {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(NETWORK_NAMES, value)
+    ? NETWORK_NAMES[value]
+    : 'una red';
+}
+
 function describe(row: AdminEventRow): string {
   const after = asRecord(row.after);
   const count = countOf(row);
@@ -97,6 +111,9 @@ function describe(row: AdminEventRow): string {
       // Las historias subidas a mano (/admin/historias) se anotan con la misma acción.
       if (after?.historia === 'publicada') return `marcó una historia como publicada${row.target ? ` · ${row.target}` : ''}`;
       if (after?.historia === 'deshecha') return `deshizo la marca de una historia${row.target ? ` · ${row.target}` : ''}`;
+      // Y los videos subidos a mano (/admin/videos), que llevan una marca por red.
+      if (after?.video === 'subido') return `marcó un video como subido a ${networkName(after.red)}${row.target ? ` · ${row.target}` : ''}`;
+      if (after?.video === 'deshecho') return `deshizo la marca de un video en ${networkName(after.red)}${row.target ? ` · ${row.target}` : ''}`;
       return `cambió el estado en redes de un producto${row.target ? ` · ${row.target}` : ''}`;
     case 'reporte_afiliados':
       return `anotó el reporte de Mercado Libre${row.target ? ` de la semana del ${row.target}` : ''}`;

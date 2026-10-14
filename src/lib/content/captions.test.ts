@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+import { hasForbiddenWord } from '@/lib/social/interest';
 import {
   DISCLOSURE,
+  YOUTUBE_TITLE_MAX,
   buildCaption,
+  buildVideoTexts,
   captionDiscount,
   chileDateTime,
   formatPrice,
   mlPhotoJpg,
   pickHook,
+  youtubeTitle,
   type CaptionChannel,
   type CaptionProduct,
 } from './captions';
@@ -138,6 +142,123 @@ describe('buildCaption', () => {
       Array.from({ length: 30 }, (_, i) => pickHook({ ...base, id: `producto-${i}` }, opts.now))
     );
     expect(hooks.size).toBeGreaterThan(2);
+  });
+});
+
+describe('buildVideoTexts', () => {
+  const texts = buildVideoTexts(base, opts.now);
+  const all = [texts.instagram, texts.tiktok, texts.facebook, texts.youtubeTitle, texts.youtubeDescription];
+  const WEB_ADDRESS = /https?:|www\.|\.(cl|com|la|app|net|org)\b/i;
+
+  it('Instagram y TikTok llevan el texto de siempre', () => {
+    expect(texts.instagram).toBe(buildCaption(base, 'instagram', opts));
+    expect(texts.tiktok).toBe(buildCaption(base, 'tiktok', opts));
+  });
+
+  it('Facebook dice lo mismo que Instagram, mandando al perfil y sin ninguna dirección web', () => {
+    expect(texts.facebook).not.toMatch(WEB_ADDRESS);
+    expect(texts.facebook).toContain('Link en el perfil');
+    expect(texts.facebook).not.toContain('bio');
+    // Ni el link de compra ni el de la ficha, que es lo que lleva el texto de Facebook del feed.
+    const feed = buildCaption(base, 'facebook', opts);
+    expect(feed).toMatch(WEB_ADDRESS);
+    expect(texts.facebook).not.toContain('Ver en Mercado Libre');
+    expect(texts.facebook).not.toContain('Compara en ComparaTech');
+
+    const ig = texts.instagram.split('\n');
+    const fb = texts.facebook.split('\n');
+    expect(fb).toHaveLength(ig.length);
+    const different = fb.filter((line, i) => line !== ig[i]);
+    expect(different).toEqual(['Link en el perfil 👉 ComparaTech']);
+  });
+
+  it('ningún texto de un reel lleva una dirección web: no se podría tocar', () => {
+    for (const text of all) expect(text).not.toMatch(WEB_ADDRESS);
+    // Tampoco con un producto sin descuento ni con otro gancho.
+    const plain = buildVideoTexts({ ...base, original_price: null, id: 'otro-producto' }, opts.now);
+    for (const text of Object.values(plain)) expect(text).not.toMatch(WEB_ADDRESS);
+  });
+
+  it('la descripción de YouTube es la de TikTok, diciendo que el link está en el perfil del canal', () => {
+    expect(texts.youtubeDescription).toContain('Link en el perfil del canal');
+    expect(texts.youtubeDescription).not.toContain('bio');
+    const tk = texts.tiktok.split('\n');
+    const yt = texts.youtubeDescription.split('\n');
+    expect(yt.filter((line, i) => line !== tk[i])).toEqual(['Link en el perfil del canal 👉 ComparaTech']);
+  });
+
+  it('todos los textos largos conservan la frase de la comisión y la hora del precio', () => {
+    for (const text of [texts.instagram, texts.tiktok, texts.facebook, texts.youtubeDescription]) {
+      expect(text).toContain(DISCLOSURE);
+      expect(text).toContain('Precio revisado el 04/10 a las 14:30 (hora de Chile); puede cambiar.');
+      expect(text).not.toMatch(/publicidad/i);
+      // La comisión va antes de los hashtags, no perdida entre ellos.
+      expect(text.indexOf(DISCLOSURE)).toBeLessThan(text.indexOf('#ofertas'));
+    }
+  });
+
+  it('el título de YouTube dice qué es, el precio y el descuento sobre el precio de lista', () => {
+    // El nombre se corta en una palabra entera (y sin dejar un "Con" colgando); el color no va.
+    expect(texts.youtubeTitle).toBe(
+      'Audífonos Bluetooth Inalámbricos Xyz Pro a $27.990, 60% por debajo del precio de lista'
+    );
+
+    // Sin descuento real no hay porcentaje.
+    expect(youtubeTitle({ ...base, original_price: null })).toMatch(/ a \$27\.990$/);
+    expect(youtubeTitle({ ...base, original_price: 20_000 })).not.toContain('%');
+  });
+
+  it('el título nunca pasa de 90 caracteres, y lo que se acorta es el nombre', () => {
+    expect(YOUTUBE_TITLE_MAX).toBe(90);
+    const names = [
+      base.name,
+      'Smart TV Samsung Crystal UHD 4K 65 Pulgadas Con Control De Voz Y Sistema Operativo Tizen Modelo 2026 Negro',
+      'Notebook',
+      `Palabra${'larguísima'.repeat(20)}`,
+      'Refrigerador Side By Side (No Frost, 578 Litros, Dispensador De Agua, Inverter) Acero Inoxidable',
+    ];
+    const prices: [number, number | null][] = [
+      [990, null],
+      [27_990, 69_990],
+      [1_299_990, 2_599_990],
+      [2_147_483_647, null],
+      [12_999_990, 99_999_990],
+    ];
+    for (const name of names) {
+      for (const [price, original_price] of prices) {
+        const title = youtubeTitle({ name, price, original_price });
+        expect(title.length).toBeLessThanOrEqual(YOUTUBE_TITLE_MAX);
+        // El precio y el descuento van siempre enteros.
+        expect(title).toContain(` a ${formatPrice(price)}`);
+        const discount = captionDiscount({ price, original_price });
+        if (discount > 0) expect(title.endsWith(`, ${discount}% por debajo del precio de lista`)).toBe(true);
+        expect(title.trim()).toBe(title);
+      }
+    }
+  });
+
+  it('el título no lleva las palabras que el sitio no usa, aunque vengan en el nombre', () => {
+    expect(hasForbiddenWord(texts.youtubeTitle)).toBe(false);
+    for (const text of all) expect(hasForbiddenWord(text)).toBe(false);
+
+    const loud = [
+      'Audífonos Sony WH-CH520 ¡Imperdible! Oferton Solo Hoy',
+      'Parlante JBL Go 4 Mejor Precio - El Más Barato',
+      'Smartwatch Xiaomi Rebajado Antes Ahorra',
+      'Tablet Lenovo Recomendado Últimas Unidades Precio Normal',
+      // Al sacar la del medio no pueden quedar juntas otras dos.
+      'Mouse Logitech Solo Imperdible Hoy M170',
+      'IMPERDIBLE',
+    ];
+    for (const name of loud) {
+      const title = youtubeTitle({ name, price: 19_990, original_price: 39_990 });
+      expect(hasForbiddenWord(title)).toBe(false);
+      expect(title).toContain(' a $19.990, 50% por debajo del precio de lista');
+    }
+    expect(youtubeTitle({ name: loud[0], price: 19_990, original_price: null })).toBe('Audífonos Sony WH-CH520 a $19.990');
+    expect(youtubeTitle({ name: 'IMPERDIBLE', price: 19_990, original_price: null })).toBe('Producto a $19.990');
+    // Un nombre limpio no se toca.
+    expect(youtubeTitle({ name: 'Parlante JBL Go 4', price: 19_990, original_price: null })).toBe('Parlante JBL Go 4 a $19.990');
   });
 });
 

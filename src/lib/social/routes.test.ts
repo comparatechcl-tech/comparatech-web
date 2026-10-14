@@ -8,13 +8,21 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 const SECRET = 'un-secreto-de-prueba-de-mas-de-32-caracteres';
 
-/** Lo que responde cualquier consulta directa a la base: ninguna fila. */
+/**
+ * Lo que responde cualquier consulta directa a la base: ninguna fila, salvo
+ * las que un test deje en `rows` para una tabla (se devuelven sin filtrar).
+ */
 const fakeAdmin = vi.hoisted(() => {
-  const builder: Record<string, unknown> = {};
-  for (const method of ['select', 'eq', 'neq', 'in', 'gte', 'order', 'limit']) builder[method] = () => builder;
-  builder.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
-    Promise.resolve({ data: [], error: null }).then(resolve);
-  return { from: () => builder };
+  const rows: Record<string, unknown[]> = {};
+  const from = (table: string) => {
+    const builder: Record<string, unknown> = {};
+    // 'range' y 'not' son de la lectura de señales (clics del sitio y más vendidos).
+    for (const method of ['select', 'eq', 'neq', 'in', 'not', 'gte', 'order', 'limit', 'range']) builder[method] = () => builder;
+    builder.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve({ data: rows[table] ?? [], error: null }).then(resolve);
+    return builder;
+  };
+  return { from, rows };
 });
 
 vi.mock('@/lib/supabase/server', () => ({ getSupabaseAdmin: () => fakeAdmin }));
@@ -168,12 +176,23 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  for (const table of Object.keys(fakeAdmin.rows)) delete fakeAdmin.rows[table];
   vi.mocked(readFreshSocialProducts).mockReset();
   vi.mocked(getPriceStatsMany).mockReset();
   vi.mocked(getPriceStatsMany).mockResolvedValue(new Map());
   vi.mocked(postedOnNetworks).mockReset();
   vi.mocked(postedOnNetworks).mockResolvedValue(new Set<string>());
 });
+
+/** Deja en la base de mentira un puesto entre los más vendidos y clics recientes para ese producto. */
+function withSignals(p: SocialProduct, position: number | null, clicks: number) {
+  const recent = new Date(NOW.getTime() - 2 * 86_400_000).toISOString();
+  fakeAdmin.rows.product_candidates =
+    position === null
+      ? []
+      : [{ ml_product_id: p.ml_product_id, highlight_position: position, prospected_at: recent, checked_at: recent }];
+  fakeAdmin.rows.outbound_clicks = Array.from({ length: clicks }, () => ({ product_id: p.id, client_key: null }));
+}
 
 describe('/api/social/plan', () => {
   it('sin el secreto no entrega nada', async () => {
@@ -322,6 +341,29 @@ describe('/api/social/plan', () => {
     expect(usual.rows[0].no_publicar).toBeNull();
   });
 
+  it('con señales de ganador y de tendencia, el producto suma puntos y el motivo lo dice', async () => {
+    const headphones = strong({ ml_product_id: 'MLC777' });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [headphones], error: null });
+    vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([[headphones.id, stats(60_000)]]));
+
+    const plain = (await selection(await planRoute(request('/api/social/plan')))).rows[0];
+    expect(plain.motivo).not.toMatch(/figuró|clics/);
+
+    withSignals(headphones, 3, 0);
+    const ranked = (await selection(await planRoute(request('/api/social/plan')))).rows[0];
+    expect(ranked.motivo).toContain('figuró 3.º entre los más vendidos de su categoría');
+    expect(ranked.puntos).toBeGreaterThan(plain.puntos);
+
+    withSignals(headphones, null, 14);
+    const clicked = (await selection(await planRoute(request('/api/social/plan')))).rows[0];
+    expect(clicked.motivo).toContain('lleva 14 clics recientes en el sitio');
+    expect(clicked.puntos).toBeGreaterThan(plain.puntos);
+
+    // Pedido por su id también: es el mismo puntaje.
+    const asked = (await selection(await planRoute(request(`/api/social/plan?producto=${headphones.id}`)))).rows[0];
+    expect(asked.motivo).toBe(clicked.motivo);
+  });
+
   it('pedido por su id, igual tiene que tener el precio recién revisado', async () => {
     const stale = strong({ price_checked_at: new Date(NOW.getTime() - 7 * 3600_000).toISOString() });
     vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [stale], error: null });
@@ -352,6 +394,26 @@ describe('/api/cron/social-telegram?dry=1', () => {
     expect(body.historial_sin_leer).toBe(0);
     // Ni se lee el historial de lo que no puede salir.
     expect(vi.mocked(getPriceStatsMany)).toHaveBeenLastCalledWith([fresh.id]);
+  });
+
+  it('el bot también cuenta las señales: entre dos ofertas iguales va primero la que figura entre los más vendidos', async () => {
+    const plain = strong({ ml_product_id: 'MLC100' });
+    const winner = strong({ category: 'gaming', ml_product_id: 'MLC200' });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [plain, winner], error: null });
+    vi.mocked(getPriceStatsMany).mockResolvedValue(
+      new Map([
+        [plain.id, stats(60_000)],
+        [winner.id, stats(60_000)],
+      ])
+    );
+    // Solo la ficha del segundo tiene puesto; la base de mentira no filtra, el código sí.
+    withSignals(winner, 2, 0);
+
+    const { rows } = await selection(await telegramRoute(request('/api/cron/social-telegram?dry=1')));
+    expect(rows.map((row) => row.id)).toEqual([winner.id, plain.id]);
+    expect(rows[0].motivo).toContain('figuró 2.º entre los más vendidos de su categoría');
+    expect(rows[1].motivo).not.toContain('figuró');
+    expect(rows[0].puntos).toBeGreaterThan(rows[1].puntos);
   });
 
   it('muestra lo que publicaría: en orden de interés, sin avisos, con puntos y motivo', async () => {

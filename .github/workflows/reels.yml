@@ -1,0 +1,99 @@
+name: Videos del día
+
+# Arma los reels de oferta del día y los deja en el almacén del sitio (Supabase
+# Storage, bucket "reels"), listos para subirlos a las redes desde el admin.
+# El sitio decide qué productos van; acá solo se baja la foto de cada uno, se
+# arma el video con ffmpeg y se sube (ver scripts/reels/generar.mjs). Lo que
+# ya está armado no se rehace, así que una corrida de más no cuesta nada.
+#
+# Corre acá y no en Vercel porque armar cada video ocupa el procesador un buen
+# rato y necesita ffmpeg.
+#
+# Requiere el secreto CRON_SECRET (Settings → Secrets and variables →
+# Actions), el mismo que usa refresh-prices.yml. La dirección del sitio no se
+# toma de una variable: está escrita en scripts/reels/generar.mjs, para que el
+# secreto no pueda terminar en un dominio que no es nuestro.
+#
+# Todo lo que se imprime acá es PÚBLICO, igual que el repositorio: el script
+# muestra el nombre, el precio, la plantilla, el tiempo y el peso de cada
+# video, y nunca el secreto ni una dirección firmada.
+#
+# Si un video falla, la corrida queda en rojo en la pestaña Actions (los demás
+# videos igual se arman). GitHub apaga solo los workflows programados de un
+# repositorio que pasa 60 días sin cambios: si deja de correr, se reactiva en
+# Actions → Videos del día → Enable workflow.
+
+on:
+  schedule:
+    # Cerca de las 08:10, 13:10 y 18:10 de Chile. GitHub usa UTC y no sabe del
+    # cambio de hora: estas horas calzan con el horario de verano (UTC-3); en
+    # invierno (UTC-4) corre una hora antes, a las 07:10, 12:10 y 17:10.
+    # Además GitHub atrasa las ejecuciones programadas cuando tiene carga, y a
+    # veces se salta alguna: por eso son tres al día, y la siguiente arma lo
+    # que haya faltado. Minuto 10 y no en punto, que es cuando más atrasa.
+    - cron: '10 11,16,21 * * *'
+  workflow_dispatch:
+    inputs:
+      cantidad:
+        description: 'Cuántos videos pedir (1 a 6)'
+        default: '4'
+      seco:
+        description: 'Solo mostrar qué haría, sin armar ni subir'
+        type: boolean
+        default: false
+
+# Si una corrida se atrasa, que no se monte con la siguiente: dos a la vez
+# armarían los mismos videos.
+concurrency:
+  group: reels
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # El resto del job no necesita volver a hablar con el repositorio.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Instalar ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+
+      - name: Armar y subir los videos
+        env:
+          # El secreto solo existe en este paso: los anteriores (que instalan
+          # paquetes) no lo ven.
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          # Lo que se escribe al lanzarlo a mano llega como variable, nunca
+          # pegado dentro del comando; el script valida la cantidad.
+          COUNT: ${{ inputs.cantidad || '4' }}
+          DRY: ${{ inputs.seco }}
+        run: |
+          # Sin el secreto no hay nada que hacer, pero tampoco es una falla:
+          # así no llega un correo de error tres veces al día mientras no se
+          # configura. El aviso queda en la pestaña Actions.
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::Falta el secreto CRON_SECRET en Settings → Secrets and variables → Actions"
+            exit 0
+          fi
+          args=(--n "$COUNT")
+          if [ "$DRY" = "true" ]; then args+=(--seco); fi
+          # Termina con código 1 si no pudo pedir el plan o si algún video
+          # falló; lo que sí se armó ya quedó subido.
+          node scripts/reels/generar.mjs "${args[@]}"

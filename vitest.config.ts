@@ -19,6 +19,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // scripts/reels: lo que arma los videos del día corre fuera del sitio
+    // (GitHub Actions), pero sus pruebas van con las demás.
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/reels/**/*.test.ts'],
   },
 });

@@ -8,9 +8,10 @@ vi.mock('@/lib/queries/price-history', () => {
   return { getPriceStatsMany, getPriceStatsManyChecked };
 });
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PriceStats } from '@/lib/deals';
 import { getPriceStatsMany, getPriceStatsManyChecked } from '@/lib/queries/price-history';
-import { countUnreadHistory, readInterestEvidence } from '@/lib/social/drops';
+import { countUnreadHistory, readInterestEvidence, readSocialEvidence } from '@/lib/social/drops';
 
 const NOW = new Date('2026-10-12T15:00:00Z');
 const NO_HISTORY = { drop: null, min30: null, daysTracked: 0, historyUnread: false };
@@ -220,5 +221,121 @@ describe('readInterestEvidence', () => {
     const old = new Date(NOW.getTime() - 40 * 86_400_000).toISOString();
     vi.mocked(getPriceStatsMany).mockResolvedValueOnce(new Map([[p.id, stats(90_000, 100_000, { lastChangeAt: old, daysTracked: 60 })]]));
     expect((await readInterestEvidence([p], NOW)).get(p.id)).toEqual({ drop: null, min30: 90_000, daysTracked: 60, ...CALM });
+  });
+});
+
+describe('readSocialEvidence', () => {
+  type Row = Record<string, unknown>;
+
+  /**
+   * Una base de mentira con lo justo para las señales: devuelve los clics y
+   * los candidatos dados (los candidatos, solo los de las fichas pedidas) y
+   * anota qué fichas se pidieron.
+   */
+  function fakeAdmin(seed: { clicks?: Row[]; candidates?: Row[]; broken?: boolean }) {
+    const askedIds: unknown[] = [];
+    const admin = {
+      from(table: string) {
+        if (seed.broken) throw new Error('sin conexión');
+        let ids: unknown[] | null = null;
+        let firstPage = true;
+        const builder = {
+          select: () => builder,
+          gte: () => builder,
+          order: () => builder,
+          not: () => builder,
+          in(_column: string, values: unknown[]) {
+            ids = values;
+            askedIds.push(...values);
+            return builder;
+          },
+          range(from: number) {
+            firstPage = from === 0;
+            return builder;
+          },
+          then<T>(resolve: (value: { data: Row[]; error: null }) => T) {
+            const rows =
+              table === 'outbound_clicks'
+                ? firstPage
+                  ? seed.clicks ?? []
+                  : []
+                : (seed.candidates ?? []).filter((row) => ids?.includes(row.ml_product_id));
+            return Promise.resolve({ data: rows, error: null }).then(resolve);
+          },
+        };
+        return builder;
+      },
+    };
+    return { admin: admin as unknown as SupabaseClient, askedIds };
+  }
+
+  const recent = new Date(NOW.getTime() - 3 * 86_400_000).toISOString();
+  const clicks = (productId: string, n: number): Row[] =>
+    Array.from({ length: n }, () => ({ product_id: productId, client_key: null }));
+  const candidate = (mlProductId: string, position: number): Row => ({
+    ml_product_id: mlProductId,
+    highlight_position: position,
+    prospected_at: recent,
+    checked_at: recent,
+  });
+
+  it('junta en un solo lugar el historial de precios con el puesto en Mercado Libre y los clics del sitio', async () => {
+    const winner = { ...row(60_000, 100_000), ml_product_id: 'MLC1' };
+    const quiet = { ...row(90_000, null), ml_product_id: 'MLC2' };
+    vi.mocked(getPriceStatsMany).mockResolvedValueOnce(
+      new Map([[winner.id, stats(60_000, 60_000, { previousPrice: null, lastChangeAt: null })]])
+    );
+    const { admin } = fakeAdmin({ clicks: clicks(winner.id, 14), candidates: [candidate('MLC1', 3)] });
+
+    const evidence = await readSocialEvidence(admin, [winner, quiet], NOW);
+    expect(evidence.get(winner.id)).toEqual({
+      drop: null,
+      min30: 60_000,
+      daysTracked: 20,
+      ...CALM,
+      mlPosition: 3,
+      recentClicks: 14,
+    });
+    // Sin señales queda exactamente lo que dice el historial.
+    expect(evidence.get(quiet.id)).toEqual(NO_HISTORY);
+  });
+
+  it('de lo que igual no puede salir no lee el historial ni las señales', async () => {
+    const posted = { ...row(60_000, 100_000), ml_product_id: 'MLC1' };
+    const candidateRow = { ...row(70_000, 100_000), ml_product_id: 'MLC2' };
+    const { admin, askedIds } = fakeAdmin({
+      clicks: [...clicks(posted.id, 9), ...clicks(candidateRow.id, 4)],
+      candidates: [candidate('MLC1', 1), candidate('MLC2', 7)],
+    });
+
+    const evidence = await readSocialEvidence(admin, [posted, candidateRow], NOW, new Set([posted.id]));
+    expect(vi.mocked(getPriceStatsMany)).toHaveBeenLastCalledWith([candidateRow.id]);
+    expect(askedIds).toEqual(['MLC2']);
+    expect(evidence.has(posted.id)).toBe(false);
+    expect(evidence.get(candidateRow.id)).toMatchObject({ mlPosition: 7, recentClicks: 4 });
+  });
+
+  it('si las señales no se pudieron leer, queda la evidencia del historial y no lanza', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const a = row(80_000, 100_000);
+    vi.mocked(getPriceStatsMany).mockResolvedValueOnce(
+      new Map([[a.id, stats(80_000, 80_000, { previousPrice: null, lastChangeAt: null })]])
+    );
+
+    const evidence = await readSocialEvidence(fakeAdmin({ broken: true }).admin, [a], NOW);
+    expect(evidence.get(a.id)).toEqual({ drop: null, min30: 80_000, daysTracked: 20, ...CALM });
+    warn.mockRestore();
+  });
+
+  it('las señales no tapan que el historial no se pudo leer', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const a = { ...row(60_000, 100_000), ml_product_id: 'MLC1' };
+    vi.mocked(getPriceStatsMany).mockRejectedValueOnce(new Error('sin conexión'));
+    const { admin } = fakeAdmin({ candidates: [candidate('MLC1', 2)] });
+
+    const evidence = await readSocialEvidence(admin, [a], NOW);
+    expect(evidence.get(a.id)).toEqual({ ...NO_HISTORY, historyUnread: true, mlPosition: 2, recentClicks: null });
+    expect(countUnreadHistory(evidence)).toBe(1);
+    warn.mockRestore();
   });
 });

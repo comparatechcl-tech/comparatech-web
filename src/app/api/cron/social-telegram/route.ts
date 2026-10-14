@@ -16,7 +16,7 @@ import {
   type SocialProduct,
   type TelegramPick,
 } from '@/lib/social/telegram';
-import { countUnreadHistory, readInterestEvidence } from '@/lib/social/drops';
+import { countUnreadHistory, readSocialEvidence } from '@/lib/social/drops';
 
 /**
  * Publica en el canal de Telegram las ofertas del momento que más pueden
@@ -112,7 +112,8 @@ export async function GET(req: NextRequest) {
     const posted = await recentlyPosted(admin, read.rows, now);
     // El historial de precios de todo lo que puede salir: el puntaje de
     // interés lo necesita también para lo que trae un buen descuento de lista.
-    const evidence = await readInterestEvidence(read.rows, now, posted ?? undefined);
+    // Con él vienen las señales de más vendidos y de clics en el sitio.
+    const evidence = await readSocialEvidence(admin, read.rows, now, posted ?? undefined);
     const picks = pickForTelegram(read.rows, { now, recentlyPosted: posted ?? new Set(), evidence });
 
     if (dry) {

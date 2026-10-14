@@ -1,6 +1,8 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPriceStatsManyChecked, type CheckedPriceStats } from '@/lib/queries/price-history';
 import { interestEvidence } from '@/lib/social/evidence';
 import type { InterestEvidence } from '@/lib/social/interest';
+import { readInterestSignals } from '@/lib/social/signals';
 
 /**
  * Lo que el historial de precios dice de cada candidato a redes: la baja que
@@ -37,6 +39,34 @@ export async function readInterestEvidence<
   }
   for (const p of candidates) {
     evidence.set(p.id, interestEvidence(p, read.stats.get(p.id), now.getTime(), read.unread.has(p.id)));
+  }
+  return evidence;
+}
+
+/**
+ * Todo lo que el puntaje de interés puede saber de cada candidato: lo que
+ * dice el historial de precios (readInterestEvidence) más las dos señales de
+ * "ganadores y tendencia" (lib/social/signals: el puesto entre los más
+ * vendidos de Mercado Libre y los clics recientes en el sitio).
+ *
+ * Es el único lugar donde se juntan, y lo usan los cuatro que eligen para
+ * redes (historias, plan de publicaciones, Telegram y videos): así un mismo
+ * producto tiene los mismos puntos y el mismo motivo en todos.
+ *
+ * Las señales solo suman. Si no se pudieron leer, la evidencia queda como la
+ * del historial solo. Nunca lanza.
+ */
+export async function readSocialEvidence<
+  T extends { id: string; price: number; original_price: number | null; ml_product_id?: string | null },
+>(admin: SupabaseClient, rows: T[], now: Date, skip?: ReadonlySet<string>): Promise<Map<string, InterestEvidence>> {
+  const candidates = skip ? rows.filter((p) => !skip.has(p.id)) : rows;
+  const [evidence, signals] = await Promise.all([
+    readInterestEvidence(candidates, now),
+    readInterestSignals(admin, candidates, now),
+  ]);
+  for (const [id, signal] of signals) {
+    const known = evidence.get(id);
+    if (known) evidence.set(id, { ...known, mlPosition: signal.mlPosition, recentClicks: signal.recentClicks });
   }
   return evidence;
 }

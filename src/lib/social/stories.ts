@@ -5,7 +5,7 @@ import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { shortProductName } from '@/lib/text';
-import { readInterestEvidence } from '@/lib/social/drops';
+import { readSocialEvidence } from '@/lib/social/drops';
 import type { InterestScore } from '@/lib/social/interest';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
@@ -188,7 +188,7 @@ export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buff
     if (history.has(p.id) && !droppedSinceStory(history.get(p.id), p.price)) alreadyPosted.add(p.id);
   }
   // Después de saber qué se subió: el historial de precios de eso no hace falta leerlo.
-  const evidence = await readInterestEvidence(read.rows, now, alreadyPosted);
+  const evidence = await readSocialEvidence(admin, read.rows, now, alreadyPosted);
 
   const items = pickByRules(read.rows, { now, recentlyPosted: alreadyPosted, evidence }, STORY_RULES)
     .map((pick) => buildStoryItem(pick, { now, settings, key, history: history.get(pick.product.id) }))

@@ -13,7 +13,9 @@ import {
   RECORDS_MAX,
   SCHEDULE_AHEAD_MS,
   STORY_MARK,
+  VIDEO_MARK,
   buildPlanItem,
+  isHandMark,
   parsePostRecords,
   parseRetirements,
   pendingIssue,
@@ -567,6 +569,70 @@ describe('registerPosts', () => {
     await retirePosts(db.admin, [{ channel: 'instagram', externalId: 'u-1' }], NOW);
     expect(stamp(db, A)).toEqual({ status: 'sin_usar', at: null, channel: null });
     expect(db.tables.social_posts.find((row) => row.id === 99)).toMatchObject({ status: 'publicado' });
+  });
+
+  it('al retirar la única publicación, un video subido a mano tampoco deja el producto como publicado', async () => {
+    const db = fakeDb({ products: [onSale(A)] });
+    await registerPosts(db.admin, [record({ externalId: 'u-1' })], NOW);
+    // El video se subió después de la publicación, a las cuatro redes.
+    for (const [i, channel] of ['instagram', 'tiktok', 'youtube', 'facebook'].entries()) {
+      db.tables.social_posts.push({
+        id: 90 + i,
+        product_id: A,
+        channel,
+        external_id: null,
+        caption: VIDEO_MARK,
+        status: 'publicado',
+        posted_at: `2026-10-11T23:0${i}:00.000Z`,
+      });
+    }
+
+    expect(await retirePosts(db.admin, [{ channel: 'instagram', externalId: 'u-1' }], NOW)).toBe(1);
+    expect(stamp(db, A)).toEqual({ status: 'sin_usar', at: null, channel: null });
+    // Las marcas de video siguen vigentes: retirar una publicación no las toca.
+    expect(db.tables.social_posts.filter((row) => row.caption === VIDEO_MARK).map((row) => row.status)).toEqual([
+      'publicado',
+      'publicado',
+      'publicado',
+      'publicado',
+    ]);
+  });
+
+  it('con marcas de video más nuevas, el producto queda con su última publicación del feed y no con el video', async () => {
+    const db = fakeDb({ products: [onSale(A)] });
+    await registerPosts(
+      db.admin,
+      [
+        record({ channel: 'instagram', externalId: 'u-1', at: new Date('2026-10-11T13:00:00Z') }),
+        record({ channel: 'facebook', externalId: 'u-2', at: new Date('2026-10-11T14:00:00Z') }),
+      ],
+      NOW
+    );
+    // Muchas marcas hechas a mano delante de la publicación que se busca.
+    for (let i = 0; i < 30; i++) {
+      db.tables.social_posts.push({
+        id: 100 + i,
+        product_id: A,
+        channel: 'youtube',
+        external_id: null,
+        caption: i % 2 ? VIDEO_MARK : STORY_MARK,
+        status: 'publicado',
+        posted_at: `2026-10-12T10:${String(i).padStart(2, '0')}:00.000Z`,
+      });
+    }
+
+    await retirePosts(db.admin, [{ channel: 'instagram', externalId: 'u-1' }], NOW);
+    expect(stamp(db, A)).toEqual({ status: 'publicado', at: '2026-10-11T14:00:00.000Z', channel: 'facebook' });
+  });
+
+  it('una marca hecha a mano es una historia o un video, nunca un post con texto', () => {
+    expect(isHandMark(STORY_MARK)).toBe(true);
+    expect(isHandMark(VIDEO_MARK)).toBe(true);
+    expect(VIDEO_MARK).toBe('video');
+    expect(isHandMark(null)).toBe(false);
+    expect(isHandMark(undefined)).toBe(false);
+    expect(isHandMark('')).toBe(false);
+    expect(isHandMark('Mira el video')).toBe(false);
   });
 
   it('retirar no toca filas de otro canal aunque compartan el id', async () => {

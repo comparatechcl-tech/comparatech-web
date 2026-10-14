@@ -22,7 +22,7 @@ import { getPriceStatsMany } from '@/lib/queries/price-history';
 import { readAffiliateSettings } from '@/lib/settings';
 import { MIN_INTEREST_POINTS, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
 import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
-import { NETWORK_RULES, STORY_MARK, postedOnNetworks } from '@/lib/social/networks';
+import { NETWORK_RULES, STORY_MARK, VIDEO_MARK, postedOnNetworks } from '@/lib/social/networks';
 import {
   STORY_REPOST_DROP,
   STORY_RULES,
@@ -139,6 +139,8 @@ function fakeAdmin(rows: unknown[], error: { code?: string; message: string } | 
     calls.push(['limit', ...args]);
     return Promise.resolve({ data: error ? null : rows, error });
   };
+  // Donde terminan las lecturas de señales (clics del sitio y más vendidos): acá no hay ninguna.
+  builder.range = builder.not = () => Promise.resolve({ data: [], error: null });
   const admin = {
     from: (table: string) => {
       calls.push(['from', table]);
@@ -236,6 +238,156 @@ describe('postedOnNetworks', () => {
     ]);
     const posted = await postedOnNetworks(admin, NOW);
     expect([...(posted ?? [])].sort()).toEqual(['feed-metricool', 'marcado-a-mano']);
+  });
+
+  it('tampoco cuenta los videos subidos a mano, en ninguna de sus redes', async () => {
+    const { admin } = fakeAdmin([
+      { product_id: 'solo-video', channel: 'instagram', caption: VIDEO_MARK },
+      { product_id: 'solo-video', channel: 'tiktok', caption: VIDEO_MARK },
+      { product_id: 'solo-video', channel: 'youtube', caption: VIDEO_MARK },
+      { product_id: 'solo-video', channel: 'facebook', caption: VIDEO_MARK },
+      { product_id: 'video-y-feed', channel: 'youtube', caption: VIDEO_MARK },
+      { product_id: 'video-y-feed', channel: 'instagram', caption: 'Texto del post' },
+      // Un post cuyo texto habla de un video sigue siendo un post.
+      { product_id: 'feed', channel: 'facebook', caption: 'Mira el video' },
+    ]);
+    const posted = await postedOnNetworks(admin, NOW);
+    expect([...(posted ?? [])].sort()).toEqual(['feed', 'video-y-feed']);
+  });
+});
+
+type Row = Record<string, unknown>;
+
+/**
+ * Una base que filtra como la de verdad (eq, neq, in, gte, orden y tope):
+ * acá lo que se prueba es justamente qué filas deja pasar cada consulta.
+ */
+function filteringAdmin(tables: Record<string, Row[]>) {
+  const admin = {
+    from(table: string) {
+      const filters: ((row: Row) => boolean)[] = [];
+      let newestFirst = false;
+      let max = Infinity;
+      const builder = {
+        select: () => builder,
+        eq(column: string, value: unknown) {
+          filters.push((row) => row[column] === value);
+          return builder;
+        },
+        neq(column: string, value: unknown) {
+          filters.push((row) => row[column] !== value);
+          return builder;
+        },
+        in(column: string, values: unknown[]) {
+          filters.push((row) => values.includes(row[column]));
+          return builder;
+        },
+        not(column: string) {
+          filters.push((row) => row[column] !== null && row[column] !== undefined);
+          return builder;
+        },
+        gte(column: string, value: unknown) {
+          filters.push((row) => String(row[column]) >= String(value));
+          return builder;
+        },
+        order(_column: string, opts: { ascending: boolean }) {
+          newestFirst = !opts.ascending;
+          return builder;
+        },
+        limit(n: number) {
+          max = n;
+          return builder;
+        },
+        range: () => builder,
+        then<T>(resolve: (value: { data: Row[]; error: null }) => T) {
+          let rows = (tables[table] ?? []).filter((row) => filters.every((f) => f(row)));
+          if (newestFirst) rows = [...rows].sort((a, b) => (String(a.posted_at) < String(b.posted_at) ? 1 : -1));
+          return Promise.resolve({ data: rows.slice(0, max), error: null }).then(resolve);
+        },
+      };
+      return builder;
+    },
+  } as unknown as SupabaseClient;
+  return admin;
+}
+
+describe('las marcas de video no cuentan como historias', () => {
+  const mark = (id: number, productId: string, channel: string, caption: string | null, hoursAgo: number, price = 60_000): Row => ({
+    id,
+    product_id: productId,
+    channel,
+    caption,
+    status: 'publicado',
+    posted_price: price,
+    posted_at: new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString(),
+  });
+
+  it('un producto subido como video a Instagram no figura como historia subida', async () => {
+    const admin = filteringAdmin({
+      social_posts: [
+        mark(1, 'con-historia', 'instagram', STORY_MARK, 5),
+        mark(2, 'con-video', 'instagram', VIDEO_MARK, 4),
+        mark(3, 'con-video', 'tiktok', VIDEO_MARK, 4),
+        mark(4, 'con-post', 'instagram', 'Texto del post', 3),
+      ],
+    });
+    const history = await readStoryHistory(admin, new Date(NOW.getTime() - 14 * 86_400_000));
+    expect([...history.keys()]).toEqual(['con-historia']);
+  });
+
+  it('la oferta de un video ya subido se sigue proponiendo como historia', async () => {
+    const withVideo = strong({ category: 'audio' });
+    const withStory = strong({ category: 'gaming' });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [withVideo, withStory], error: null });
+    const admin = filteringAdmin({
+      social_posts: [
+        mark(1, withVideo.id, 'instagram', VIDEO_MARK, 2),
+        mark(2, withVideo.id, 'facebook', VIDEO_MARK, 2),
+        mark(3, withStory.id, 'instagram', STORY_MARK, 2),
+      ],
+    });
+
+    const items = await readStoryPicks(admin, NOW, KEY);
+    expect(items.map((item) => item.id)).toEqual([withVideo.id]);
+    // Y no vuelve como "ya la subiste a tanto": nunca se subió como historia.
+    expect(items[0].again).toBeNull();
+  });
+
+  it('la lista de historias de las últimas 24 horas no muestra los videos', async () => {
+    const a = product();
+    const b = product();
+    const admin = filteringAdmin({
+      social_posts: [mark(1, a.id, 'instagram', VIDEO_MARK, 1, 80_000), mark(2, b.id, 'instagram', STORY_MARK, 2, 80_000)],
+      products: [a, b] as unknown as Row[],
+    });
+    const stories = await readPostedStories(admin, NOW, KEY);
+    expect(stories.map((st) => [st.id, st.postId])).toEqual([[b.id, 2]]);
+  });
+});
+
+describe('las señales de ganadores y tendencia llegan a las historias', () => {
+  it('lo que figura entre los más vendidos o lleva clics en el sitio sube en la lista, y el motivo lo dice', async () => {
+    const plain = strong({ category: 'audio', ml_product_id: 'MLC100' });
+    const winner = strong({ category: 'gaming', ml_product_id: 'MLC200' });
+    const trending = strong({ category: 'hogar', ml_product_id: 'MLC300' });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [plain, winner, trending], error: null });
+    const recent = new Date(NOW.getTime() - 2 * 86_400_000).toISOString();
+    const admin = filteringAdmin({
+      product_candidates: [
+        { ml_product_id: 'MLC200', highlight_position: 1, prospected_at: recent, checked_at: recent },
+        // Sin puesto anotado: no es señal.
+        { ml_product_id: 'MLC100', highlight_position: null, prospected_at: recent, checked_at: recent },
+      ],
+      outbound_clicks: Array.from({ length: 6 }, () => ({ product_id: trending.id, client_key: null, created_at: recent })),
+    });
+
+    const items = await readStoryPicks(admin, NOW, KEY);
+    const byId = new Map(items.map((item) => [item.id, item]));
+    expect(byId.get(winner.id)?.reason).toContain('figuró 1.º entre los más vendidos de su categoría');
+    expect(byId.get(trending.id)?.reason).toContain('lleva 6 clics recientes en el sitio');
+    expect(byId.get(plain.id)?.reason).not.toMatch(/figuró|clics/);
+    // Las tres ofertas son iguales: el orden lo deciden las señales.
+    expect(items.map((item) => item.id)).toEqual([winner.id, trending.id, plain.id]);
   });
 });
 

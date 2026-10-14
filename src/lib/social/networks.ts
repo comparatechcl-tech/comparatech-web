@@ -63,6 +63,22 @@ export const NETWORK_RULES: PickRules & { repeatAfterDays: number } = {
  */
 export const STORY_MARK = 'historia';
 
+/**
+ * Marca (en `caption`) de los videos subidos a mano desde el admin, una fila
+ * por red. Igual que las historias, llevan su propia cuenta de "ya subido"
+ * (lib/social/videos) y no le quitan productos al plan de publicaciones.
+ */
+export const VIDEO_MARK = 'video';
+
+/**
+ * ¿La fila es una marca hecha a mano (historia o video) y no una publicación
+ * del feed? Se pregunta fila por fila y no en la consulta: un "distinto de"
+ * en la base dejaría fuera también las filas sin texto, que son casi todas.
+ */
+export function isHandMark(caption: string | null | undefined): boolean {
+  return caption === STORY_MARK || caption === VIDEO_MARK;
+}
+
 /** Tope de productos por plan: más que esto no se alcanza a programar con cuidado. */
 export const PLAN_MAX = 12;
 
@@ -86,6 +102,7 @@ const TIKTOK_TEXT_MAX = 2000;
  *
  * Sin las historias subidas a mano: duran un día y llevan su propio link,
  * así que no le quitan productos al plan de publicaciones (ni al revés).
+ * Tampoco los videos subidos a mano, que son otro formato y otra cuenta.
  */
 export async function postedOnNetworks(admin: SupabaseClient, since: Date): Promise<Set<string> | null> {
   const ids = new Set<string>();
@@ -102,9 +119,7 @@ export async function postedOnNetworks(admin: SupabaseClient, since: Date): Prom
     throw new Error(`No se pudo leer social_posts: ${error.message}`);
   }
   for (const row of (data ?? []) as { product_id: string | null; caption: string | null }[]) {
-    // Se descartan acá y no en la consulta: un "distinto de" en la base
-    // dejaría fuera también las filas sin texto, que son casi todas.
-    if (row.caption === STORY_MARK) continue;
+    if (isHandMark(row.caption)) continue;
     if (row.product_id) ids.add(row.product_id);
   }
   return ids;
@@ -608,11 +623,12 @@ export async function retirePosts(admin: SupabaseClient, items: Retirement[], no
       .eq('product_id', productId)
       .neq('status', 'error')
       .order('posted_at', { ascending: false })
-      .limit(20);
+      // Holgado: cada video subido deja hasta cuatro marcas (una por red) delante de la publicación que se busca.
+      .limit(60);
     if (error) throw new Error(`No se pudo leer social_posts: ${error.message}`);
-    // Una historia subida a mano no cuenta como publicación del producto (ver STORY_MARK).
+    // Una historia o un video subidos a mano no cuentan como publicación del producto (ver isHandMark).
     const last = ((data ?? []) as { channel: string; posted_at: string; caption: string | null }[]).find(
-      (row) => row.caption !== STORY_MARK
+      (row) => !isHandMark(row.caption)
     );
     const patch = last
       ? { rrss_status: 'publicado', rrss_published_at: last.posted_at, rrss_channel: last.channel }
