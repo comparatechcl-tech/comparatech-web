@@ -49,7 +49,7 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
     fileName: `comparatech-producto-${seq}-reel.mp4`,
     renderedAt: '2026-10-13T11:05:00.000Z',
     points: 62.5,
-    reason: 'Parlante JBL, 50% por debajo del precio de lista, de tienda oficial',
+    reason: 'Parlante JBL, 50% de descuento, de tienda oficial',
     link: `https://www.mercadolibre.cl/p/MLC${seq}?matt_word=comparatech`,
     texts: {
       instagram: `Texto de Instagram ${seq}`,

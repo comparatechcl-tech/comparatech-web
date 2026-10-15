@@ -96,10 +96,11 @@ export function readPlan(data) {
  *
  * El nombre del archivo es "AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>" y se usa tal como llega. El id, el
  * precio y la plantilla del nombre tienen que ser los del elemento: si el sitio mandara otros, el video
- * quedaría guardado con un nombre que la página del admin no sabría leer. La huella resume lo demás que el
- * video dice (nombre, marca, precio de lista, descuento, baja, envío gratis, Full) y la calcula solo el
- * sitio: aquí no se recalcula, se revisa que venga y que tenga su forma. Un nombre sin huella es el de un
- * sitio de la versión anterior, y un video guardado así no lo mostraría nadie: se rechaza diciéndolo.
+ * quedaría guardado con un nombre que la página del admin no sabría leer. La huella resume la versión del
+ * aspecto de los videos y lo demás que el video dice (nombre, marca, precio_lista, descuento, baja, envío
+ * gratis, Full) y la calcula solo el sitio: aquí no se recalcula, se revisa que venga y que tenga su forma.
+ * Un nombre sin huella es el de un sitio de la versión anterior, y un video guardado así no lo mostraría
+ * nadie: se rechaza diciéndolo.
  */
 export function planItemProblem(item) {
   if (!item || typeof item !== 'object') return 'el sitio mandó un elemento vacío';

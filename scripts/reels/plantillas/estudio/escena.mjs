@@ -4,9 +4,10 @@
 //
 // La foto real del producto va grande sobre un fondo claro de estudio. El video tiene cuatro momentos, y todos
 // cuelgan de una "hoja" azul noche que sube desde abajo:
-//   A. gancho   la foto y, enorme, el dato del descuento ("45% / por debajo del / precio de lista")
+//   A. gancho   la foto y, enorme, el dato del descuento ("45% / de descuento")
 //   B. nombre   la marca y el nombre del producto; la foto en su tamaño más grande
-//   C. precio   el precio cae y pega; descuento, precio de lista tachado, etiquetas y "Precio revisado"
+//   C. precio   el precio cae y pega; descuento, "sin descuento" con la cifra tachada, etiquetas y
+//               "Precio revisado"
 //   Z. cierre   la hoja sube del todo: logo, ComparaTech, la llamada y "Precio revisado"
 import * as capas from '../../capas.mjs';
 import { COLOR, MENOS, arribaDeLetra, lineaBase, ALTO_MAYUSCULA } from '../../capas.mjs';
@@ -42,39 +43,49 @@ const RADIO = 64; // esquinas de la hoja
 const coma = (n, d = 1) => n.toFixed(d).replace('.', ',');
 
 // --- A. El gancho -------------------------------------------------------------------------------------------
-// El dato del descuento, tal cual. Sin precio de lista vale la baja medida por el sitio; sin ninguna de las dos
-// no hay gancho y el video parte con el nombre. No hay preguntas del tipo "¿Buscas...?": adivinarían el producto.
+// El dato del descuento, tal cual: "45%" y, debajo, "de descuento". Sin descuento vale la baja medida por el
+// sitio ("Bajó 12%" / "según nuestro historial": una baja del historial no es un descuento); sin ninguna de las
+// dos no hay gancho y el video parte con el nombre. No hay preguntas del tipo "¿Buscas...?": adivinarían el
+// producto.
 async function armarGancho(producto, apaisada, dicho) {
   let trozos;
   let frases;
+  let numeros;
+  let letra;
   if (producto.descuento) {
+    // "de descuento" cabe en un renglón: el número y la frase van más grandes que la baja del historial, y aun
+    // así la hoja queda más baja (la foto se ve más grande). Con una foto apaisada la hoja tiene más sitio.
     trozos = [{ t: `${producto.descuento}%`, color: COLOR.cian }];
-    frases = ['por debajo del', 'precio de lista'];
+    frases = ['de descuento'];
+    numeros = apaisada ? [248, 232, 216, 200] : [216, 200, 184, 168];
+    letra = apaisada ? { tam: 120, alto: 150, espaciado: -3 } : { tam: 108, alto: 135, espaciado: -2.5 };
   } else if (producto.bajaHistorial) {
     trozos = [{ t: 'Bajó ' }, { t: `${producto.bajaHistorial}%`, color: COLOR.cian }];
     frases = ['según nuestro', 'historial'];
+    numeros = apaisada ? [200, 184, 168, 152] : [168, 160, 152];
+    letra = { tam: 80, alto: 100, espaciado: -2 };
   } else return null;
-  // El número va en 150 a 200 px: con una foto apaisada la hoja tiene más sitio y va en 200.
   let numero = null;
-  for (const tam of apaisada ? [200, 184, 168, 152] : [168, 160, 152]) {
+  for (const tam of numeros) {
     numero = await capas.renglon(trozos, { tam, alto: Math.round(tam * 1.3), peso: 800, espaciado: -0.03 * tam, anchoMax: ANCHO_TEXTO });
     if (numero) break;
   }
   if (!numero) throw new Error('No cabe el gancho del descuento');
-  const TAM = 80;
-  const ALTO = 100;
-  const PASO = 88;
+  const PASO = 88; // de un renglón de la frase al siguiente (solo la baja del historial lleva dos)
   const filas = [];
-  for (const f of frases) filas.push(await capas.renglon(f, { tam: TAM, alto: ALTO, peso: 800, espaciado: -2, anchoMax: ANCHO_TEXTO }));
+  for (const f of frases) filas.push(await capas.renglon(f, { ...letra, peso: 800, anchoMax: ANCHO_TEXTO }));
   if (!filas.every(Boolean)) throw new Error('No cabe la frase del gancho');
   dicho.push(trozos.map((p) => p.t).join(''), frases.join(' '));
-  // Medidas desde el borde de arriba de las cifras del número.
+  // Medidas desde el borde de arriba de las cifras del número. Entre el número y la frase, 36 px o algo más si
+  // el número es muy grande (en 216 px, 41).
   const cuelga = numero.tinta.y1 - lineaBase(numero.tam, numero.h); // la "j" de "Bajó" baja de la línea
-  const y1 = Math.round(ALTO_MAYUSCULA * numero.tam + Math.max(36, cuelga + 16) - arribaDeLetra(TAM, ALTO));
+  const aire = Math.max(36, Math.round(0.19 * numero.tam), cuelga + 16);
+  const y1 = Math.round(ALTO_MAYUSCULA * numero.tam + aire - arribaDeLetra(letra.tam, letra.alto));
+  const ultima = filas[filas.length - 1];
   return {
     numero: { capa: numero, y: Math.round(-arribaDeLetra(numero.tam, numero.h)) },
     frases: filas.map((capa, i) => ({ capa, y: y1 + i * PASO })),
-    alto: y1 + PASO + filas[1].tinta.y1 + 2,
+    alto: y1 + (filas.length - 1) * PASO + ultima.tinta.y1 + 2,
     relleno: 42,
   };
 }
@@ -121,8 +132,9 @@ async function armarPrecio(producto, dicho) {
   dicho.push(precio.texto);
   y += precio.h + 12;
 
-  // La fila del descuento: pastilla grande ("−45%"), al lado "precio de lista" sobre "$399.990" (que se tacha)
-  // y, si caben, las etiquetas apiladas a la derecha. Todo pegado a la izquierda, lejos de los botones.
+  // La fila del descuento: pastilla grande ("−45%"), al lado "sin descuento" sobre "$399.990" (la cifra tachada
+  // que pone el vendedor, que se tacha) y, si caben, las etiquetas apiladas a la derecha. Todo pegado a la
+  // izquierda, lejos de los botones.
   const etiquetas = async (chicas) => {
     const lista = [];
     if (producto.envioGratis) lista.push(await capas.etiquetaEnvio(chicas));
@@ -139,7 +151,7 @@ async function armarPrecio(producto, dicho) {
     const tamanos = conLista
       ? [{ p: 90, a: 30, b: 46 }, { p: 90, a: 28, b: 40 }, { p: 90, a: 26, b: 35 }, { p: 90, a: 24, b: 30 }]
       : [{ p: 90, a: 32, b: 32 }, { p: 80, a: 30, b: 30 }, { p: 72, a: 28, b: 28 }];
-    const renglones = conLista ? ['precio de lista', formatoPrecio(producto.precioLista)] : ['según nuestro', 'historial'];
+    const renglones = conLista ? ['sin descuento', formatoPrecio(producto.precioLista)] : ['según nuestro', 'historial'];
     let armado = null;
     for (const alLado of hayEtiquetas ? [true, false] : [false]) {
       for (const m of tamanos) {
@@ -166,7 +178,7 @@ async function armarPrecio(producto, dicho) {
       { capa: a, x: xb, y: yb },
       { capa: b, x: xb, y: yb + a.h },
     ];
-    // El tachado cruza las cifras del precio de lista, de izquierda a derecha.
+    // El tachado cruza las cifras del precio sin descuento, de izquierda a derecha.
     if (conLista) C.tachado = { x: xb + b.tinta.x0 - 6, y: yb + a.h + Math.round((b.tinta.y0 + b.tinta.y1) / 2) - 1, w: b.tinta.x1 - b.tinta.x0 + 13 };
     dicho.push(textoPastilla);
     if (conLista) dicho.push(renglones[0], { texto: renglones[1], nota: 'tachado' });
@@ -499,7 +511,7 @@ export function pintor(escena, T) {
         }
       }
 
-      // El descuento salta a su lugar; después aparece el precio de lista y se tacha solo.
+      // El descuento salta a su lugar; después aparece el precio sin descuento y se tacha solo.
       if (C.pastilla) {
         const pd = fase(t, T.descuento, T.descuento + 0.36);
         if (pd > 0) {

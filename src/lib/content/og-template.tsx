@@ -13,7 +13,8 @@ import { OfferTemplate } from '@/lib/content/offer-template';
  * - La foto de Mercado Libre va tal cual, entera y dentro de un marco blanco.
  *   Nada de texto encima: tapar parte del producto o "decorar" la foto
  *   oficial confunde sobre lo que se compra.
- * - Descuento, precio de lista, envío gratis y Full aparecen solo si son ciertos.
+ * - Descuento, cifra tachada ("sin descuento"), envío gratis y Full aparecen
+ *   solo si son ciertos.
  * - Siempre la hora del precio.
  *
  * La pieza no lleva la etiqueta "Publicidad": el dueño pidió sacarla (10/2026).
@@ -202,10 +203,11 @@ export function ProductOgTemplate({
           {formatPrice(product.price)}
         </div>
         {discount > 0 && product.original_price ? (
-          // Es el precio de lista que informa el vendedor, no un "antes"
-          // comprobado. Va en dos líneas para que quepa al lado del precio
-          // (en una sola, los precios sobre un millón lo bajaban de línea y
-          // la pieza de feed no tiene alto para eso), y solo la cifra tachada.
+          // La cifra tachada la pone el vendedor en Mercado Libre: no es un
+          // "antes" comprobado, por eso dice "sin descuento". Va en dos líneas
+          // para que quepa al lado del precio (en una sola, los precios sobre
+          // un millón lo bajaban de línea y la pieza de feed no tiene alto
+          // para eso), y solo la cifra va tachada.
           <div
             style={{
               display: 'flex',
@@ -216,7 +218,7 @@ export function ProductOgTemplate({
               paddingBottom: Math.round(L.small * 0.3),
             }}
           >
-            <span>precio de lista</span>
+            <span>sin descuento</span>
             <span style={{ textDecoration: 'line-through' }}>{formatPrice(product.original_price)}</span>
           </div>
         ) : null}
@@ -339,7 +341,7 @@ export function OffersOgTemplate({
           ))}
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 22, color: COLORS.muted }}>
-        <div style={{ display: 'flex' }}>Descuentos según el precio de lista que informa Mercado Libre</div>
+        <div style={{ display: 'flex' }}>Descuentos según lo que informa cada vendedor en Mercado Libre</div>
       </div>
     </div>
   );

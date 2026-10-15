@@ -113,19 +113,22 @@ export type HookKind = 'oferta' | 'top' | 'precio';
 
 /**
  * Ganchos por tipo de post. Ninguno afirma algo que no se pueda sostener:
- * el descuento se dice sobre el precio de lista que informa ML (no "bajó"
- * ni "rebajado", que exigirían historial), y "top" habla del vendedor, que
- * es lo que el dato seller_sales_count mide.
+ * se habla de "descuento", lo mismo que muestra Mercado Libre con la cifra
+ * tachada que pone el vendedor (no "bajó" ni "rebajado", que exigirían
+ * historial, ni "antes" o "precio normal", que afirmarían que se vendía a
+ * esa cifra), y "top" habla del vendedor, que es lo que el dato
+ * seller_sales_count mide.
  */
 const HOOKS: Record<HookKind, string[]> = {
   oferta: [
     // Sin "hoy": se lee como una oferta del día, y sin historial de precios
     // no se puede afirmar.
     '🔥 Con descuento en Mercado Libre',
-    '⚡ Descuento sobre su precio de lista',
+    '⚡ Viene con descuento',
     '👀 Ojo con este descuento',
-    // No "Bajo su precio de lista": sin el acento se lee "bajó".
-    '💸 Por debajo de su precio de lista',
+    // Sin la palabra "descuento": el renglón del precio ya dice "sin
+    // descuento $X", y en TikTok todo va en un párrafo.
+    '💸 Vale la pena mirarlo',
     '🛒 Para aprovechar mientras dure',
     '🏷️ Con descuento en este momento',
   ],
@@ -177,14 +180,26 @@ export function priceCheckedLine(priceCheckedAt: string | null): string {
   return `Precio revisado el ${at.date} a las ${at.time} (hora de Chile); puede cambiar.`;
 }
 
+/**
+ * "45% de descuento": como se dice un descuento en todo lo que se publica
+ * (dueño, 14/10/2026). Es el que muestra Mercado Libre sobre la cifra tachada
+ * que pone el vendedor. Una baja medida con el historial propio NO es un
+ * descuento y nunca se dice así ("bajó 12% según nuestro historial").
+ */
+export function discountPhrase(discount: number): string {
+  return `${discount}% de descuento`;
+}
+
 function priceLine(p: CaptionProduct): string {
   const discount = captionDiscount(p);
   const base = `💰 ${formatPrice(p.price)}`;
-  // El precio de lista va solo si es mayor: uno igual o menor sería una
-  // rebaja inventada. No se le dice "antes": es el que informa el vendedor,
-  // no un precio anterior comprobado.
+  // La cifra tachada va solo si es mayor: una igual o menor sería una rebaja
+  // inventada. Es la que pone el vendedor en Mercado Libre y el sitio no sabe
+  // si de verdad lo vendía a ese precio: por eso "sin descuento" y no "antes"
+  // ni "precio normal". El porcentaje va como "-60%" y no "60% de descuento",
+  // para no decir "descuento" dos veces en la misma línea.
   if (discount > 0 && p.original_price) {
-    return `${base} (precio de lista ${formatPrice(p.original_price)} / -${discount}%)`;
+    return `${base} (-${discount}%, sin descuento ${formatPrice(p.original_price)})`;
   }
   return base;
 }
@@ -200,7 +215,7 @@ function categoryTag(category: string | null | undefined): string | null {
 
 function hashtags(p: CaptionProduct, channel: CaptionChannel): string | null {
   if (channel === 'whatsapp' || channel === 'telegram') return null;
-  // #ofertas solo si hay descuento: en un producto a precio de lista sería falso.
+  // #ofertas solo si hay descuento: en un producto sin descuento sería falso.
   const tags = [
     captionDiscount(p) > 0 ? '#ofertas' : null,
     '#tecnologia',
@@ -290,13 +305,13 @@ function withoutForbiddenWords(name: string): string {
 }
 
 /**
- * Título para YouTube: qué es, cuánto cuesta y, si hay descuento, cuánto por
- * debajo del precio de lista. El nombre es lo único que se acorta: el precio
- * y el descuento van siempre enteros.
+ * Título para YouTube: qué es, cuánto cuesta y, si hay descuento, cuánto
+ * ("… a $27.990 con 60% de descuento"). El nombre es lo único que se acorta:
+ * el precio y el descuento van siempre enteros.
  */
 export function youtubeTitle(product: Pick<CaptionProduct, 'name' | 'price' | 'original_price'>): string {
   const discount = captionDiscount(product);
-  const tail = ` a ${formatPrice(product.price)}${discount > 0 ? `, ${discount}% por debajo del precio de lista` : ''}`;
+  const tail = ` a ${formatPrice(product.price)}${discount > 0 ? ` con ${discountPhrase(discount)}` : ''}`;
   // El título es el del video: el nombre va como en el reel, sin códigos de fábrica.
   const name = reelProductName(withoutForbiddenWords(product.name) || 'Producto', YOUTUBE_TITLE_MAX - tail.length);
   return `${name}${tail}`.slice(0, YOUTUBE_TITLE_MAX);

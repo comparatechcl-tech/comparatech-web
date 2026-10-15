@@ -97,8 +97,8 @@ export default async function HistoriasPage() {
 
       {!error && items.length === 0 && (
         <p className="mt-6 rounded-xl border border-border bg-surface px-4 py-6 text-sm text-muted">
-          Ahora no hay ofertas para mostrar: tienen que estar {STORY_RULES.minDiscount}% o más por debajo del precio de
-          lista (o tener una baja confirmada por el historial), con el precio revisado en las últimas{' '}
+          Ahora no hay ofertas para mostrar: tienen que venir con {STORY_RULES.minDiscount}% o más de descuento (o con
+          una baja confirmada por el historial), con el precio revisado en las últimas{' '}
           {Math.round(STORY_RULES.maxPriceAgeMs / 3_600_000)} horas, y no haberse subido como historia en los últimos{' '}
           {STORY_RULES.repeatAfterDays} días. Tampoco muestro las que le interesarían a poca gente ni las que hace poco
           costaban bastante menos. Vuelve a mirar más tarde.

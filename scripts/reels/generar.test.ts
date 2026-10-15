@@ -215,13 +215,14 @@ describe('generate: lo que arma y lo que salta', () => {
 
     expect(result).toEqual({ ok: true, made: 2, existing: 1, failed: 0, pending: 0 });
     // Subió portada y video de los dos que faltaban; del que ya existía, nada. Cada archivo queda con el
-    // nombre que mandó el sitio, huella incluida (escrita aquí a mano: es la del contrato para estos datos).
+    // nombre que mandó el sitio, huella incluida (escrita aquí a mano: es la del contrato para estos datos, con
+    // la versión 2 del aspecto).
     const stored = Array.from(site.stored.keys());
     expect(stored).toEqual([
-      `2026-10-13/${items[0].id}-219990-estudio-05758542.jpg`,
-      `2026-10-13/${items[0].id}-219990-estudio-05758542.mp4`,
-      `2026-10-13/${items[2].id}-189990-estudio-ce5849cd.jpg`,
-      `2026-10-13/${items[2].id}-189990-estudio-ce5849cd.mp4`,
+      `2026-10-13/${items[0].id}-219990-estudio-9436e838.jpg`,
+      `2026-10-13/${items[0].id}-219990-estudio-9436e838.mp4`,
+      `2026-10-13/${items[2].id}-189990-estudio-c0974736.jpg`,
+      `2026-10-13/${items[2].id}-189990-estudio-c0974736.mp4`,
     ]);
     expect(site.stored.get(stored[1])?.toString()).toBe('video de mentira');
     // Tampoco bajó la foto del que ya existía.

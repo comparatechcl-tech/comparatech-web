@@ -74,10 +74,17 @@ export const VIDEO_BOARD_MAX = 8;
  * letras minúsculas y números: el nombre viaja dentro del nombre del archivo.
  *
  * "estudio" ya da dos formatos según la foto del producto (alta o cuadrada,
- * como un celular; apaisada, como un televisor). Con una segunda plantilla,
- * assignVideoTemplates las reparte sola entre los videos del día.
+ * como un celular; apaisada, como un televisor). "bloques" la aprobó el dueño
+ * el 14-10-2026 para variar el diseño; assignVideoTemplates las reparte sola
+ * entre los videos del día según VIDEO_TEMPLATE_WEIGHTS.
  */
-export const VIDEO_TEMPLATES = ['estudio'] as const;
+export const VIDEO_TEMPLATES = ['estudio', 'bloques'] as const;
+
+/**
+ * Cuántos videos de cada plantilla por vuelta: el dueño quiere "estudio" más
+ * seguido que "bloques" (3 de cada 4). Una plantilla que no está acá pesa 1.
+ */
+export const VIDEO_TEMPLATE_WEIGHTS: Readonly<Record<string, number>> = { estudio: 3, bloques: 1 };
 
 /** ¿Es una plantilla que el generador arma hoy? Un video de una que se retiró ya no es el que saldría ahora. */
 function isCurrentTemplate(template: string): boolean {
@@ -201,9 +208,20 @@ export function videoClaims(
 }
 
 /**
+ * Versión de cómo el video dice las cosas. Se sube cada vez que cambia lo que
+ * el video dice con las mismas cifras (las palabras de la plantilla: por
+ * ejemplo, "por debajo del precio de lista" pasó a ser "de descuento" y "sin
+ * descuento" el 14/10/2026), para que los videos ya armados queden viejos y
+ * se rehagan: va primero en la huella, así que con otra versión cada video
+ * guardado tiene otro nombre que el que saldría ahora.
+ */
+export const VIDEO_LOOK_VERSION = 2;
+
+/**
  * La huella de lo que el video dice: los primeros 8 caracteres, en
- * hexadecimal, del SHA-256 de esos datos escritos siempre en el mismo orden.
- * Va en el nombre del archivo junto al precio. Pura.
+ * hexadecimal, del SHA-256 de esos datos escritos siempre en el mismo orden,
+ * con VIDEO_LOOK_VERSION adelante. Va en el nombre del archivo junto al
+ * precio. Pura.
  *
  * Sin ella, un video seguía ofreciéndose cuando al producto le cambiaban el
  * precio de lista o le quitaban el envío gratis sin tocarle el precio: el
@@ -216,6 +234,7 @@ export function videoClaims(
  */
 export function videoFingerprint(claims: VideoClaims): string {
   const said = [
+    VIDEO_LOOK_VERSION,
     claims.nombre_corto,
     claims.marca ?? null,
     claims.precio_lista ?? null,
@@ -248,21 +267,29 @@ function hash(text: string): number {
 /**
  * Qué plantilla le toca a cada elegido del día, en el mismo orden. Puro.
  *
- * Con una sola plantilla es siempre esa. Con más, se reparten parejo (ninguna
- * se usa dos veces más que otra) y por cuál se empieza depende del producto y
- * del día, para que el primero de la lista no salga siempre con la misma. Un
- * producto que ya tiene su video de hoy (`already`) conserva su plantilla: si
- * cambiara entre una corrida y otra, se armaría dos veces.
+ * Con una sola plantilla es siempre esa. Con más, se reparten según su peso
+ * (con pesos iguales, parejo: ninguna se usa dos veces más que otra): a cada
+ * elegido le toca la que, sumándole este video, queda más corta frente a su
+ * peso. En un empate decide el producto y el día, para que el primero de la
+ * lista no salga siempre con la misma. Un producto que ya tiene su video de
+ * hoy (`already`) conserva su plantilla: si cambiara entre una corrida y otra,
+ * se armaría dos veces.
  */
 export function assignVideoTemplates(
   productIds: string[],
   date: string,
   already: ReadonlyMap<string, string> = new Map(),
-  templates: readonly string[] = VIDEO_TEMPLATES
+  templates: readonly string[] = VIDEO_TEMPLATES,
+  weights: Readonly<Record<string, number>> = VIDEO_TEMPLATE_WEIGHTS
 ): string[] {
   const used = new Map<string, number>();
   for (const template of templates) used.set(template, 0);
   const count = (template: string) => used.get(template) ?? 0;
+  const weightOf = (template: string) => {
+    const weight = Object.prototype.hasOwnProperty.call(weights, template) ? weights[template] : 1;
+    return Number.isFinite(weight) && weight > 0 ? weight : 1;
+  };
+  const load = (template: string) => (count(template) + 1) / weightOf(template);
 
   const kept = productIds.map((id) => {
     const template = already.get(id);
@@ -278,7 +305,7 @@ export function assignVideoTemplates(
     let choice = templates[start];
     for (let step = 1; step < templates.length; step++) {
       const other = templates[(start + step) % templates.length];
-      if (count(other) < count(choice)) choice = other;
+      if (load(other) < load(choice)) choice = other;
     }
     used.set(choice, count(choice) + 1);
     return choice;

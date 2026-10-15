@@ -49,7 +49,8 @@ se programó.
 
 1. `node scripts/redes.mjs plan 2` pide a `/api/social/plan` los productos
    elegidos (precio revisado hace menos de 6 horas, 20% o más de descuento
-   sobre el precio de lista o una baja comprobada, sin repetir en 14 días),
+   según la cifra tachada que pone el vendedor, o una baja comprobada, sin
+   repetir en 14 días),
    con el texto de cada red, la imagen y los ajustes exactos para Metricool
    (en TikTok, la etiqueta de contenido comercial). También dice cuántas
    publicaciones van en el mes: el plan gratis de Metricool publica 20 y

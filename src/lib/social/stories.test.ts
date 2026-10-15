@@ -483,7 +483,7 @@ describe('buildStoryItem', () => {
     expect(saved.link).toBe('https://meli.la/abc');
   });
 
-  it('muestra el descuento y el precio de lista solo cuando hay rebaja', () => {
+  it('muestra el descuento y la cifra tachada solo cuando hay rebaja', () => {
     const withList = buildStoryItem(pickOne(product()), { now: NOW, settings: DIRECT, key: KEY })!;
     expect(withList).toMatchObject({ discount: 20, listPrice: 100_000, drop: null, again: null });
 
@@ -506,12 +506,12 @@ describe('buildStoryItem', () => {
     const score: InterestScore = {
       ...pick.score,
       points: 58.5,
-      reason: 'Audífonos JBL, 40% por debajo del precio de lista',
+      reason: 'Audífonos JBL, 40% de descuento',
       warning: 'hace poco estuvo a $55.000',
     };
     expect(buildStoryItem({ ...pick, score }, { now: NOW, settings: DIRECT, key: KEY })).toMatchObject({
       points: 58.5,
-      reason: 'Audífonos JBL, 40% por debajo del precio de lista',
+      reason: 'Audífonos JBL, 40% de descuento',
       warning: 'hace poco estuvo a $55.000',
     });
   });

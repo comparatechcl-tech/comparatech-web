@@ -275,7 +275,7 @@ export function StoryList({
             <strong className="font-heading text-lg">{formatPrice(item.price)}</strong>
             {item.listPrice !== null && (
               <span className="ml-2 text-xs text-muted">
-                lista <s>{formatPrice(item.listPrice)}</s> · -{item.discount}%
+                sin descuento <s>{formatPrice(item.listPrice)}</s> · -{item.discount}%
               </span>
             )}
             {item.listPrice === null && item.drop !== null && (

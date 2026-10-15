@@ -228,12 +228,12 @@ export function VideoCard({ video, posted, fileState: state, saving, canShare, c
         {/* Hay nombres que parten por el código del modelo: la marca dice de qué se trata. */}
         {video.brand && <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{video.brand}</p>}
         <p className="text-sm font-semibold leading-snug text-fg">{video.name}</p>
-        {/* Si no caben en un renglón, el precio de lista baja entero al siguiente: no se parte en el punto. */}
+        {/* Si no caben en un renglón, "sin descuento $X · -N%" baja entero al siguiente: no se parte en el punto. */}
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-sm text-fg">
           <strong className="font-heading text-lg">{formatPrice(video.price)}</strong>
           {video.listPrice !== null && video.discount > 0 && (
             <span className="whitespace-nowrap text-xs text-muted">
-              lista <s>{formatPrice(video.listPrice)}</s> · -{video.discount}%
+              sin descuento <s>{formatPrice(video.listPrice)}</s> · -{video.discount}%
             </span>
           )}
         </p>

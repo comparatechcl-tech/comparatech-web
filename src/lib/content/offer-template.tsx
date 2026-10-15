@@ -34,7 +34,7 @@ const COLORS = {
   white: '#FFFFFF',
   muted: '#94A3B8',
 };
-const INK_SOFT = 'rgba(10,14,23,0.7)'; // el precio de lista va más apagado que su etiqueta
+const INK_SOFT = 'rgba(10,14,23,0.7)'; // la cifra tachada va más apagada que su etiqueta ("sin descuento")
 const MINUS = String.fromCharCode(0x2212); // el signo menos de verdad, no el guion
 
 // Anchos de avance de Inter en milésimas de em, del espacio (32) a la virgulilla (126).
@@ -291,7 +291,8 @@ export function OfferTemplate({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: INNER_W, height: bandH, padding: `0 ${CARD_PAD}px`, background: COLORS.cyan, color: COLORS.ink }}>
             <div style={{ display: 'flex', marginLeft: -7, fontSize: 98, fontWeight: 800, letterSpacing: -3.5, lineHeight: 1 }}>{`${MINUS}${discount}%`}</div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-              <div style={{ display: 'flex', fontSize: 28, fontWeight: 600, lineHeight: '34px' }}>precio de lista</div>
+              {/* La cifra tachada la pone el vendedor: "sin descuento", nunca "antes" ni "precio normal" */}
+              <div style={{ display: 'flex', fontSize: 28, fontWeight: 600, lineHeight: '34px' }}>sin descuento</div>
               {/* Tachado con una línea propia de 3 px: la del dibujante es más gruesa y se come las cifras */}
               <div style={{ display: 'flex', position: 'relative', fontSize: 40, fontWeight: 600, lineHeight: '46px', color: INK_SOFT }}>
                 <span>{formatPrice(product.original_price as number)}</span>

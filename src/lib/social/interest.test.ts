@@ -1080,7 +1080,7 @@ describe('interestScore: los puntos, bloque por bloque', () => {
         NO_HISTORY
       );
       expect(charge.points).toBe(54.2);
-      expect(charge.warning).toBe('descuento de lista con poco respaldo');
+      expect(charge.warning).toBe('descuento del vendedor con poco respaldo');
 
       const go5 = product({
         name: 'Jbl Go 5 - Speaker - Blue',
@@ -1092,7 +1092,7 @@ describe('interestScore: los puntos, bloque por bloque', () => {
       });
       const go = interestScore(go5, seen(34_253));
       expect(go.points).toBe(58.4);
-      expect(go.warning).toBe('descuento de lista con poco respaldo');
+      expect(go.warning).toBe('descuento del vendedor con poco respaldo');
 
       const spot = interestScore(
         product({
@@ -1106,7 +1106,7 @@ describe('interestScore: los puntos, bloque por bloque', () => {
         seen(71_790)
       );
       expect(spot.points).toBe(49.1);
-      expect(spot.warning).toBe('descuento de lista con poco respaldo');
+      expect(spot.warning).toBe('descuento del vendedor con poco respaldo');
 
       // El mismo parlante de un vendedor con trayectoria no lleva aviso.
       expect(interestScore({ ...go5, seller_sales_count: 6_455 }, seen(34_253)).warning).toBeNull();
@@ -1518,7 +1518,7 @@ describe('interestScore: los puntos, bloque por bloque', () => {
         product({ ...listed(40), brand: 'Sleve', offer_info: { free_shipping: true, is_lowest: true } }),
         evidence()
       );
-      expect(unbacked.warning).toBe('descuento de lista con poco respaldo');
+      expect(unbacked.warning).toBe('descuento del vendedor con poco respaldo');
       // Sin descuento ni baja.
       const nothing = interestScore(product({ original_price: null }), evidence());
       expect(nothing.warning).toBe('sin oferta que mostrar');
@@ -1608,7 +1608,7 @@ describe('interestScore: los puntos, bloque por bloque', () => {
       for (const original_price of [null, 0, -1, NaN, 50_000, 70_000]) {
         const score = interestScore(product({ original_price }), evidence());
         expect(score.breakdown.deal).toBe(0);
-        expect(score.reason).toContain('sin descuento ni baja registrada');
+        expect(score.reason).toContain('no trae descuento ni baja registrada');
       }
     });
   });
@@ -1618,7 +1618,7 @@ describe('interestScore: los puntos, bloque por bloque', () => {
     const score = interestScore(bare, NO_HISTORY);
     expect(Number.isFinite(score.points)).toBe(true);
     expect(score.breakdown).toEqual({ type: 7, brand: -4, deal: 0, reach: 15, commission: 2.5, delivery: 0, signals: 0, penalties: -9 });
-    expect(score.reason).toBe('Producto para la casa, sin descuento ni baja registrada');
+    expect(score.reason).toBe('Producto para la casa, no trae descuento ni baja registrada');
     expect(score.warning).toBe('sin oferta que mostrar');
     expect(score.excluded).toBeNull();
     expect(score.typeKey).toBe('hogar');
@@ -1639,10 +1639,10 @@ describe('interestScore: los puntos, bloque por bloque', () => {
 describe('interestScore: la frase', () => {
   it('dice qué es, de qué marca, las pulgadas y la prueba', () => {
     expect(interestScore(TCL_TV, TCL_EVIDENCE).reason).toBe(
-      'Smart TV TCL de 55 pulgadas, bajó 37% según nuestro historial ($183.859 menos) y está 37% por debajo del precio de lista'
+      'Smart TV TCL de 55 pulgadas, bajó 37% según nuestro historial ($183.859 menos) y tiene 37% de descuento'
     );
     expect(interestScore(USUAL_PICKS[0][0], USUAL_PICKS[0][1]).reason).toBe(
-      'Celular Motorola, 45% por debajo del precio de lista, llega con Full y envío gratis, lo vende Mercado Libre'
+      'Celular Motorola, 45% de descuento, llega con Full y envío gratis, lo vende Mercado Libre'
     );
   });
 
@@ -1657,21 +1657,33 @@ describe('interestScore: la frase', () => {
     // Una baja de pocos pesos junto a un buen descuento de lista: manda la lista.
     const listFirst = interestScore(product({ ...listed(40) }), evidence({ drop: { pct: 3, amount: 1_800 }, min30: 60_000 })).reason;
     expect(listFirst).toBe(
-      'Audífonos JBL, 40% por debajo del precio de lista y bajó 3% según nuestro historial, con envío gratis, de tienda oficial'
+      'Audífonos JBL, 40% de descuento y bajó 3% según nuestro historial, con envío gratis, de tienda oficial'
     );
     // Una baja grande: manda la baja.
     const dropFirst = interestScore(product({ ...listed(20) }), evidence({ drop: { pct: 25, amount: 26_000 }, min30: 80_000 })).reason;
-    expect(dropFirst.startsWith('Audífonos JBL, bajó 25% según nuestro historial ($26.000 menos) y está 20% por debajo del precio de lista')).toBe(
-      true
-    );
+    expect(dropFirst.startsWith('Audífonos JBL, bajó 25% según nuestro historial ($26.000 menos) y tiene 20% de descuento')).toBe(true);
   });
 
-  it('dice "por debajo del", nunca "bajo el" (sin el acento se lee "bajó")', () => {
+  it('dice "N% de descuento", nunca "precio de lista" ni "bajo el" (sin el acento se lee "bajó")', () => {
     for (const pct of [12, 25, 40, 55, 70]) {
       const reason = interestScore(product(listed(pct)), evidence()).reason;
-      expect(reason).toContain(`${pct}% por debajo del precio de lista`);
+      expect(reason).toContain(`${pct}% de descuento`);
+      expect(reason).not.toContain('precio de lista');
       expect(reason).not.toMatch(/bajo el|bajo su/);
     }
+  });
+
+  it('una baja del historial nunca se llama descuento: el % de "de descuento" es siempre el de la cifra tachada', () => {
+    // Solo la baja: dice "bajó", no "de descuento".
+    for (const pct of [6, 12, 25, 40]) {
+      const reason = interestScore(product({ original_price: null }), evidence({ drop: { pct, amount: 12_000 }, min30: 70_000 })).reason;
+      expect(reason).toContain(`bajó ${pct}% según nuestro historial`);
+      expect(reason).not.toMatch(/de descuento/);
+    }
+    // Las dos: el porcentaje de "de descuento" es el de la cifra tachada (20%), nunca el de la baja (25%).
+    const both = interestScore(product({ ...listed(20) }), evidence({ drop: { pct: 25, amount: 26_000 }, min30: 80_000 })).reason;
+    expect(both.match(/(\d+)% de descuento/g)).toEqual(['20% de descuento']);
+    expect(both).toContain('bajó 25% según nuestro historial');
   });
 
   it('si no vende una tienda oficial ni Mercado Libre, la cifra es del vendedor ya desde 40%', () => {
@@ -1679,8 +1691,8 @@ describe('interestScore: la frase', () => {
     const reason = (pct: number, offer_info: InterestProduct['offer_info']) =>
       interestScore(product({ ...listed(pct), offer_info }), evidence()).reason;
     expect(reason(39, other)).not.toContain('cifra del vendedor');
-    expect(reason(40, other)).toContain('40% por debajo del precio de lista (cifra del vendedor)');
-    expect(reason(45, other)).toContain('45% por debajo del precio de lista (cifra del vendedor)');
+    expect(reason(40, other)).toContain('40% de descuento (cifra del vendedor)');
+    expect(reason(45, other)).toContain('45% de descuento (cifra del vendedor)');
     // Tienda oficial o Mercado Libre: recién desde 50%.
     expect(reason(45, { ...other, official_store: true })).not.toContain('cifra del vendedor');
     expect(reason(45, { ...other, sold_by_ml: true })).not.toContain('cifra del vendedor');
@@ -1688,24 +1700,30 @@ describe('interestScore: la frase', () => {
 
   it('desde 50% de lista aclara que la cifra es del vendedor, también cuando la baja va primero', () => {
     expect(interestScore(product(listed(49)), evidence()).reason).not.toContain('cifra del vendedor');
-    expect(interestScore(product(listed(50)), evidence()).reason).toContain('50% por debajo del precio de lista (cifra del vendedor)');
-    expect(interestScore(product(listed(73)), evidence()).reason).toContain('73% por debajo del precio de lista (cifra del vendedor)');
-    // Con la baja primero: o la lista sale con su aclaración, o no sale.
+    expect(interestScore(product(listed(50)), evidence()).reason).toContain('50% de descuento (cifra del vendedor)');
+    expect(interestScore(product(listed(73)), evidence()).reason).toContain('73% de descuento (cifra del vendedor)');
+    // Con la baja primero: o el descuento sale con su aclaración, o no sale.
+    let said = 0;
     for (const amount of [1_000, 6_000, 120_000]) {
       for (const daysTracked of [0, 6]) {
         const reason = interestScore(product(listed(65)), { drop: { pct: 12, amount }, min30: 35_000, daysTracked }).reason;
-        if (reason.includes('precio de lista')) expect(reason).toContain('65% por debajo del precio de lista (cifra del vendedor)');
+        if (reason.includes('de descuento')) {
+          expect(reason).toContain('65% de descuento (cifra del vendedor)');
+          said++;
+        }
       }
     }
+    // La comprobación no queda vacía: al menos una vez sale.
+    expect(said).toBeGreaterThan(0);
   });
 
   it('dice "llega con Full" y "con envío gratis"', () => {
     const reasonWith = (free_shipping: boolean, is_full: boolean) =>
       interestScore(product({ offer_info: { free_shipping, is_full, is_lowest: true } }), evidence()).reason;
-    expect(reasonWith(true, false)).toBe('Audífonos JBL, 30% por debajo del precio de lista, con envío gratis');
-    expect(reasonWith(false, true)).toBe('Audífonos JBL, 30% por debajo del precio de lista, llega con Full');
-    expect(reasonWith(true, true)).toBe('Audífonos JBL, 30% por debajo del precio de lista, llega con Full y envío gratis');
-    expect(reasonWith(false, false)).toBe('Audífonos JBL, 30% por debajo del precio de lista');
+    expect(reasonWith(true, false)).toBe('Audífonos JBL, 30% de descuento, con envío gratis');
+    expect(reasonWith(false, true)).toBe('Audífonos JBL, 30% de descuento, llega con Full');
+    expect(reasonWith(true, true)).toBe('Audífonos JBL, 30% de descuento, llega con Full y envío gratis');
+    expect(reasonWith(false, false)).toBe('Audífonos JBL, 30% de descuento');
   });
 
   it('dice a lo más dos razones extra, aunque haya más que contar', () => {
@@ -1721,7 +1739,7 @@ describe('interestScore: la frase', () => {
       }),
       evidence({ recentClicks: 14 })
     );
-    expect(radio.reason).toBe('Radio, 30% por debajo del precio de lista, lleva 14 clics recientes en el sitio, con envío gratis');
+    expect(radio.reason).toBe('Radio, 30% de descuento, lleva 14 clics recientes en el sitio, con envío gratis');
     expect(radio.reason.length).toBeLessThan(100);
     expect(radio.reason).not.toContain('tienda oficial');
   });
@@ -1933,7 +1951,7 @@ describe('las palabras que el sitio no usa', () => {
 
   it('si la marca trae una de esas palabras, la frase sale sin la marca', () => {
     const score = interestScore(product({ name: 'Audífonos Bluetooth Over Ear', brand: 'Antes' }), evidence());
-    expect(score.reason).toBe('Audífonos, 30% por debajo del precio de lista, con envío gratis, de tienda oficial');
+    expect(score.reason).toBe('Audífonos, 30% de descuento, con envío gratis, de tienda oficial');
     // Como parte de otra palabra no es la palabra: "Guantes" no es "antes".
     const gloves = interestScore(product({ name: 'Audífonos Bluetooth Over Ear', brand: 'Guantes' }), evidence());
     expect(gloves.reason.startsWith('Audífonos Guantes,')).toBe(true);
@@ -1946,7 +1964,17 @@ describe('las palabras que el sitio no usa', () => {
     }
     expect(hasForbiddenWord('OFERTON de la semana')).toBe(true);
     expect(hasForbiddenWord('Sólo hoy')).toBe(true);
-    for (const fine of ['Guantes brillantes', 'por debajo del precio de lista', 'hace poco estuvo a $100.000', 'bajó 37% según nuestro historial']) {
+    // Las frases del descuento ("45% de descuento", la cifra tachada "sin descuento $X") pasan.
+    for (const fine of [
+      'Guantes brillantes',
+      '45% de descuento',
+      'con 45% de descuento (cifra del vendedor)',
+      'sin descuento $399.990',
+      'Sin descuento',
+      '💰 $219.990 (-45%, sin descuento $399.990)',
+      'hace poco estuvo a $100.000',
+      'bajó 37% según nuestro historial',
+    ]) {
       expect(hasForbiddenWord(fine)).toBe(false);
     }
     // La lista del módulo es la misma que la del sitio.

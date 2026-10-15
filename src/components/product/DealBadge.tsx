@@ -11,7 +11,8 @@ import { formatCLP } from '@/lib/format';
  * muestra sus descuentos) y, desde 40%, rojo con llama.
  *
  * El porcentaje es sobre el precio de lista que informa el vendedor, y el
- * `title` lo dice. Lo que nosotros comprobamos va aparte, en DropChip.
+ * `title` dice que la cifra es del vendedor. Lo que nosotros comprobamos va
+ * aparte, en DropChip.
  *
  * Sin estado ni efectos: se usa igual desde servidor y desde cliente.
  */
@@ -21,7 +22,7 @@ export function DealBadge({ discount, className = '' }: { discount: number; clas
 
   return (
     <span
-      title="Descuento sobre el precio de lista informado en Mercado Libre"
+      title="Descuento informado por el vendedor en Mercado Libre"
       className={`inline-flex items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-extrabold leading-none text-white shadow-md ${
         tier === 'hot' ? 'bg-gradient-to-r from-red-600 to-orange-600' : 'bg-emerald-700'
       } ${className}`}

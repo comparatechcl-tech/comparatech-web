@@ -43,7 +43,7 @@
  */
 
 import { estimateCommission } from '@/lib/commission';
-import { captionDiscount, formatPrice } from '@/lib/content/captions';
+import { captionDiscount, discountPhrase, formatPrice } from '@/lib/content/captions';
 import { MIN_DROP_PCT } from '@/lib/deal-rank';
 import { normalizeName } from '@/lib/text';
 import {
@@ -537,8 +537,10 @@ function dropPhrase(facts: ReasonFacts, withAmount: boolean): string {
 
 function listPhrase(facts: ReasonFacts): string {
   if (facts.discount <= 0) return '';
-  // "Por debajo del", nunca "bajo el": sin el acento se lee "bajó".
-  let phrase = `${facts.discount}% por debajo del precio de lista`;
+  // "45% de descuento", como en todo lo que se publica (discountPhrase). Es el
+  // de la cifra tachada que pone el vendedor; la baja del historial va aparte
+  // y nunca se llama descuento.
+  let phrase = discountPhrase(facts.discount);
   // De 50% para arriba casi siempre es una lista inflada: la cifra es del vendedor, no nuestra.
   // Si no es tienda oficial ni Mercado Libre, se le atribuye desde antes.
   if (facts.discount >= facts.sellerFigureFrom) phrase += ' (cifra del vendedor)';
@@ -554,9 +556,9 @@ function assembleReason(facts: ReasonFacts, withBrand: boolean): string {
   const proofs = (withAmount: boolean): [string, string] => {
     const byDrop = dropPhrase(facts, withAmount);
     const byList = listPhrase(facts);
-    if (byDrop && (facts.dropFirst || !byList)) return [byDrop, byList ? `y está ${byList}` : ''];
+    if (byDrop && (facts.dropFirst || !byList)) return [byDrop, byList ? `y tiene ${byList}` : ''];
     if (byList) return [byList, byDrop ? `y ${byDrop}` : ''];
-    return ['sin descuento ni baja registrada', ''];
+    return ['no trae descuento ni baja registrada', ''];
   };
 
   // De la versión más completa a la más corta: lo primero que se sacrifica
@@ -814,8 +816,9 @@ export function interestScore(product: InterestProduct, evidence: InterestEviden
   if (weakDeal) {
     penalty += W.penaltyWeakDealPerPoint * (W.weakDealBelow - dealPoints);
     // Un 40% de lista que casi no suma puntos no es "chico": es que no hay quién lo respalde.
+    // El aviso lo lee el dueño: "del vendedor", porque la cifra tachada la pone él.
     warnings.push(
-      dealPoints <= 0 ? 'sin oferta que mostrar' : discount >= 30 ? 'descuento de lista con poco respaldo' : 'la oferta es chica'
+      dealPoints <= 0 ? 'sin oferta que mostrar' : discount >= 30 ? 'descuento del vendedor con poco respaldo' : 'la oferta es chica'
     );
   }
   if (startsWithCode(rawName)) {

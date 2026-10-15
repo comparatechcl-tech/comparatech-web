@@ -26,15 +26,23 @@ function readBody(req) {
 }
 
 /**
+ * La versión del aspecto de los videos, la misma que VIDEO_LOOK_VERSION en src/lib/social/videos.ts. Sube
+ * cuando cambia lo que los videos dicen sin que cambien los datos (la 2: "45% de descuento" y "sin descuento"
+ * en vez de "por debajo del precio de lista" y "precio de lista"), para que los videos viejos dejen de
+ * ofrecerse y se armen de nuevo.
+ */
+export const VIDEO_LOOK_VERSION = 2;
+
+/**
  * La huella de la oferta, calculada como la calcula el sitio de verdad (src/lib/social/videos.ts): los
- * primeros 8 signos, en hexadecimal, del SHA-256 de lo que el video dice además del precio, con los mismos
- * valores que el plan entrega en esos campos. El generador no la calcula nunca: esto existe solo para que el
- * sitio de mentira entregue nombres de archivo como los de verdad.
+ * primeros 8 signos, en hexadecimal, del SHA-256 de la versión del aspecto y de lo que el video dice además
+ * del precio, con los mismos valores que el plan entrega en esos campos. El generador no la calcula nunca:
+ * esto existe solo para que el sitio de mentira entregue nombres de archivo como los de verdad.
  *
  * @param {Record<string, any>} item
  */
 export function offerFingerprint(item) {
-  const said = [item.nombre_corto, item.marca ?? null, item.precio_lista ?? null, item.descuento, item.baja_historial ?? null, item.envio_gratis, item.full];
+  const said = [VIDEO_LOOK_VERSION, item.nombre_corto, item.marca ?? null, item.precio_lista ?? null, item.descuento, item.baja_historial ?? null, item.envio_gratis, item.full];
   return crypto.createHash('sha256').update(JSON.stringify(said)).digest('hex').slice(0, 8);
 }
 
@@ -80,7 +88,7 @@ export function sampleItems() {
       envio_gratis: true,
       full: true,
       puntos: 82,
-      motivo: 'Celular Motorola, 45% por debajo del precio de lista, llega con Full y envío gratis',
+      motivo: 'Celular Motorola con 45% de descuento, llega con Full y envío gratis',
       foto: 'https://http2.mlstatic.com/D_NQ_NP_814687-MLA106501833995_022026-F.jpg',
     },
     {
@@ -96,7 +104,7 @@ export function sampleItems() {
       descuento: 39,
       envio_gratis: true,
       puntos: 74,
-      motivo: 'Smart TV Caixun de 43 pulgadas, 39% por debajo del precio de lista, con envío gratis',
+      motivo: 'Smart TV Caixun de 43 pulgadas con 39% de descuento y envío gratis',
       foto: 'https://http2.mlstatic.com/D_NQ_NP_878845-MLA112597664360_062026-F.jpg',
     },
     {

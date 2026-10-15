@@ -29,10 +29,13 @@ node scripts/reels/generar.mjs --seco     pide el plan y dice qué haría, sin a
 Cada video queda en el almacén `reels` como dos archivos con el mismo nombre:
 `{fecha}/{producto}-{precio}-{plantilla}-{huella}.mp4` y `.jpg` (la portada).
 
-**La huella** son 8 signos (del 0 al 9 y de la a a la f) que resumen lo que el video dice además del precio:
-el nombre corto, la marca, el precio de lista, el descuento, la baja del historial, "Envío gratis" y "Full".
-Así, si cambia cualquiera de esas cosas sin que cambie el precio, el nombre es otro: el video anterior deja
-de ofrecerse y se arma uno nuevo. **La calcula solo el sitio** (`src/lib/social/videos.ts`). El generador no
+**La huella** son 8 signos (del 0 al 9 y de la a a la f) que resumen la versión del aspecto de los videos
+(`VIDEO_LOOK_VERSION`, hoy 2) y lo que el video dice además del precio: el nombre corto, la marca, la cifra
+tachada (`precio_lista`), el descuento, la baja del historial, "Envío gratis" y "Full". Así, si cambia
+cualquiera de esas cosas sin que cambie el precio, el nombre es otro: el video anterior deja de ofrecerse y
+se arma uno nuevo. Lo mismo cuando cambia cómo lo dicen los videos con los mismos datos: se sube la versión
+(la 2 cambió "por debajo del precio de lista" por "de descuento" y el rótulo de la cifra tachada por "sin
+descuento"). **La calcula solo el sitio** (`src/lib/social/videos.ts`). El generador no
 la recalcula: usa el nombre tal como llega en `archivo` y solo revisa que el producto, el precio y la
 plantilla del nombre sean los de ese elemento, que la huella tenga su forma y que las dos direcciones de
 subida terminen en ese mismo nombre. Si el nombre llega sin huella, el sitio que respondió es de la versión
@@ -123,12 +126,15 @@ diciendo el dato del descuento, el nombre y el precio. Con descuento dura 10,2 s
 
 | Segundos | Qué pasa |
 |---|---|
-| 0 – 1,4 | Desde el primer cuadro: la foto, el logo en su pastilla y el gancho completo y enorme ("45%" en 152 a 200 px, "por debajo del precio de lista" en 80 px). El número late una vez y lo cruza un brillo. |
+| 0 – 1,4 | Desde el primer cuadro: la foto, el logo en su pastilla y el gancho completo y enorme: "45%" (216 px; 248 con foto apaisada) y debajo, en un renglón, "de descuento" (108 px; 120 con foto apaisada). El número late una vez y lo cruza un brillo. |
 | 1,4 – 2,9 | El gancho se va y entran la marca y el nombre; la foto queda en su tamaño más grande. |
-| 2,9 – 7,9 | La hoja sube y el precio (hasta 170 px) cae desde más grande y pega a los 3,3 s con un golpe de luz. Después entran "−45%" (90 px), "precio de lista $X" (se tacha solo), "Envío gratis" / "Full" y "Precio revisado 13/10 09:30" / "Precios en Mercado Libre" (34 px). A los 6,3 s pasa un brillo por el descuento y el precio. La portada es el cuadro de los 7,5 s. |
+| 2,9 – 7,9 | La hoja sube y el precio (hasta 170 px) cae desde más grande y pega a los 3,3 s con un golpe de luz. Después entran "−45%" (90 px), "sin descuento" sobre la cifra tachada "$399.990" (se tacha sola), "Envío gratis" / "Full" y "Precio revisado 13/10 09:30" / "Precios en Mercado Libre" (34 px). A los 6,3 s pasa un brillo por el descuento y el precio. La portada es el cuadro de los 7,5 s. |
 | 7,9 – 10,2 | La hoja sube del todo: logo grande, ComparaTech, la llamada y otra vez "Precio revisado" y "Precios en Mercado Libre". |
 
-- Sin precio de lista pero con baja de historial, el gancho es "Bajó N%" / "según nuestro historial".
+- Sin descuento pero con baja de historial, el gancho es "Bajó N%" (152 a 200 px) / "según nuestro
+  historial" (80 px, dos renglones). Una baja del historial no es un descuento: ahí nunca dice "descuento".
+- Con descuento el gancho ocupa menos alto que con la baja (un renglón en vez de dos), así que la hoja queda
+  más baja y la foto del gancho se ve más grande (un celular a 657x801 px, antes 622x758).
 - Sin ninguno de los dos no hay gancho: el video parte con el nombre, el precio pega a los 2,6 s y dura 9,8 s
   (293 cuadros).
 - El precio nunca se cuenta: en ningún cuadro hay un número que no sea el real.
@@ -145,24 +151,26 @@ se estampa como una etiqueta de tienda y los cortes son marcados. El precio pega
 
 | Segundos | Qué pasa |
 |---|---|
-| 0 – 1,25 | Desde el primer cuadro: arriba una franja de noche; un bloque cian con la pastilla del logo y el número enorme en tinta oscura ("45%", de 330 a 470 px); un bloque azul con "por debajo del / precio de lista" en blanco (94 px) y, debajo a la derecha, la tarjeta blanca con la foto real. Así el primer cuadro, que muchas apps usan de miniatura, ya muestra el producto. Los bordes entre bloques van inclinados. El número llega apenas más grande, se asienta y a los 0,6 s late una vez. |
+| 0 – 1,25 | Desde el primer cuadro: arriba una franja de noche; un bloque cian con la pastilla del logo y el número enorme en tinta oscura ("45%", de 330 a 470 px); un bloque azul con "de descuento" en blanco (120 px, en un renglón) y, debajo a la derecha, la tarjeta blanca con la foto real. Así el primer cuadro, que muchas apps usan de miniatura, ya muestra el producto. Los bordes entre bloques van inclinados. El número llega apenas más grande, se asienta y a los 0,6 s late una vez. |
 | 1,25 – 1,65 | Los bloques suben de un empujón y entra la noche, con un bloque azul inclinado arriba. La tarjeta no se va: crece desde su sitio hasta su tamaño grande. El logo queda quieto. Entran la marca y el nombre en negrita (hasta 68 px). |
 | 1,65 – 2,6 | La tarjeta grande (un celular a 681x830 px), con la marca y el nombre debajo. Desde los 2,24 s el nombre se va y la tarjeta se encoge (en 0,34 s) a su tamaño de la escena del precio. |
 | 2,6 – 2,76 | La etiqueta del precio (cian, con su punta, su agujero y un poco chueca) se estampa desde un 25% más grande y pega a los 2,76 s, con un eco de luz y una sacudida. Su borde de arriba no se mueve, así que nunca pisa el producto, y el precio se ve entero en todos los cuadros (al empezar, solo la punta queda fuera de la pantalla). |
-| 2,8 – 4,1 | Entran el nombre chico, el bloque blanco "−45%" (o "Bajó 12%"), "precio de lista $399.990" (se tacha en cian), "Envío gratis" / "Full" y, pegado debajo, "Precio revisado 13/10 09:30" / "Precios en Mercado Libre" (34 px): la aclaración va junto al precio. |
+| 2,8 – 4,1 | Entran el nombre chico, el bloque blanco "−45%" (o "Bajó 12%"), "sin descuento" sobre la cifra tachada "$399.990" (se tacha en cian), "Envío gratis" / "Full" y, pegado debajo, "Precio revisado 13/10 09:30" / "Precios en Mercado Libre" (34 px): la aclaración va junto al precio. |
 | 4,1 – 7,25 | Todo quieto para leer, con la foto acercándose despacio. A los 5,16 s un brillo cruza la etiqueta y el descuento late. La portada es el cuadro de los 6,9 s. |
 | 7,25 – 9,6 | Tres barras (cian, azul y noche) suben una tras otra y tapan todo: logo grande, ComparaTech, la llamada en una losa cian con letra oscura (de 80 a 40 px, dos renglones como máximo; si ni así cabe, se corta y avisa) y otra vez "Precio revisado" y "Precios en Mercado Libre". |
 
-- Sin precio de lista pero con baja de historial, el gancho es "Bajó" / "12%" / "según nuestro historial" y en
-  la fila va el bloque "Bajó 12%".
+- Sin descuento pero con baja de historial, el gancho es "Bajó" / "12%" / "según nuestro historial" (94 px,
+  dos renglones) y en la fila va el bloque "Bajó 12%". Ahí nunca dice "descuento": una baja del historial no
+  lo es.
 - Sin ninguno de los dos no hay gancho: el primer cuadro ya trae la tarjeta grande, la marca y el nombre; la
   etiqueta pega a los 1,41 s y dura 9,35 s (281 cuadros).
-- **El número del gancho** va lo más grande que quepa (hasta 470 px), pero baja (hasta 330) si así la tarjeta
-  de abajo quedara de menos de 400 px de alto.
-- **Foto alta o cuadrada**: tarjeta de x=72 a x=924. Un celular se ve a 339x414 px en el gancho, 681x830 con el
-  nombre y 470x573 con el precio.
+- **El número del gancho** va lo más grande que quepa a lo ancho (hasta 470 px; "45%" llega a 390 y "28%" a
+  410), pero baja (hasta 330) si así la tarjeta de abajo quedara de menos de 400 px de alto.
+- **Foto alta o cuadrada**: tarjeta de x=72 a x=924. Un celular se ve a 402x490 px en el gancho (275x335 con
+  "Bajó", que lleva una palabra sobre el número y la frase en dos renglones), 681x830 con el nombre y 470x573
+  con el precio.
 - **Foto apaisada**: tarjeta casi de lado a lado (x=48 a x=1032), con el producto entero sobre la mitad de la
-  pantalla. Un televisor se ve a 615x414 en el gancho, 918x618 con el nombre y 844x568 con el precio.
+  pantalla. Un televisor se ve a 728x490 en el gancho, 918x618 con el nombre y 844x568 con el precio.
 - **Producto bajo** (una barra de sonido, una foto chica): la tarjeta mide lo que pide el producto más aire
   (nunca menos de 440 px de alto) y el grupo baja hasta 130 px para no dejar una tarjeta medio vacía.
 - La etiqueta nunca pasa de x=924, ni siquiera mientras se estampa; el precio va en 156 px (160 con foto
@@ -175,7 +183,10 @@ se estampa como una etiqueta de tienda y los cortes son marcados. El precio pega
 
 Todo sale del dato del producto; no hay frases de venta escritas a mano.
 
-- **Descuento**: solo si vienen el precio de lista y el porcentaje, y calzan entre sí.
+- **Descuento**: solo si vienen la cifra tachada (`precio_lista`) y el porcentaje, y calzan entre sí. Se dice
+  "45% de descuento" y, sobre la cifra tachada, "sin descuento": esa cifra la pone el vendedor en Mercado
+  Libre y no se sabe si de verdad lo vendía a ese precio, así que nunca se dice "precio normal", "antes" ni
+  "precio de lista" (la llamada del cierre tampoco acepta esas frases).
 - **"Envío gratis" y "Full"**: en los videos del día salen solo de los campos `envio_gratis` y `full` del
   plan. En un archivo de productos a mano, si esos campos no vienen, cuentan solo cuando el motivo o los
   textos lo dicen a secas ("envío gratis", "llega con Full"); "Full HD", "Full Frame" o "envío gratis sobre
@@ -222,8 +233,11 @@ Solo necesita `sharp` y `next`, que ya están en el proyecto, y ffmpeg instalado
   entre el margen y la columna de botones.
 - **Televisor y tablet no llegan a 1000 px de ancho** (945 y 879 en las muestras): es lo que cabe arriba de
   la mitad de la pantalla dejando 30 px bajo la pastilla del logo.
-- **Con precio de lista y baja de historial a la vez**, la baja no se muestra (el gancho y la fila son del
-  precio de lista).
+- **Con descuento y baja de historial a la vez**, la baja no se muestra (el gancho y la fila son del
+  descuento).
+- **"−45%" y "sin descuento" van uno al lado del otro** en la fila del precio: el rótulo es chico y va sobre
+  la cifra tachada, así que se lee como la cifra sin descuento, no como una contradicción. No se probó con
+  gente.
 - **La foto manda**: una foto chica se ve chica, y los letreros que traiga pegados salen tal cual.
 - **Revisado cuadro a cuadro, no en un teléfono** ni dentro de las apps. La música se probó con tonos de prueba.
 - **El corte a la mitad se probó avisando la señal desde dentro del proceso**, no con un Ctrl+C de consola ni
@@ -238,8 +252,9 @@ Solo necesita `sharp` y `next`, que ya están en el proyecto, y ffmpeg instalado
   corrida.
 - **En "bloques", el producto de la escena del precio queda más chico que en "estudio"** (un celular a 470x573
   contra 536x654; un televisor a 844x568 contra 945x636): la tarjeta deja aire blanco bajo el producto para la
-  etiqueta y la letra chica va bajo el descuento. En el gancho la tarjeta es chica (unos 400 px de alto; con
-  "Bajó" algo menos) y el número baja a unos 390 px para dejarle sitio.
+  etiqueta y la letra chica va bajo el descuento. En el gancho la tarjeta es chica: unos 540 px de alto con
+  descuento ("de descuento" va en un renglón) y unos 380 con "Bajó" (lleva la frase en dos renglones y el
+  número baja a 330 px para dejarle sitio).
 - **En "bloques", algunos movimientos de menos de 0,3 s cruzan las zonas de las apps**: el empujón de los
   bloques y el eco de luz del golpe de la etiqueta (asoma unos 40 px en la columna de botones mientras se
   apaga). En reposo no entra nada escrito ni el producto.

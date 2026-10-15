@@ -8,8 +8,8 @@
 //                un empujón y la tarjeta crece hasta...
 //   B. tarjeta   ...su tamaño grande, sobre un bloque azul inclinado; abajo la marca y el nombre.
 //   C. precio    la etiqueta cian con el precio se estampa sobre el borde de la tarjeta (golpe, eco y sacudida);
-//                al tiro saltan el descuento, el precio de lista que se tacha, las etiquetas y, pegado debajo,
-//                "Precio revisado ..." / "Precios en Mercado Libre".
+//                al tiro saltan el descuento, "sin descuento" con la cifra que se tacha, las etiquetas y,
+//                pegado debajo, "Precio revisado ..." / "Precios en Mercado Libre".
 //   Z. cierre    tres barras (cian, azul, noche) suben y tapan todo: logo, ComparaTech y la llamada en una losa.
 import * as capas from '../../capas.mjs';
 import { COLOR, MENOS, arribaDeLetra, lineaBase } from '../../capas.mjs';
@@ -71,7 +71,8 @@ function productoEn(leida, w, h) {
 }
 
 // --- A. El gancho -------------------------------------------------------------------------------------------
-// El dato del descuento, tal cual. Sin precio de lista vale la baja medida por el sitio; sin ninguna de las dos
+// El dato del descuento, tal cual: "45%" y "de descuento". Sin descuento vale la baja medida por el sitio
+// ("Bajó 12%" / "según nuestro historial": una baja del historial no es un descuento); sin ninguna de las dos
 // no hay gancho y el video parte con la tarjeta. Nada de preguntas que adivinan qué busca la gente.
 
 /**
@@ -94,11 +95,13 @@ function acomodarGancho(numero, encima, filas, leida) {
   const b1 = { y: Math.round(y + 46 + PENDIENTE_B1 * (derecha - W / 2)), pendiente: PENDIENTE_B1 };
   A.cortes = { techo: TECHO, b1, b2: B2 };
 
-  // La frase, bajo el borde (que a la izquierda está más abajo).
+  // La frase, bajo el borde (que a la izquierda está más abajo): un renglón ("de descuento") o dos ("según
+  // nuestro" / "historial"). Cada renglón mide de alto lo que su capa.
   const PASO = 100;
-  const yf = Math.round(bordeEn(b1, MARGEN) + 30 - arribaDeLetra(filas[0].tam, 108));
+  const yf = Math.round(bordeEn(b1, MARGEN) + 30 - arribaDeLetra(filas[0].tam, filas[0].h));
   A.frases = filas.map((capa, i) => ({ capa, y: yf + i * PASO }));
-  const finFrase = yf + PASO + lineaBase(filas[1].tam, 108) + 0.22 * filas[1].tam; // con lo que cuelga ("p", "j")
+  const ultima = filas[filas.length - 1];
+  const finFrase = yf + (filas.length - 1) * PASO + lineaBase(ultima.tam, ultima.h) + 0.22 * ultima.tam; // con lo que cuelga ("g", "j")
 
   // La tarjeta: bajo la frase y dentro del bloque azul (30 px sobre su borde de abajo y con la sombra arriba de la
   // franja de las apps), pegada a la derecha: con su sombra dura llega justo a x=924, donde empieza la columna
@@ -120,16 +123,20 @@ async function armarGancho(producto, leida, dicho) {
   let cifra;
   let previo = null;
   let frases;
+  let letra;
   if (producto.descuento) {
     cifra = `${producto.descuento}%`;
-    frases = ['por debajo del', 'precio de lista'];
+    // "de descuento" cabe en un renglón: va más grande que la frase de la baja y le deja más alto a la tarjeta.
+    frases = ['de descuento'];
+    letra = { alto: 136, pasos: [{ tam: 120, espaciado: -3 }, { tam: 110, espaciado: -2.5 }, { tam: 100, espaciado: -2.5 }] };
   } else if (producto.bajaHistorial) {
     cifra = `${producto.bajaHistorial}%`;
     previo = 'Bajó';
     frases = ['según nuestro', 'historial'];
+    letra = { alto: 108, pasos: [{ tam: 94, espaciado: -2.5 }, { tam: 86, espaciado: -2 }, { tam: 78, espaciado: -1.5 }] };
   } else return null;
   const filas = [];
-  for (const f of frases) filas.push(await capas.renglonQueQuepa(f, { peso: 800, color: COLOR.blanco, anchoMax: ANCHO_TEXTO, alto: 108 }, [{ tam: 94, espaciado: -2.5 }, { tam: 86, espaciado: -2 }, { tam: 78, espaciado: -1.5 }]));
+  for (const f of frases) filas.push(await capas.renglonQueQuepa(f, { peso: 800, color: COLOR.blanco, anchoMax: ANCHO_TEXTO, alto: letra.alto }, letra.pasos));
   const encima = previo ? await capas.renglon(previo, { tam: 116, alto: 136, peso: 800, color: COLOR.tinta, espaciado: -3.5, anchoMax: DERECHA_ARRIBA - MARGEN }) : null;
   // El número llega desde un poco más grande (LLEGA): ni así pasa de x=1008 (sobre la mitad no hay botones). Va lo
   // más grande que quepa, pero si así la tarjeta de abajo quedara muy baja, un poco más chico.
@@ -195,8 +202,9 @@ async function armarPrecio(producto, apaisada, dicho) {
   C.nombreAlto = Math.round((nombre.capas.length - 1) * nombre.alto + lineaBase(nombre.tam, nombre.alto) + 0.22 * nombre.tam - C.nombreArriba);
   if (!dicho.includes(nombre.filas.join(' '))) dicho.push(nombre.filas.join(' '));
 
-  // La fila del descuento: un bloque blanco ("−45%"), al lado "precio de lista" sobre "$399.990" (que se tacha)
-  // y, si caben, las etiquetas apiladas a la derecha. Todo pegado a la izquierda, lejos de los botones.
+  // La fila del descuento: un bloque blanco ("−45%"), al lado "sin descuento" sobre "$399.990" (la cifra tachada
+  // que pone el vendedor, que se tacha) y, si caben, las etiquetas apiladas a la derecha. Todo pegado a la
+  // izquierda, lejos de los botones.
   const F = C.fila;
   const etiquetas = async (chicas) => {
     const lista = [];
@@ -213,7 +221,7 @@ async function armarPrecio(producto, apaisada, dicho) {
     const tamanos = conLista
       ? [{ p: 84, a: 30, b: 46 }, { p: 80, a: 28, b: 40 }, { p: 76, a: 26, b: 35 }, { p: 72, a: 24, b: 30 }]
       : [{ p: 70, a: 32, b: 32 }, { p: 64, a: 30, b: 30 }, { p: 58, a: 28, b: 28 }];
-    const renglones = conLista ? ['precio de lista', formatoPrecio(producto.precioLista)] : ['según nuestro', 'historial'];
+    const renglones = conLista ? ['sin descuento', formatoPrecio(producto.precioLista)] : ['según nuestro', 'historial'];
     let armado = null;
     for (const alLado of hayEtiquetas ? [true, false] : [false]) {
       for (const m of tamanos) {
@@ -576,7 +584,7 @@ export function pintor(escena, T) {
     // El nombre chico, bajo la etiqueta.
     C.nombre.forEach(({ capa, y }, i) => asomar(dst, capa, x, geo.nombreY + dy + y, fase(t, T.nombreC + 0.05 * i, T.nombreC + 0.05 * i + 0.3), 16));
 
-    // La fila: el bloque del descuento salta, el precio de lista entra y se tacha, las etiquetas saltan.
+    // La fila: el bloque del descuento salta, el precio sin descuento entra y se tacha, las etiquetas saltan.
     const F = C.fila;
     const o = geo.filaY + dy;
     if (F.bloque) {

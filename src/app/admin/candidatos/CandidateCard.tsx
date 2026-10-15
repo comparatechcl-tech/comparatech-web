@@ -177,7 +177,7 @@ export function CandidateCard({
                   -{discount}%
                 </span>
                 <span className="text-xs text-muted">
-                  antes <span className="line-through">{formatCLP(candidate.original_price)}</span>
+                  sin descuento <span className="line-through">{formatCLP(candidate.original_price)}</span>
                 </span>
               </>
             )}

@@ -76,7 +76,7 @@ export function DealSpotlight({
           </p>
           {product.original_price && discount > 0 && (
             <p className="mt-1 text-sm text-muted">
-              Precio de lista <span className="line-through">{formatCLP(product.original_price)}</span>
+              Sin descuento <span className="line-through">{formatCLP(product.original_price)}</span>
             </p>
           )}
           {drop && (
@@ -101,7 +101,7 @@ export function DealSpotlight({
         </Link>
       </div>
       <p className="mt-3 text-[11px] leading-snug text-muted">
-        Descuento sobre el precio de lista informado en Mercado Libre.
+        El descuento y la cifra tachada los informa el vendedor en Mercado Libre.
       </p>
       {product.price_checked_at && (
         // PriceFreshness se escribe recién en el navegador: el alto se

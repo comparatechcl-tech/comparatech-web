@@ -128,7 +128,7 @@ export async function generateMetadata({
   // el nombre corto: el de ML (76-90 caracteres) se comía todo el espacio
   // que Google muestra.
   const title = `${short}: precio y ofertas en Chile`;
-  const lead = `${short} a ${formatCLP(product.price)}${discount ? ` (${discount}% dcto)` : ''} en Mercado Libre.`;
+  const lead = `${short} a ${formatCLP(product.price)}${discount ? ` con ${discount}% de descuento` : ''} en Mercado Libre.`;
   // La ficha muestra un solo vendedor (el de la oferta ganadora), no una
   // comparación entre vendedores. Con un nombre largo la frase completa no
   // cabe en lo que muestra Google: ahí va la versión corta, en vez de dejar

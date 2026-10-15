@@ -40,7 +40,7 @@ function story(over: Partial<StoryItem> = {}): StoryItem {
     drop: null,
     checkedAt: new Date(NOW.getTime() - 20 * 60_000).toISOString(),
     again: null,
-    reason: 'Parlante JBL, 50% por debajo del precio de lista, de tienda oficial',
+    reason: 'Parlante JBL, 50% de descuento, de tienda oficial',
     warning: null,
     points: 62.5,
     image: `/social/pieza/${id}/story-49990-99990-1-1-1-abc.jpg`,
@@ -112,6 +112,9 @@ describe('StoryList: el motivo y el aviso en la tarjeta', () => {
       expect(html).toContain(text);
     }
     expect(html).toContain('Bajaron desde que las subiste');
+    // La cifra tachada se rotula "sin descuento", no "lista".
+    expect(html).toContain('sin descuento <s>$99.990</s>');
+    expect(html).not.toContain('lista <s>');
     // La miniatura y "Guardar imagen" usan la dirección firmada de la pieza, nunca una dirección blob:.
     expect(html).not.toContain('blob:');
   });
@@ -162,7 +165,8 @@ describe('/admin/historias: lo que la página le explica al dueño', () => {
   it('sin ofertas, la explicación sigue siendo cierta con el piso de interés', async () => {
     const page = text(renderToStaticMarkup(await HistoriasPage()));
     expect(page).toContain('Ahora no hay ofertas para mostrar');
-    expect(page).toContain('20% o más por debajo del precio de lista');
+    expect(page).toContain('20% o más de descuento');
+    expect(page).not.toContain('precio de lista');
     // El piso de interés y la exclusión también pueden dejar la lista vacía.
     expect(page).toContain('Tampoco muestro las que le interesarían a poca gente');
     expect(page).toContain('las que hace poco costaban bastante menos');

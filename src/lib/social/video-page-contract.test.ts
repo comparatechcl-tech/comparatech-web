@@ -19,9 +19,9 @@ import { VIDEO_NETWORKS, VIDEO_WARNING_MARK } from '@/lib/social/videos';
 
 describe('la página de videos y lib/social/videos', () => {
   it('parten el motivo por la misma marca: el aviso "Ojo" no se lee como una frase más del motivo', () => {
-    const reason = `Parlante JBL, 50% por debajo del precio de lista${VIDEO_WARNING_MARK}otro vendedor lo ofrece a menos`;
+    const reason = `Parlante JBL, 50% de descuento${VIDEO_WARNING_MARK}otro vendedor lo ofrece a menos`;
     expect(splitReason(reason)).toEqual({
-      why: 'Parlante JBL, 50% por debajo del precio de lista',
+      why: 'Parlante JBL, 50% de descuento',
       warning: 'otro vendedor lo ofrece a menos',
     });
   });

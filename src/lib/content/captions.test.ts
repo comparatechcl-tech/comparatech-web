@@ -38,22 +38,29 @@ const opts = {
 };
 
 describe('buildCaption', () => {
-  it('sin descuento no muestra porcentaje ni precio de lista', () => {
+  it('sin descuento no muestra porcentaje ni cifra tachada', () => {
     const noDiscount = { ...base, original_price: null };
     for (const channel of CHANNELS) {
       const text = buildCaption(noDiscount, channel, opts);
       expect(text).not.toContain('%');
+      expect(text).not.toContain('sin descuento $');
       expect(text).not.toContain('precio de lista');
     }
     // Un precio de lista menor o igual tampoco es una rebaja.
     const fake = buildCaption({ ...base, original_price: 20000 }, 'whatsapp', opts);
     expect(fake).not.toContain('%');
+    expect(fake).not.toContain('sin descuento');
   });
 
-  it('con descuento muestra el precio de lista y el porcentaje, sin llamarlo "antes"', () => {
-    const text = buildCaption(base, 'whatsapp', opts);
-    expect(text).toContain('$27.990 (precio de lista $69.990 / -60%)');
-    expect(text).not.toContain('antes $');
+  it('con descuento muestra el porcentaje y la cifra tachada como "sin descuento", nunca "antes" ni "precio de lista"', () => {
+    for (const channel of CHANNELS) {
+      const text = buildCaption(base, channel, opts);
+      expect(text).toContain('💰 $27.990 (-60%, sin descuento $69.990)');
+      expect(text).not.toContain('antes $');
+      expect(text).not.toMatch(/precio de lista|precio normal|rebajado/i);
+      // "descuento" no va dos veces en la misma línea.
+      for (const line of text.split('\n')) expect(line.match(/descuento/gi)?.length ?? 0).toBeLessThanOrEqual(1);
+    }
   });
 
   it('#ofertas va solo si el producto tiene descuento', () => {
@@ -197,11 +204,12 @@ describe('buildVideoTexts', () => {
     }
   });
 
-  it('el título de YouTube dice qué es, el precio y el descuento sobre el precio de lista', () => {
-    // El nombre se corta en una palabra entera (y sin dejar un "Con" colgando); el color no va.
+  it('el título de YouTube dice qué es, el precio y el descuento ("con 60% de descuento")', () => {
+    // El nombre se corta en una palabra entera (y sin dejar un "De" colgando); el color no va.
     expect(texts.youtubeTitle).toBe(
-      'Audífonos Bluetooth Inalámbricos Xyz Pro a $27.990, 60% por debajo del precio de lista'
+      'Audífonos Bluetooth Inalámbricos Xyz Pro Con Cancelación a $27.990 con 60% de descuento'
     );
+    expect(texts.youtubeTitle).not.toContain('precio de lista');
 
     // Sin descuento real no hay porcentaje.
     expect(youtubeTitle({ ...base, original_price: null })).toMatch(/ a \$27\.990$/);
@@ -231,7 +239,7 @@ describe('buildVideoTexts', () => {
         // El precio y el descuento van siempre enteros.
         expect(title).toContain(` a ${formatPrice(price)}`);
         const discount = captionDiscount({ price, original_price });
-        if (discount > 0) expect(title.endsWith(`, ${discount}% por debajo del precio de lista`)).toBe(true);
+        if (discount > 0) expect(title.endsWith(` con ${discount}% de descuento`)).toBe(true);
         expect(title.trim()).toBe(title);
       }
     }
@@ -253,7 +261,7 @@ describe('buildVideoTexts', () => {
     for (const name of loud) {
       const title = youtubeTitle({ name, price: 19_990, original_price: 39_990 });
       expect(hasForbiddenWord(title)).toBe(false);
-      expect(title).toContain(' a $19.990, 50% por debajo del precio de lista');
+      expect(title).toContain(' a $19.990 con 50% de descuento');
     }
     expect(youtubeTitle({ name: loud[0], price: 19_990, original_price: null })).toBe('Audífonos Sony WH-CH520 a $19.990');
     expect(youtubeTitle({ name: 'IMPERDIBLE', price: 19_990, original_price: null })).toBe('Producto a $19.990');
@@ -264,7 +272,7 @@ describe('buildVideoTexts', () => {
   it('el título lleva el nombre como en el reel, sin el código de fábrica; los demás textos, el nombre corto de siempre', () => {
     const watch = { ...base, name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3 - Color Negro' };
     const watchTexts = buildVideoTexts(watch, opts.now);
-    expect(watchTexts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $27.990, 60% por debajo del precio de lista');
+    expect(watchTexts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $27.990 con 60% de descuento');
     for (const text of [watchTexts.instagram, watchTexts.tiktok, watchTexts.facebook, watchTexts.youtubeDescription]) {
       expect(text.split('\n')).toContain('Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3');
     }

@@ -74,7 +74,7 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
     fileName: `comparatech-producto-${seq}-reel.mp4`,
     renderedAt: '2026-10-13T11:05:00.000Z',
     points: 62.5,
-    reason: 'Parlante JBL, 50% por debajo del precio de lista, de tienda oficial',
+    reason: 'Parlante JBL, 50% de descuento, de tienda oficial',
     link: `https://www.mercadolibre.cl/p/MLC${seq}?matt_word=comparatech`,
     texts: {
       instagram: `Texto de Instagram ${seq}`,
@@ -175,14 +175,15 @@ describe('VideoList: la tarjeta de un video', () => {
     expect(box).not.toContain('opacity-60');
   });
 
-  it('dice qué es: marca, nombre, precio con su precio de lista y descuento, el motivo en letra chica y la plantilla', () => {
+  it('dice qué es: marca, nombre, precio con la cifra tachada ("sin descuento") y el descuento, el motivo en letra chica y la plantilla', () => {
     const item = video();
     const html = card(render([item]), item);
     const read = text(html);
     expect(read).toContain('JBL');
     expect(read).toContain(item.name);
     expect(read).toContain('$49.990');
-    expect(read).toContain('lista $99.990 · -50%');
+    expect(read).toContain('sin descuento $99.990 · -50%');
+    expect(read).not.toContain('precio de lista');
     expect(html).toContain('<s>$99.990</s>');
     // Hecho a las 11:05 UTC, que en Chile son las 08:05.
     expect(read).toContain('Plantilla estudio · hecho el 13/10 a las 08:05');
@@ -196,12 +197,12 @@ describe('VideoList: la tarjeta de un video', () => {
 
   it('si desde que se armó el video apareció algo que mirar, lo dice en una línea aparte que se distingue', () => {
     const clean = video();
-    const warned = video({ reason: 'Parlante JBL, 50% por debajo del precio de lista. Ojo: otro vendedor lo ofrece a menos' });
+    const warned = video({ reason: 'Parlante JBL, 50% de descuento. Ojo: otro vendedor lo ofrece a menos' });
     const html = render([clean, warned]);
     expect(card(html, clean)).not.toContain('Ojo:');
 
     const mine = card(html, warned);
-    const whyAt = mine.indexOf('Parlante JBL, 50% por debajo del precio de lista.');
+    const whyAt = mine.indexOf('Parlante JBL, 50% de descuento.');
     const warningAt = mine.indexOf('Ojo: otro vendedor lo ofrece a menos.');
     expect(whyAt).toBeGreaterThan(0);
     expect(warningAt).toBeGreaterThan(whyAt);
@@ -221,10 +222,11 @@ describe('VideoList: la tarjeta de un video', () => {
     });
   });
 
-  it('sin precio de lista no inventa un descuento', () => {
+  it('sin cifra tachada no inventa un descuento', () => {
     const item = video({ listPrice: null, discount: 0 });
     const read = text(card(render([item]), item));
     expect(read).toContain('$49.990');
+    expect(read).not.toContain('sin descuento');
     expect(read).not.toContain('lista $');
     expect(read).not.toContain('-0%');
     expect(card(render([item]), item)).not.toContain('<s>');

@@ -151,7 +151,7 @@ export function ponerEscalada(dst, capa, x, y, escala, opacidad = 1, ancla = [0.
   }
 }
 
-/** Un rectángulo de color liso (el tachado del precio de lista, la línea del cierre). */
+/** Un rectángulo de color liso (el tachado de la cifra sin descuento, la línea del cierre). */
 export function rectangulo(dst, x, y, w, h, color, opacidad = 1) {
   const x0 = Math.max(0, Math.round(x));
   const y0 = Math.max(0, Math.round(y));

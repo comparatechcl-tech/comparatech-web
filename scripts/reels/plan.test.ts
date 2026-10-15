@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { resolverProducto } from './datos.mjs';
 import { noCommands, oneLine, photoUrlProblem, planItemProblem, readPlan, reelInput, uploadUrlProblem } from './plan.mjs';
 import { cargarPlantilla, existePlantilla, nombresDePlantillas } from './plantillas/index.mjs';
-import { fileName, offerFingerprint, sampleItems } from './pruebas/sitio-de-mentira.mjs';
+import { VIDEO_LOOK_VERSION, fileName, offerFingerprint, sampleItems } from './pruebas/sitio-de-mentira.mjs';
 
 /**
  * El plan llega por la red y de él salen una descarga, un video público y dos subidas. Aquí se prueba que se
@@ -21,7 +21,7 @@ const ID = 'bb2d3803-a43b-4aa2-bd82-f73ae7ecb246';
 /** El nombre que tenía el archivo antes de llevar huella. */
 const OLD_FILE = `2026-10-13/${ID}-219990-estudio`;
 /** El de ahora: lo mismo más la huella de la oferta, que calcula el sitio. */
-const FILE = `${OLD_FILE}-05758542`;
+const FILE = `${OLD_FILE}-9436e838`;
 const STORAGE = 'https://abcdefgh.supabase.co/storage/v1/object/upload/sign/reels';
 
 /** Un elemento del plan como lo entrega el sitio para un video que falta. */
@@ -72,23 +72,23 @@ describe('planItemProblem', () => {
 
   it('el nombre del archivo tiene que ser el de ese producto, a ese precio y con esa plantilla', () => {
     const other = 'bb540d67-d995-4efd-893d-29d7cef9f4d3';
-    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-199990-estudio-05758542` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-219990-otra-05758542` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `2026-10-13/${other}-219990-estudio-05758542` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `${ID}-219990-estudio-05758542` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `13-10-2026/${ID}-219990-estudio-05758542` }))).toContain('no calza');
-    expect(planItemProblem(planItem({ archivo: `2026-10-13/../${ID}-219990-estudio-05758542` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-199990-estudio-9436e838` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-219990-otra-9436e838` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${other}-219990-estudio-9436e838` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `${ID}-219990-estudio-9436e838` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `13-10-2026/${ID}-219990-estudio-9436e838` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/../${ID}-219990-estudio-9436e838` }))).toContain('no calza');
     expect(planItemProblem(planItem({ archivo: `${FILE}\n` }))).toContain('no calza');
     // El precio del nombre se compara tal cual: "0219990" no es 219990.
-    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-0219990-estudio-05758542` }))).toContain('no calza');
+    expect(planItemProblem(planItem({ archivo: `2026-10-13/${ID}-0219990-estudio-9436e838` }))).toContain('no calza');
   });
 
   it('la huella no se calcula aquí, pero tiene que venir y con su forma: 8 signos del 0 al 9 y de la a a la f', () => {
     // Cualquier huella bien formada vale: cuál es la correcta lo sabe solo el sitio.
-    for (const good of ['05758542', '00000000', 'ffffffff', 'a1b2c3d4']) {
+    for (const good of ['9436e838', '00000000', 'ffffffff', 'a1b2c3d4']) {
       expect(planItemProblem(planItem({ archivo: `${OLD_FILE}-${good}` })), good).toBeNull();
     }
-    for (const bad of ['0575854', '057585421', '0575854g', '05758542-05758542', '', '05758542/x', '../../otro', ' 05758542', '05758542.mp4']) {
+    for (const bad of ['9436e83', '9436e8381', '9436e83g', '9436e838-9436e838', '', '9436e838/x', '../../otro', ' 9436e838', '9436e838.mp4']) {
       expect(planItemProblem(planItem({ archivo: `${OLD_FILE}-${bad}` })), JSON.stringify(bad)).toContain('no trae una huella válida');
     }
     // En mayúsculas tampoco: el almacén las distingue, y sería otro archivo.
@@ -107,15 +107,19 @@ describe('planItemProblem', () => {
 });
 
 describe('el sitio de mentira', () => {
-  it('calcula la huella como dice el contrato con el sitio: 8 signos del SHA-256 de lo que el video dice', () => {
+  it('calcula la huella como dice el contrato con el sitio: 8 signos del SHA-256 de la versión del aspecto y de lo que el video dice', () => {
     // Escritas a mano, sacadas con otra herramienta (sha256sum) sobre el texto del contrato:
-    // JSON.stringify([nombre_corto, marca, precio_lista, descuento, baja_historial, envio_gratis, full]).
+    // JSON.stringify([VIDEO_LOOK_VERSION, nombre_corto, marca, precio_lista, descuento, baja_historial, envio_gratis, full]).
+    expect(VIDEO_LOOK_VERSION).toBe(2);
     const [phone, tv, tablet] = sampleItems();
-    expect(offerFingerprint(phone)).toBe('05758542'); // ["Moto G86 power 256GB","Motorola",399990,45,null,true,true]
-    expect(offerFingerprint(tv)).toBe('571e62bb');
-    expect(offerFingerprint(tablet)).toBe('ce5849cd'); // ["Tablet Lenovo Tab 128gb","Lenovo",null,0,12,false,false]
+    expect(offerFingerprint(phone)).toBe('9436e838'); // [2,"Moto G86 power 256GB","Motorola",399990,45,null,true,true]
+    expect(offerFingerprint(tv)).toBe('d1be4500');
+    expect(offerFingerprint(tablet)).toBe('c0974736'); // [2,"Tablet Lenovo Tab 128gb","Lenovo",null,0,12,false,false]
     expect(fileName(phone)).toBe(FILE);
-    expect(fileName(tablet, '2026-10-14')).toBe('2026-10-14/c65c6a4c-42c4-42fd-b14f-8b908ca1e2b2-189990-estudio-ce5849cd');
+    expect(fileName(tablet, '2026-10-14')).toBe('2026-10-14/c65c6a4c-42c4-42fd-b14f-8b908ca1e2b2-189990-estudio-c0974736');
+    // Con la fórmula anterior (sin la versión adelante) el celular era 05758542: al cambiar la versión, el video
+    // viejo deja de ofrecerse y se arma uno nuevo con el mismo precio.
+    expect(fileName(phone)).not.toBe(`${OLD_FILE}-05758542`);
   });
 
   it('la huella cambia con cada cosa que el video dice, y no con lo que no dice', () => {
@@ -127,7 +131,7 @@ describe('el sitio de mentira', () => {
     }
     // El precio va aparte en el nombre; el motivo, los puntos y la hora de revisión no cambian el archivo.
     expect(offerFingerprint({ ...phone, precio: 1, motivo: 'otro', puntos: 1, precio_revisado: '2026-10-14T00:00:00Z', foto: 'https://http2.mlstatic.com/otra.jpg' })).toBe(base);
-    // Sin marca o sin precio de lista, el valor es null (como lo entrega el plan), no un campo que falta.
+    // Sin marca o sin precio_lista, el valor es null (como lo entrega el plan), no un campo que falta.
     expect(offerFingerprint({ ...phone, marca: undefined })).toBe(offerFingerprint({ ...phone, marca: null }));
   });
 });
@@ -216,7 +220,7 @@ describe('reelInput', () => {
     });
   });
 
-  it('un producto sin precio de lista sale con su baja del historial y sin descuento', () => {
+  it('un producto sin precio_lista sale con su baja del historial y sin descuento', () => {
     const product = resolverProducto(reelInput(planItem({ ...sampleItems()[2] })), { foto: PHOTO });
     expect(product).toMatchObject({ precioLista: null, descuento: null, bajaHistorial: 12, envioGratis: false, full: false, avisos: [] });
   });

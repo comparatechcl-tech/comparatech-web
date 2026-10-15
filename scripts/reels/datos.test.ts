@@ -125,8 +125,10 @@ describe('resolverProducto: precio, descuento y fecha', () => {
     const wrong = resolve({ precio_lista: 399990, descuento: 70 });
     expect(wrong).toMatchObject({ precioLista: null, descuento: null });
     expect(wrong.avisos.join(' ')).toContain('no calza');
-    // Un precio de lista más bajo que el precio no es un descuento.
-    expect(resolve({ precio_lista: 199990, descuento: 10 })).toMatchObject({ precioLista: null, descuento: null });
+    // Un precio_lista más bajo que el precio no es un descuento.
+    const lower = resolve({ precio_lista: 199990, descuento: 10 });
+    expect(lower).toMatchObject({ precioLista: null, descuento: null });
+    expect(lower.avisos).toEqual(['el precio sin descuento (precio_lista) o el descuento del dato no calzan con el precio: no se muestra descuento.']);
     expect(resolve({ precio_lista: null, descuento: 0 })).toMatchObject({ precioLista: null, descuento: null, avisos: [] });
   });
 
@@ -202,7 +204,7 @@ describe('revisarLlamada', () => {
   it('no acepta direcciones web ni frases que la marca no usa', () => {
     expect(() => revisarLlamada('Entra a comparatech.cl')).toThrow('dirección web');
     expect(() => revisarLlamada('Mira https://ejemplo.test')).toThrow('dirección web');
-    for (const banned of ['Solo hoy', 'El mejor precio', 'Imperdible', 'Últimas unidades', 'Antes $399.990', 'Recomendado', 'Ahorra ya']) {
+    for (const banned of ['Solo hoy', 'El mejor precio', 'Imperdible', 'Últimas unidades', 'Antes $399.990', 'Recomendado', 'Ahorra ya', 'Precio normal $399.990', 'Bajo el precio de lista']) {
       expect(() => revisarLlamada(banned), banned).toThrow('no puede decir');
     }
   });

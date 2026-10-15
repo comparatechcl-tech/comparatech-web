@@ -181,11 +181,11 @@ describe('buildPlanItem', () => {
     expect(item.motivo.length).toBeGreaterThan(10);
     expect(item.aviso).toBe(pick.score.warning);
 
-    const score = { ...pick.score, points: 61.5, reason: 'Audífonos JBL, 30% por debajo del precio de lista' };
+    const score = { ...pick.score, points: 61.5, reason: 'Audífonos JBL, 30% de descuento' };
     const warned = buildPlanItem({ ...pick, score: { ...score, warning: 'otro vendedor lo ofrece a menos' } }, build)!;
     expect(warned).toMatchObject({
       puntos: 61.5,
-      motivo: 'Audífonos JBL, 30% por debajo del precio de lista',
+      motivo: 'Audífonos JBL, 30% de descuento',
       aviso: 'otro vendedor lo ofrece a menos',
     });
     expect(buildPlanItem({ ...pick, score: { ...score, warning: null } }, build)!.aviso).toBeNull();
@@ -199,8 +199,18 @@ describe('buildPlanItem', () => {
     expect(built.aviso).toBeNull();
     expect(built.puntos).toBeGreaterThan(0);
     expect(`${built.motivo} | ${item.motivo} | ${item.aviso ?? ''}`).not.toMatch(
-      /recomendad|verificad|publicidad|mejor precio|m[aá]s barato|imperdible|ofert[oó]n|solo hoy|[uú]ltimas unidades|antes \$|rebajad|precio normal|ahorra/i
+      /recomendad|verificad|publicidad|mejor precio|m[aá]s barato|imperdible|ofert[oó]n|solo hoy|[uú]ltimas unidades|antes \$|rebajad|precio normal|ahorra|precio de lista/i
     );
+  });
+
+  it('los textos del plan dicen la cifra tachada como "sin descuento", nunca "precio de lista"', () => {
+    for (const text of [...Object.values(item.textos), item.motivo]) {
+      expect(text).not.toMatch(/precio de lista/i);
+    }
+    // El producto de este archivo: $80.000 con 20% de descuento sobre $100.000.
+    expect(item.textos.instagram).toContain('💰 $80.000 (-20%, sin descuento $100.000)');
+    expect(item.textos.tiktok).toContain('💰 $80.000 (-20%, sin descuento $100.000)');
+    expect(item.motivo).toContain('20% de descuento');
   });
 
   it('la imagen es una dirección firmada del sitio, con el precio del texto', () => {

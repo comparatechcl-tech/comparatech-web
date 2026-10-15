@@ -45,12 +45,14 @@ import {
   VIDEO_BOARD_MAX,
   VIDEO_BUCKET,
   VIDEO_KEEP_DAYS,
+  VIDEO_LOOK_VERSION,
   VIDEO_MARK,
   VIDEO_MAX_BYTES,
   VIDEO_NETWORKS,
   VIDEO_PLAN_MAX,
   VIDEO_RULES,
   VIDEO_TEMPLATES,
+  VIDEO_TEMPLATE_WEIGHTS,
   VIDEO_WARNING_MARK,
   assignVideoTemplates,
   ensureVideoBucket,
@@ -326,13 +328,15 @@ const sha256 = (text: string) => createHash('sha256').update(text).digest('hex')
 
 /**
  * La huella que le corresponde a un producto, sacada a mano: los primeros 8
- * caracteres del SHA-256 de lo que su video dice además del precio. `drop` es
- * la baja del historial ya redondeada, y `price` el precio con que se armó el
- * video (el descuento sale de ahí).
+ * caracteres del SHA-256 de lo que su video dice además del precio, con la
+ * versión de cómo lo dice adelante (2: "de descuento" y "sin descuento").
+ * `drop` es la baja del historial ya redondeada, y `price` el precio con que
+ * se armó el video (el descuento sale de ahí).
  */
 function printOf(p: SocialProduct, drop: number | null = null, price: number = p.price): string {
   const discount = p.original_price && p.original_price > price ? Math.round((1 - price / p.original_price) * 100) : 0;
   const said = [
+    2,
     reelProductName(p.name),
     p.brand || null,
     discount > 0 ? p.original_price : null,
@@ -571,7 +575,7 @@ describe('lo que el video dice y su huella', () => {
     const said = videoClaims(watch, null);
     expect(said.nombre_corto).toBe('Samsung Smartwatch Galaxy Fit 3');
     expect(videoFingerprint(said)).toBe(
-      sha256(JSON.stringify(['Samsung Smartwatch Galaxy Fit 3', 'Samsung', 100_000, 40, null, true, false])).slice(0, 8)
+      sha256(JSON.stringify([2, 'Samsung Smartwatch Galaxy Fit 3', 'Samsung', 100_000, 40, null, true, false])).slice(0, 8)
     );
     // Con el código (el nombre corto de la ficha y de las redes) sería otro video.
     expect(shortProductName(watch.name)).toBe('Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3');
@@ -581,15 +585,16 @@ describe('lo que el video dice y su huella', () => {
     expect(videoClaims(ram, null).nombre_corto).toBe('Kingston ValueRAM KVR32S22S8/8 Memoria RAM');
   });
 
-  it('la huella son los primeros 8 caracteres del SHA-256 de esos datos, siempre en el mismo orden', () => {
+  it('la huella son los primeros 8 caracteres del SHA-256 de esos datos, siempre en el mismo orden y con la versión adelante', () => {
     // El contrato, escrito con todas sus letras: si esta cuenta cambia, los
     // videos ya guardados dejan de reconocerse.
-    const written = '["Audífonos Bluetooth JBL Tune 520BT","JBL",100000,40,null,true,false]';
+    expect(VIDEO_LOOK_VERSION).toBe(2);
+    const written = '[2,"Audífonos Bluetooth JBL Tune 520BT","JBL",100000,40,null,true,false]';
     expect(videoFingerprint(claims)).toBe(sha256(written).slice(0, 8));
-    expect(videoFingerprint(claims)).toBe('7b6ff293');
+    expect(videoFingerprint(claims)).toBe('16a0bfd5');
     expect(
       videoFingerprint({ ...claims, marca: null, precio_lista: null, descuento: 0, baja_historial: 25, envio_gratis: false })
-    ).toBe('188b17c7');
+    ).toBe('900dbf84');
     expect(videoFingerprint(claims)).toMatch(/^[0-9a-f]{8}$/);
     // No depende del orden en que vengan los campos del objeto.
     const shuffled: VideoClaims = {
@@ -601,7 +606,17 @@ describe('lo que el video dice y su huella', () => {
       marca: 'JBL',
       nombre_corto: 'Audífonos Bluetooth JBL Tune 520BT',
     };
-    expect(videoFingerprint(shuffled)).toBe('7b6ff293');
+    expect(videoFingerprint(shuffled)).toBe('16a0bfd5');
+  });
+
+  it('con las mismas cifras, la versión 2 da otra huella que la fórmula de antes (sin versión)', () => {
+    // Lo que el video decía con "por debajo del precio de lista" y "precio de lista"
+    // tiene las mismas cifras que el de ahora: solo la versión los distingue.
+    const before = sha256(JSON.stringify(['Audífonos Bluetooth JBL Tune 520BT', 'JBL', 100_000, 40, null, true, false])).slice(0, 8);
+    expect(before).toBe('7b6ff293');
+    expect(videoFingerprint(claims)).not.toBe(before);
+    const dropOnly: VideoClaims = { ...claims, marca: null, precio_lista: null, descuento: 0, baja_historial: 25, envio_gratis: false };
+    expect(videoFingerprint(dropOnly)).not.toBe('188b17c7');
   });
 
   it('cualquier cosa que el video diga distinto da otra huella', () => {
@@ -628,11 +643,11 @@ describe('lo que el video dice y su huella', () => {
   it('el nombre de un video lleva la huella de su producto, y con ella se lee de vuelta', () => {
     const p = strong({ name: 'Audífonos Bluetooth JBL Tune 520BT - Color Negro' });
     const fingerprint = videoFingerprint(videoClaims(p, null));
-    expect(fingerprint).toBe('7b6ff293');
+    expect(fingerprint).toBe('16a0bfd5');
     // La cuenta hecha a mano en este archivo da lo mismo que la del sitio.
     expect(printOf(p)).toBe(fingerprint);
     const name = videoObjectName({ date: TODAY, productId: p.id, price: p.price, template: 'estudio', fingerprint });
-    expect(name).toBe(`${TODAY}/${p.id}-60000-estudio-7b6ff293`);
+    expect(name).toBe(`${TODAY}/${p.id}-60000-estudio-16a0bfd5`);
     expect(name).toBe(fileOf(TODAY, p));
   });
 });
@@ -640,18 +655,37 @@ describe('lo que el video dice y su huella', () => {
 describe('plantillas', () => {
   const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
 
-  it('hoy hay una sola: todos los videos salen con ella', () => {
-    expect(VIDEO_TEMPLATES).toEqual(['estudio']);
-    expect(assignVideoTemplates(ids, TODAY)).toEqual(ids.map(() => 'estudio'));
-    expect(assignVideoTemplates([], TODAY)).toEqual([]);
+  it('hoy son dos, "estudio" y "bloques", y de cada cuatro videos tres salen con "estudio"', () => {
+    expect(VIDEO_TEMPLATES).toEqual(['estudio', 'bloques']);
+    expect(VIDEO_TEMPLATE_WEIGHTS).toEqual({ estudio: 3, bloques: 1 });
     for (const template of VIDEO_TEMPLATES) expect(template).toMatch(/^[a-z0-9]+$/);
+    expect(assignVideoTemplates([], TODAY)).toEqual([]);
+    for (let day = 1; day <= 28; day++) {
+      const date = `2026-10-${String(day).padStart(2, '0')}`;
+      const four = assignVideoTemplates(['a', 'b', 'c', 'd'], date);
+      expect(four.filter((t) => t === 'estudio')).toHaveLength(3);
+      expect(four.filter((t) => t === 'bloques')).toHaveLength(1);
+      // Con uno o dos videos en el día, todos son de "estudio": "bloques" no le gana el turno.
+      expect(assignVideoTemplates(['a'], date)).toEqual(['estudio']);
+      expect(assignVideoTemplates(['a', 'b'], date)).toEqual(['estudio', 'estudio']);
+    }
+    // Ocho videos: seis y dos.
+    const eight = assignVideoTemplates(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], TODAY);
+    expect(eight.filter((t) => t === 'bloques')).toHaveLength(2);
   });
 
-  it('con más de una se reparten parejo, y el mismo día con los mismos productos da siempre lo mismo', () => {
+  it('un peso que no sirve (cero, negativo, no número) cuenta como 1', () => {
+    const assigned = assignVideoTemplates(ids, TODAY, new Map(), ['x', 'y'], { x: 0, y: Number.NaN });
+    expect(assigned.filter((t) => t === 'x')).toHaveLength(3);
+    expect(assigned.filter((t) => t === 'y')).toHaveLength(3);
+  });
+
+  it('con pesos iguales se reparten parejo, y el mismo día con los mismos productos da siempre lo mismo', () => {
     const two = ['estudio', 'ficha'];
+    const even = {};
     for (const date of ['2026-10-13', '2026-10-14', '2026-10-15', '2026-11-01']) {
-      const assigned = assignVideoTemplates(ids, date, new Map(), two);
-      expect(assigned).toEqual(assignVideoTemplates(ids, date, new Map(), two));
+      const assigned = assignVideoTemplates(ids, date, new Map(), two, even);
+      expect(assigned).toEqual(assignVideoTemplates(ids, date, new Map(), two, even));
       expect(assigned.filter((t) => t === 'estudio')).toHaveLength(3);
       expect(assigned.filter((t) => t === 'ficha')).toHaveLength(3);
     }
@@ -664,7 +698,7 @@ describe('plantillas', () => {
   it('por cuál se empieza cambia con el día: el primero de la lista no sale siempre igual', () => {
     const first = new Set<string>();
     for (let day = 1; day <= 28; day++) {
-      first.add(assignVideoTemplates(['a'], `2026-10-${String(day).padStart(2, '0')}`, new Map(), ['estudio', 'ficha'])[0]);
+      first.add(assignVideoTemplates(['a'], `2026-10-${String(day).padStart(2, '0')}`, new Map(), ['estudio', 'ficha'], {})[0]);
     }
     expect(first.size).toBe(2);
   });
@@ -677,7 +711,7 @@ describe('plantillas', () => {
       // Una plantilla que ya no existe no se respeta.
       ['c', 'retirada'],
     ]);
-    const assigned = assignVideoTemplates(['a', 'b', 'c', 'd'], TODAY, already, two);
+    const assigned = assignVideoTemplates(['a', 'b', 'c', 'd'], TODAY, already, two, {});
     expect(assigned.slice(0, 2)).toEqual(['ficha', 'ficha']);
     // Los que faltan compensan: quedan dos y dos.
     expect(assigned.slice(2)).toEqual(['estudio', 'estudio']);
@@ -765,17 +799,18 @@ describe('readVideoPicks', () => {
     expect(plan.date).toBe(TODAY);
     expect(plan.unreadHistory).toBe(0);
     expect(plan.picks).toHaveLength(4);
+    // De cada cuatro, tres con "estudio" y uno con "bloques".
+    expect(plan.picks.map((pick) => pick.template).sort()).toEqual(['bloques', 'estudio', 'estudio', 'estudio']);
     for (const pick of plan.picks) {
-      expect(pick.template).toBe('estudio');
       // Las cuatro ofertas dicen lo mismo, así que llevan la misma huella.
-      expect(pick.file).toBe(`${TODAY}/${pick.product.id}-60000-estudio-f1e1ca68`);
-      expect(pick.file).toBe(fileOf(TODAY, pick.product));
+      expect(pick.file).toBe(`${TODAY}/${pick.product.id}-60000-${pick.template}-dfd6e270`);
+      expect(pick.file).toBe(fileOf(TODAY, pick.product, pick.product.price, pick.template));
       expect(parseVideoObjectName(pick.file)).toEqual({
         date: TODAY,
         productId: pick.product.id,
         price: 60_000,
-        template: 'estudio',
-        fingerprint: 'f1e1ca68',
+        template: pick.template,
+        fingerprint: 'dfd6e270',
       });
       // Lo que el video dice va con el elegido: de ahí sale la huella y es lo que entrega la ruta.
       expect(pick.claims).toEqual({
@@ -787,7 +822,7 @@ describe('readVideoPicks', () => {
         envio_gratis: true,
         full: false,
       });
-      expect(videoFingerprint(pick.claims)).toBe('f1e1ca68');
+      expect(videoFingerprint(pick.claims)).toBe('dfd6e270');
       expect(pick.exists).toBe(false);
       expect(pick.score.points).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
       expect(pick.score.warning).toBeNull();
@@ -971,8 +1006,8 @@ describe('readVideoPicks', () => {
       const pick = byId.get(p.id)!;
       expect(pick.exists).toBe(false);
       expect(pick.file).not.toBe(old);
-      // El nombre nuevo es el de siempre con la huella de lo que diría ahora.
-      expect(pick.file).toBe(fileOf(TODAY, p, p.price, 'estudio', drop));
+      // El nombre nuevo es el de siempre con la huella de lo que diría ahora (y la plantilla que le toque).
+      expect(pick.file).toBe(fileOf(TODAY, p, p.price, pick.template, drop));
     }
     expect(byId.get(dropped.id)?.claims.baja_historial).toBe(25);
   });
@@ -1220,8 +1255,8 @@ describe('readVideoBoard', () => {
       discount: 40,
       checkedAt: p.price_checked_at,
       template: 'estudio',
-      videoUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio-7b6ff293.mp4`,
-      coverUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio-7b6ff293.jpg`,
+      videoUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio-16a0bfd5.mp4`,
+      coverUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio-16a0bfd5.jpg`,
       fileName: 'comparatech-audifonos-jbl-tune-520bt-reel.mp4',
       renderedAt: uploadedAt,
       // El mismo destino que el botón de compra del sitio.
@@ -1229,7 +1264,8 @@ describe('readVideoBoard', () => {
       posted: {},
     });
     expect(video.points).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
-    expect(video.reason).toContain('40% por debajo del precio de lista');
+    expect(video.reason).toContain('40% de descuento');
+    expect(video.reason).not.toContain('precio de lista');
     expect(video.reason).not.toContain('Ojo');
     expect(video.texts).toEqual(buildVideoTexts(p, NOW));
     expect(Object.keys(video.texts).sort()).toEqual(['facebook', 'instagram', 'tiktok', 'youtubeDescription', 'youtubeTitle']);
@@ -1245,7 +1281,7 @@ describe('readVideoBoard', () => {
     const { admin } = fakeSite({ products: [p], objects: stored([fileOf(TODAY, p)]) });
     const [video] = (await readVideoBoard(admin, NOW)).videos;
     expect(video.name).toBe('Samsung Smartwatch Galaxy Fit 3');
-    expect(video.texts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $60.000, 40% por debajo del precio de lista');
+    expect(video.texts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $60.000 con 40% de descuento');
     for (const text of [video.texts.instagram, video.texts.tiktok, video.texts.facebook, video.texts.youtubeDescription]) {
       expect(text.split('\n')).toContain('Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3');
     }
@@ -1253,11 +1289,31 @@ describe('readVideoBoard', () => {
 
   it('un video armado con el nombre de antes, con el código de fábrica, ya no es el de hoy', async () => {
     const p = strong({ name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3', brand: 'Samsung' });
-    const before = sha256(JSON.stringify([shortProductName(p.name), 'Samsung', 100_000, 40, null, true, false])).slice(0, 8);
+    const before = sha256(JSON.stringify([2, shortProductName(p.name), 'Samsung', 100_000, 40, null, true, false])).slice(0, 8);
     const { admin } = fakeSite({ products: [p], objects: stored([`${TODAY}/${p.id}-60000-estudio-${before}`]) });
     const board = await readVideoBoard(admin, NOW);
     expect(board.videos).toEqual([]);
     expect(board.stale).toBe(1);
+  });
+
+  it('un video armado con la huella de antes de la versión (decía "precio de lista") cuenta como viejo y el plan lo pide de nuevo', async () => {
+    const p = strong({ name: 'Audífonos Bluetooth JBL Tune 520BT - Color Negro' });
+    // Las mismas cifras, con la cuenta de antes: sin la versión adelante.
+    const said = [reelProductName(p.name), 'JBL', 100_000, 40, null, true, false];
+    const old = `${TODAY}/${p.id}-60000-estudio-${sha256(JSON.stringify(said)).slice(0, 8)}`;
+    expect(old).toBe(`${TODAY}/${p.id}-60000-estudio-7b6ff293`);
+    expect(fileOf(TODAY, p)).not.toBe(old);
+    catalog([p]);
+    const fake = fakeSite({ products: [p], objects: stored([old]) });
+
+    const board = await readVideoBoard(fake.admin, NOW);
+    expect(board.videos).toEqual([]);
+    expect(board.stale).toBe(1);
+
+    // El plan no lo da por armado: pide el de ahora, con otro nombre.
+    const plan = await readVideoPicks(fake.admin, NOW);
+    expect(plan.picks).toHaveLength(1);
+    expect(plan.picks[0]).toMatchObject({ exists: false, file: fileOf(TODAY, p) });
   });
 
   it('sin descuento de lista no muestra un precio de lista, y el nombre del archivo no lleva caracteres raros', async () => {
@@ -1509,7 +1565,7 @@ describe('readVideoBoard', () => {
     expect(VIDEO_WARNING_MARK).toBe('. Ojo: ');
     const parts = byId.get(doubtful.id)!.reason.split(VIDEO_WARNING_MARK);
     expect(parts).toHaveLength(2);
-    expect(parts[0]).toContain('40% por debajo del precio de lista');
+    expect(parts[0]).toContain('40% de descuento');
     expect(parts[1]).toMatch(/^otro vendedor lo ofrece a menos/);
     expect(byId.get(fine.id)?.reason).not.toContain('Ojo');
   });
@@ -1766,7 +1822,7 @@ describe('/api/social/videos/plan', () => {
     );
     // Con Full: no es la huella de las demás ofertas de este archivo.
     const file = fileOf(TODAY, p);
-    expect(file).not.toBe(`${TODAY}/${p.id}-60000-estudio-7b6ff293`);
+    expect(file).not.toBe(`${TODAY}/${p.id}-60000-estudio-16a0bfd5`);
     expect(row).toEqual({
       id: p.id,
       slug: p.slug,
@@ -1782,7 +1838,7 @@ describe('/api/social/videos/plan', () => {
       full: true,
       precio_revisado: p.price_checked_at,
       puntos: expect.any(Number),
-      motivo: expect.stringContaining('40% por debajo del precio de lista'),
+      motivo: expect.stringContaining('40% de descuento'),
       foto: 'https://http2.mlstatic.com/D_NQ_NP_123-F.jpg',
       plantilla: 'estudio',
       archivo: file,
@@ -1955,8 +2011,8 @@ describe('/api/social/videos/plan', () => {
     const { rows } = await call('/api/social/videos/plan?n=6');
     expect(rows).toHaveLength(4);
     for (const row of rows) {
-      // La cuenta que haría quien revisa desde afuera: siete campos de la respuesta, en este orden.
-      const said = [row.nombre_corto, row.marca, row.precio_lista, row.descuento, row.baja_historial, row.envio_gratis, row.full];
+      // La cuenta que haría quien revisa desde afuera: la versión y siete campos de la respuesta, en este orden.
+      const said = [2, row.nombre_corto, row.marca, row.precio_lista, row.descuento, row.baja_historial, row.envio_gratis, row.full];
       const print = sha256(JSON.stringify(said)).slice(0, 8);
       expect(row.archivo).toBe(`${TODAY}/${row.id}-${row.precio}-${row.plantilla}-${print}`);
       expect(row.archivo).toMatch(/^\d{4}-\d{2}-\d{2}\/[0-9a-f-]{36}-[1-9]\d*-[a-z0-9]+-[0-9a-f]{8}$/);
@@ -1966,7 +2022,7 @@ describe('/api/social/videos/plan', () => {
     // Cuatro ofertas que dicen cosas distintas: cuatro huellas.
     expect(new Set(rows.map((row) => row.archivo.slice(-8))).size).toBe(4);
     const byId = new Map(rows.map((row) => [row.id, row]));
-    expect(byId.get(plain.id)?.archivo).toBe(`${TODAY}/${plain.id}-60000-estudio-7b6ff293`);
+    expect(byId.get(plain.id)?.archivo).toBe(`${TODAY}/${plain.id}-60000-estudio-16a0bfd5`);
     expect(byId.get(full.id)).toMatchObject({ envio_gratis: true, full: true });
     expect(byId.get(dropped.id)).toMatchObject({
       marca: null,
@@ -1976,7 +2032,7 @@ describe('/api/social/videos/plan', () => {
       envio_gratis: false,
       full: false,
     });
-    expect(byId.get(dropped.id)?.archivo).toBe(`${TODAY}/${dropped.id}-60000-estudio-188b17c7`);
+    expect(byId.get(dropped.id)?.archivo).toBe(`${TODAY}/${dropped.id}-60000-estudio-900dbf84`);
     expect(byId.get(both.id)).toMatchObject({ precio_lista: 100_000, descuento: 40, baja_historial: 14 });
   });
 

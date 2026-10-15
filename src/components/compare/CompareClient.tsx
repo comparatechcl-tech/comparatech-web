@@ -422,7 +422,7 @@ function CompareView({
         En cyan va el menor de los dos precios y el envío gratis cuando solo
         uno lo tiene. También el valor más alto donde más es mejor: batería,
         RAM, almacenamiento, potencia, autonomía y resistencia IP. El
-        descuento se calcula sobre el precio de lista que informa el vendedor.
+        descuento y la cifra tachada los informa el vendedor en Mercado Libre.
         Las bajas y subidas salen de nuestro propio registro de precios. Solo
         mostramos las especificaciones que tienen los dos productos: revisa
         cuál te importa más antes de decidir.
@@ -655,9 +655,9 @@ function CompareTable({ pair: { a, b }, busy, stale }: { pair: Pair; busy: boole
                 {p.offer.list_price !== null && discount !== null && discount > 0 && (
                   <p
                     className="mt-0.5 text-xs text-muted"
-                    title="Descuento sobre el precio de lista informado en Mercado Libre"
+                    title="El descuento y la cifra tachada los informa el vendedor en Mercado Libre"
                   >
-                    Precio de lista <s>{formatCLP(p.offer.list_price)}</s> · -{discount}%
+                    Sin descuento <s>{formatCLP(p.offer.list_price)}</s> · -{discount}%
                   </p>
                 )}
               </div>

@@ -38,7 +38,7 @@ beforeAll(async () => {
         { n: 2, ...base, foto_local: 'no-existe.jpg' },
         { n: 3, ...base, foto_local: 'rota.jpg' },
         { n: 4, ...base, precio: 0, foto_local: 'foto.jpg' },
-        // Sin precio de lista pero con baja del historial, y sin ninguna de las dos (sin gancho).
+        // Sin descuento pero con baja del historial, y sin ninguna de las dos (sin gancho).
         { n: 5, nombre: 'Samsung Galaxy A56 5G 256 GB Negro', marca: 'Samsung', precio: 329990, baja_historial: 12, precio_revisado: '2026-09-06T04:30:00Z', envio_gratis: true, full: false, foto_local: 'foto.jpg' },
         { n: 6, nombre: 'Parlante Bluetooth portátil', precio: 29990, foto_local: 'foto.jpg' },
       ],
@@ -49,10 +49,11 @@ beforeAll(async () => {
 /**
  * Lo que la marca no dice nunca (ni en el video): "recomendado" (se dice "destacado"), que alguien revisó o
  * probó el producto, "verificado" (se dice "precio revisado"), la etiqueta "Publicidad", frases de urgencia o de
- * "el mejor", un precio "antes", preguntas que adivinan qué busca la gente y direcciones web (en un reel no se
- * pueden tocar). Se compara sin tildes y sin mayúsculas.
+ * "el mejor", un precio "antes", "normal" o "de lista" (la cifra tachada la pone el vendedor: se dice "sin
+ * descuento"), preguntas que adivinan qué busca la gente y direcciones web (en un reel no se pueden tocar). Se
+ * compara sin tildes y sin mayúsculas.
  */
-const PROHIBIDAS = [/recomendad/, /mejor precio/, /mas barat/, /imperdible/, /oferton/, /solo hoy/, /ultimas unidades/, /antes \$/, /rebajad/, /ahorra/, /verificad/, /publicidad/, /\bbuscas\b/, /revisamos/, /probamos/, /probad/, /https?:/, /www\./, /\.(cl|com)\b/];
+const PROHIBIDAS = [/recomendad/, /mejor precio/, /mas barat/, /imperdible/, /oferton/, /solo hoy/, /ultimas unidades/, /antes \$/, /rebajad/, /ahorra/, /verificad/, /publicidad/, /\bbuscas\b/, /revisamos/, /probamos/, /probad/, /precio normal/, /precio de lista/, /https?:/, /www\./, /\.(cl|com)\b/];
 const sinTildes = (texto: string) => texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const prohibidasEn = (texto: string) => PROHIBIDAS.filter((re) => re.test(sinTildes(texto))).map(String);
 
@@ -83,29 +84,33 @@ describe('plantillas: "bloques"', () => {
     }
   });
 
-  it('dice solo lo que trae el dato y nada que la marca no diga', async () => {
-    const P = await cargarPlantilla('bloques');
+  it('las dos plantillas dicen solo lo que trae el dato y nada que la marca no diga', async () => {
     const antes = globalThis.fetch;
     globalThis.fetch = () => Promise.reject(new Error('Sin red'));
     try {
-      const dicho: Record<number, string[]> = {};
-      for (const n of [1, 5, 6]) {
-        const escena = await P.preparar(leerProducto(DATA, n), P.CTA_POR_DEFECTO);
-        dicho[n] = escena.dicho.map((d: string | { texto: string }) => (typeof d === 'string' ? d : d.texto));
-        expect(prohibidasEn(dicho[n].join(' | ')), `producto ${n}`).toEqual([]);
-        expect(dicho[n][0]).toBe('ComparaTech');
-        expect(dicho[n]).toContain('Precios en Mercado Libre');
-        expect(dicho[n][dicho[n].length - 1]).toBe('Más ofertas en el perfil');
+      for (const plantilla of ['estudio', 'bloques']) {
+        const P = await cargarPlantilla(plantilla);
+        const dicho: Record<number, string[]> = {};
+        for (const n of [1, 5, 6]) {
+          const escena = await P.preparar(leerProducto(DATA, n), P.CTA_POR_DEFECTO);
+          dicho[n] = escena.dicho.map((d: string | { texto: string }) => (typeof d === 'string' ? d : d.texto));
+          expect(prohibidasEn(dicho[n].join(' | ')), `${plantilla}, producto ${n}`).toEqual([]);
+          expect(dicho[n][0]).toBe('ComparaTech');
+          expect(dicho[n]).toContain('Precios en Mercado Libre');
+          expect(dicho[n][dicho[n].length - 1]).toBe('Más ofertas en el perfil');
+        }
+        // Con descuento: "45%" / "de descuento", la cifra tachada con su rótulo "sin descuento" y las dos etiquetas.
+        expect(dicho[1].slice(1, 3), plantilla).toEqual(['45%', 'de descuento']);
+        expect(dicho[1], plantilla).toEqual(expect.arrayContaining(['$219.990', '−45%', 'sin descuento', '$399.990', 'Envío gratis', 'Full', 'Precio revisado 13/10 09:30']));
+        // Con baja del historial: "Bajó 12%" y de dónde sale; sin "Full" porque no viene. Una baja medida con el
+        // historial no es un descuento: la palabra no sale.
+        expect(dicho[5].slice(1, 3), plantilla).toEqual(['Bajó 12%', 'según nuestro historial']);
+        expect(dicho[5]).toContain('Envío gratis');
+        expect(dicho[5]).not.toContain('Full');
+        expect(dicho[5].join(' | '), plantilla).not.toMatch(/descuento/);
+        // Sin ninguna de las dos: no hay gancho ni descuento, ni etiquetas, ni fecha (no viene).
+        expect(dicho[6], plantilla).toEqual(['ComparaTech', 'Parlante Bluetooth portátil', '$29.990', 'Precios en Mercado Libre', 'Más ofertas en el perfil']);
       }
-      // Con precio de lista: el descuento y la frase del precio de lista, el precio de lista y las dos etiquetas.
-      expect(dicho[1].slice(1, 3)).toEqual(['45%', 'por debajo del precio de lista']);
-      expect(dicho[1]).toEqual(expect.arrayContaining(['$219.990', '−45%', 'precio de lista', '$399.990', 'Envío gratis', 'Full', 'Precio revisado 13/10 09:30']));
-      // Con baja del historial: "Bajó 12%" y de dónde sale; sin "Full" porque no viene.
-      expect(dicho[5].slice(1, 3)).toEqual(['Bajó 12%', 'según nuestro historial']);
-      expect(dicho[5]).toContain('Envío gratis');
-      expect(dicho[5]).not.toContain('Full');
-      // Sin ninguna de las dos: no hay gancho ni descuento, ni etiquetas, ni fecha (no viene).
-      expect(dicho[6]).toEqual(['ComparaTech', 'Parlante Bluetooth portátil', '$29.990', 'Precios en Mercado Libre', 'Más ofertas en el perfil']);
     } finally {
       globalThis.fetch = antes;
     }
@@ -179,7 +184,7 @@ describe('hacer.mjs: un video de verdad, con ffmpeg', () => {
       const r = hacer(DATA, '1', 'salida.mp4', '--plantilla', 'estudio', '--portada', 'portada.jpg');
       expect(r.out).toContain('Producto 1: Moto G86 power 256GB · $219.990');
       expect(r.out).toContain(
-        'En pantalla: "ComparaTech" | "45%" | "por debajo del precio de lista" | "MOTOROLA" | "Moto G86 power 256GB" | "$219.990" | "−45%" | "precio de lista" | "$399.990" (tachado) | "Envío gratis" | "Full" | "Precio revisado 13/10 09:30" | "Precios en Mercado Libre" | "Más ofertas en el perfil"'
+        'En pantalla: "ComparaTech" | "45%" | "de descuento" | "MOTOROLA" | "Moto G86 power 256GB" | "$219.990" | "−45%" | "sin descuento" | "$399.990" (tachado) | "Envío gratis" | "Full" | "Precio revisado 13/10 09:30" | "Precios en Mercado Libre" | "Más ofertas en el perfil"'
       );
       expect(r.out).toContain('10,2 s (305 cuadros)');
       expect(r.code).toBe(0);
@@ -202,7 +207,7 @@ describe('hacer.mjs: un video de verdad, con ffmpeg', () => {
         expect(r.out).toContain('Producto 1: Moto G86 power 256GB · $219.990');
         const enPantalla = r.out.split('\n').find((linea) => linea.includes('En pantalla:')) ?? '';
         expect(enPantalla).toContain(
-          'En pantalla: "ComparaTech" | "45%" | "por debajo del precio de lista" | "MOTOROLA" | "Moto G86 power 256GB" | "$219.990" | "−45%" | "precio de lista" | "$399.990" (tachado) | "Envío gratis" | "Full" | "Precio revisado 13/10 09:30" | "Precios en Mercado Libre" | "Más ofertas en el perfil"'
+          'En pantalla: "ComparaTech" | "45%" | "de descuento" | "MOTOROLA" | "Moto G86 power 256GB" | "$219.990" | "−45%" | "sin descuento" | "$399.990" (tachado) | "Envío gratis" | "Full" | "Precio revisado 13/10 09:30" | "Precios en Mercado Libre" | "Más ofertas en el perfil"'
         );
         expect(prohibidasEn(enPantalla)).toEqual([]);
         expect(r.out).toContain('9,6 s (288 cuadros)');

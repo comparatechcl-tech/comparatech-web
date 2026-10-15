@@ -104,10 +104,11 @@ export function resolverProducto(p, { foto, quien = 'producto', sinFoto = null }
   const nombre = limpia(String(p.nombre_corto || p.nombre || '').replace(/[″“”]/g, '"').replace(/[′‘’]/g, "'"));
   if (!nombre) throw new Error(`El ${quien} no tiene nombre`);
 
-  // El descuento se muestra solo si el dato trae las dos cosas (precio de lista y porcentaje) y calzan entre sí.
+  // El descuento se muestra solo si el dato trae las dos cosas (la cifra tachada, precio_lista, y el porcentaje)
+  // y calzan entre sí.
   if (!Number.isInteger(valor)) throw new Error(`El precio del ${quien} no es un número entero de pesos (${JSON.stringify(p.precio)}): no se arma el video`);
   const listaLeida = numero(p.precio_lista);
-  // Un precio de lista con decimales tampoco se redondea: se trata como si no viniera.
+  // Un precio_lista con decimales tampoco se redondea: se trata como si no viniera.
   const lista_ = listaLeida !== null && Number.isInteger(listaLeida) ? listaLeida : null;
   const desc = numero(p.descuento) === null ? null : Math.round(numero(p.descuento));
   let conLista = lista_ !== null && lista_ > valor && desc !== null && desc > 0 && desc < 100;
@@ -115,7 +116,7 @@ export function resolverProducto(p, { foto, quien = 'producto', sinFoto = null }
     conLista = false;
     avisos.push(`el descuento del dato (${desc}%) no calza con los precios (${precio(valor)} y ${precio(lista_)}): no se muestra descuento.`);
   } else if (!conLista && (lista_ !== null || desc !== null) && p.precio_lista != null && p.descuento != null) {
-    avisos.push('el precio de lista o el descuento del dato no son coherentes con el precio: no se muestra descuento.');
+    avisos.push('el precio sin descuento (precio_lista) o el descuento del dato no calzan con el precio: no se muestra descuento.');
   }
   const baja = numero(p.baja_historial) === null ? null : Math.round(numero(p.baja_historial));
 
@@ -148,8 +149,9 @@ export function resolverProducto(p, { foto, quien = 'producto', sinFoto = null }
   };
 }
 
-// Frases que no pueden salir en pantalla (ni siquiera en la llamada del cierre, que se escribe a mano).
-const PROHIBIDO = ['imperdible', 'mejor precio', 'el más barato', 'el mas barato', 'la más barata', 'la mas barata', 'solo hoy', 'sólo hoy', 'últimas unidades', 'ultimas unidades', 'rebajado', 'ahorra', 'recomendado', 'probamos', 'lo probé', 'revisamos'];
+// Frases que no pueden salir en pantalla (ni siquiera en la llamada del cierre, que se escribe a mano). La cifra
+// tachada la pone el vendedor: no se dice que sea un "precio normal" ni un "precio de lista".
+const PROHIBIDO = ['imperdible', 'mejor precio', 'el más barato', 'el mas barato', 'la más barata', 'la mas barata', 'solo hoy', 'sólo hoy', 'últimas unidades', 'ultimas unidades', 'rebajado', 'ahorra', 'recomendado', 'probamos', 'lo probé', 'revisamos', 'precio normal', 'precio de lista'];
 
 /** Revisa la llamada del cierre: sin direcciones web (en un reel no se pueden tocar) y sin frases prohibidas. */
 export function revisarLlamada(cta) {
