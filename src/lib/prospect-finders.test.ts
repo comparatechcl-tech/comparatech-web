@@ -80,9 +80,10 @@ describe('rankSearchResults', () => {
 
 describe('findBySearches', () => {
   /**
-   * ML de mentira: cada raíz tiene una hija; cada hija, tres búsquedas;
+   * ML de mentira: cada raíz tiene una hija; cada hija, cuatro búsquedas;
    * "hello kitty" no es de ningún tipo que el sitio publique; el catálogo
-   * devuelve dos fichas por búsqueda.
+   * devuelve tres fichas por búsqueda, una de ellas a medio armar (sin caja
+   * de compra).
    */
   function stubMl({ trendsStatus = 200 }: { trendsStatus?: number } = {}) {
     const fetchMock = vi.fn(async (input: string) => {
@@ -110,6 +111,7 @@ describe('findBySearches', () => {
           results: [
             { id: `MLC-${q}-1`, domain_id: url.searchParams.get('domain_id') },
             { id: `MLC-${q}-2`, domain_id: url.searchParams.get('domain_id') },
+            { id: `MLC-${q}-primitiva`, domain_id: url.searchParams.get('domain_id'), quality_type: 'PRIMITIVE' },
           ],
         });
       }
@@ -123,15 +125,18 @@ describe('findBySearches', () => {
     const fetchMock = stubMl();
     const findings = await findBySearches('tok', () => false);
 
-    // 7 subcategorías × 3 búsquedas; "hello kitty" no tiene un tipo del sitio.
+    // 7 subcategorías × 4 búsquedas (las que hay; el tope es 5); "hello kitty"
+    // no tiene un tipo del sitio, y la ficha a medio armar de cada búsqueda queda fuera.
     expect(findings.report).toMatchObject({
       subcategorias: 7,
-      busquedas_elegidas: 21,
+      busquedas_elegidas: 28,
       busquedas_sin_tipo_del_sitio: 1,
-      busquedas_en_catalogo: 20,
+      busquedas_en_catalogo: 27,
       busquedas_cortadas_por_tiempo: 0,
+      fichas_sin_caja_de_compra: 27,
     });
-    expect(findings.ids).toHaveLength(40);
+    expect(findings.ids).toHaveLength(54);
+    expect(findings.ids.some((id) => id.endsWith('-primitiva'))).toBe(false);
     // Primero la primera ficha de las búsquedas más frecuentes.
     expect(findings.ids[0]).toBe(`MLC-${ROOT_CATEGORIES[1]}9-uno-1`);
     expect(findings.highlights.size).toBe(0);
@@ -145,8 +150,8 @@ describe('findBySearches', () => {
     expect(findings.stages).toEqual({
       categorias: { consultas: 7, fallidas: 0, por_estado: {}, codigo_ml: null },
       tendencias: { consultas: 7, fallidas: 0, por_estado: {}, codigo_ml: null },
-      tipos: { consultas: 21, fallidas: 0, por_estado: {}, codigo_ml: null },
-      busqueda: { consultas: 20, fallidas: 0, por_estado: {}, codigo_ml: null },
+      tipos: { consultas: 28, fallidas: 0, por_estado: {}, codigo_ml: null },
+      busqueda: { consultas: 27, fallidas: 0, por_estado: {}, codigo_ml: null },
     });
   });
 
@@ -157,10 +162,10 @@ describe('findBySearches', () => {
       fetchMock.mock.calls.filter(([input]) => new URL(input).pathname === '/products/search').length;
     const findings = await findBySearches('tok', () => searchesMade() >= 5);
 
-    expect(findings.report).toMatchObject({ busquedas_elegidas: 21 });
+    expect(findings.report).toMatchObject({ busquedas_elegidas: 28 });
     expect(findings.report.busquedas_cortadas_por_tiempo as number).toBeGreaterThan(0);
     expect(findings.ids.length).toBeGreaterThan(0);
-    expect(findings.ids.length).toBeLessThan(40);
+    expect(findings.ids.length).toBeLessThan(54);
   });
 
   it('si ML bloquea lo más buscado, no hay búsquedas y la etapa queda con sus fallas', async () => {

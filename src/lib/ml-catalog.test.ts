@@ -184,14 +184,18 @@ describe('discoverDomains', () => {
 });
 
 describe('searchCatalogProducts', () => {
-  it('busca fichas activas dentro del tipo y devuelve id y tipo de cada una', async () => {
+  it('busca fichas activas dentro del tipo y dice cuáles pueden tener ganador', async () => {
+    const catalog = { listing_strategy: 'catalog_required' };
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
       json(200, {
         paging: { total: 496 },
         results: [
-          { id: 'MLC1', domain_id: 'MLC-CELLPHONES', name: 'Samsung S26 Ultra' },
+          { id: 'MLC1', domain_id: 'MLC-CELLPHONES', quality_type: 'COMPLETE', settings: catalog },
           { id: '', domain_id: 'MLC-CELLPHONES' },
-          { id: 'MLC2', name: 'sin tipo' },
+          { id: 'MLC2', name: 'sin tipo ni datos de caja de compra' },
+          // Las dos que nunca tienen ganador: a medio armar, o fuera del catálogo obligatorio.
+          { id: 'MLC3', domain_id: 'MLC-CELLPHONES', quality_type: 'PRIMITIVE', settings: catalog },
+          { id: 'MLC4', domain_id: 'MLC-CELLPHONES', quality_type: 'COMPLETE', settings: { listing_strategy: 'open' } },
         ],
       })
     );
@@ -200,8 +204,10 @@ describe('searchCatalogProducts', () => {
     expect(await searchCatalogProducts('samsung s26 ultra', 'MLC-CELLPHONES', 'tok', 5)).toEqual({
       status: 'ok',
       items: [
-        { id: 'MLC1', domainId: 'MLC-CELLPHONES' },
-        { id: 'MLC2', domainId: null },
+        { id: 'MLC1', domainId: 'MLC-CELLPHONES', buyBox: true },
+        { id: 'MLC2', domainId: null, buyBox: true },
+        { id: 'MLC3', domainId: 'MLC-CELLPHONES', buyBox: false },
+        { id: 'MLC4', domainId: 'MLC-CELLPHONES', buyBox: false },
       ],
     });
     const url = new URL(fetchMock.mock.calls[0][0]);

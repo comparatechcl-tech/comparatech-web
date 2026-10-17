@@ -82,11 +82,14 @@ export const dynamic = 'force-dynamic';
 const TIME_BUDGET_MS = 45_000;
 
 /**
- * Tope de productos nuevos analizados por corrida. Medido: 400 fichas en
- * 7,7 segundos, así que 300 deja holgura de sobra. Lo que no alcanza entra
- * en la corrida siguiente.
+ * Tope de productos nuevos analizados por corrida. Lo que no alcanza entra
+ * en la corrida siguiente. Destacados: medido, 400 fichas en 7,7 segundos,
+ * así que 300 deja holgura de sobra. Búsquedas: ~9 de cada 10 fichas no
+ * tienen a nadie vendiéndolas, así que hay que mirar más para encontrar las
+ * que sí; medido en producción el 17-10-2026, 595 fichas y la corrida entera
+ * en 12,6 s.
  */
-const DEFAULT_MAX_NEW_PRODUCTS = 300;
+const DEFAULT_MAX_NEW_PRODUCTS: Record<ProspectSourceName, number> = { destacados: 300, busquedas: 600 };
 
 /**
  * De dónde salen los productos si la corrida no dice otra cosa. La lista de
@@ -510,7 +513,7 @@ export async function GET(req: NextRequest) {
   const source = sourceFrom(req.nextUrl.searchParams.get('fuente'));
   const requestedLimit = Number(req.nextUrl.searchParams.get('limit'));
   const maxNewProducts =
-    Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : DEFAULT_MAX_NEW_PRODUCTS;
+    Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : DEFAULT_MAX_NEW_PRODUCTS[source];
   const minCommission = minCommissionFromEnv();
   // Una corrida de prueba a mano no avisa al healthcheck: no es la diaria.
   const healthcheckUrl = dryRun ? undefined : process.env.HEALTHCHECK_PROSPECT_URL;

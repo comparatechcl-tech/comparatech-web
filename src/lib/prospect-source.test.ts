@@ -481,18 +481,18 @@ describe('GET /api/cron/prospect', () => {
       const res = await prospectRoute(request('?fuente=busquedas'));
       expect(res.status).toBe(200);
       const body = await res.json();
-      // 7 subcategorías × 3 búsquedas × 3 fichas.
+      // 7 subcategorías × 4 búsquedas × 3 fichas, todas revisadas (el tope de esta fuente es 600).
       expect(body).toMatchObject({
         ok: true,
         fuente: 'busquedas',
-        found: 63,
-        inspected: 63,
+        found: 84,
+        inspected: 84,
         inserted: 40,
         would_insert: 40,
-        over_daily_cap: 23,
+        over_daily_cap: 44,
         max_new_candidates: 40,
-        busquedas_elegidas: 21,
-        busquedas_en_catalogo: 21,
+        busquedas_elegidas: 28,
+        busquedas_en_catalogo: 28,
       });
       expect(body.fuente_ml.problema).toBeNull();
       expect(body.highlighted).toBeUndefined();

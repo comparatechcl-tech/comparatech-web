@@ -34,14 +34,21 @@ const DAY_MS = 86_400_000;
 /** En cuántos días se recorre completo el segundo nivel de subcategorías (destacados). */
 const LEVEL2_ROTATION = 3;
 
-/** Las primeras búsquedas de cada subcategoría: las más frecuentes. */
-export const KEYWORDS_PER_CATEGORY = 3;
+/**
+ * Las primeras búsquedas de cada subcategoría: las más frecuentes. Unas 6 de
+ * cada 10 no son de un tipo que el sitio publique y se descartan sin buscar.
+ */
+export const KEYWORDS_PER_CATEGORY = 5;
 
-/** Tope de búsquedas por corrida: cada una cuesta dos consultas a ML (tipo y catálogo). */
-export const MAX_KEYWORDS = 150;
+/** Tope de búsquedas por corrida: cada una cuesta hasta dos consultas a ML (tipo y catálogo). */
+export const MAX_KEYWORDS = 250;
 
-/** Fichas por búsqueda: las primeras del catálogo dentro del tipo. */
-export const RESULTS_PER_SEARCH = 10;
+/**
+ * Fichas por búsqueda. Solo ~1 de cada 10 tiene alguien vendiéndola (el resto
+ * son fichas viejas del catálogo), y las del puesto 10 al 19 rindieron más
+ * que las primeras (medido el 17-10-2026): 20 da de dónde elegir varios días.
+ */
+export const RESULTS_PER_SEARCH = 20;
 
 /** Búsquedas en paralelo: ML respondió 16 a la vez sin 429 (medido el 17-10-2026). */
 const SEARCH_CONCURRENCY = 16;
@@ -213,6 +220,7 @@ export async function findBySearches(token: string, outOfTime: () => boolean): P
   const searchFailures: (MlFailure | null)[] = [];
   const found: { keyword: Keyword; domain: string; ids: string[] }[] = [];
   let withoutSiteType = 0;
+  let withoutBuyBox = 0;
   let cutForTime = 0;
 
   await mapWithConcurrency(keywords, SEARCH_CONCURRENCY, async (keyword) => {
@@ -235,11 +243,14 @@ export async function findBySearches(token: string, outOfTime: () => boolean): P
     const results = await searchCatalogProducts(keyword.keyword, domain, token, RESULTS_PER_SEARCH);
     searchFailures.push(results.status === 'error' ? results.failure : null);
     if (results.status !== 'ok') return;
+    // Las fichas sin caja de compra nunca tienen ganador: revisarlas solo gastaría dos consultas.
+    const withBuyBox = results.items.filter((r) => r.buyBox);
+    withoutBuyBox += results.items.length - withBuyBox.length;
     found.push({
       keyword,
       domain,
       // Se buscó dentro del tipo; igual queda fuera lo que el sitio no publica.
-      ids: results.items.filter((r) => categoryFromDomain(r.domainId ?? domain) !== null).map((r) => r.id),
+      ids: withBuyBox.filter((r) => categoryFromDomain(r.domainId ?? domain) !== null).map((r) => r.id),
     });
   });
 
@@ -264,6 +275,7 @@ export async function findBySearches(token: string, outOfTime: () => boolean): P
       busquedas_sin_tipo_del_sitio: withoutSiteType,
       busquedas_en_catalogo: searchFailures.length,
       busquedas_cortadas_por_tiempo: cutForTime,
+      fichas_sin_caja_de_compra: withoutBuyBox,
       muestra_busquedas: sample,
     },
   };

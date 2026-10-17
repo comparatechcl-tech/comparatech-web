@@ -311,6 +311,18 @@ export async function discoverDomains(query: string, token: string): Promise<MlL
   return { status: 'ok', items: [...new Set(items)] };
 }
 
+export interface CatalogSearchHit {
+  id: string;
+  domainId: string | null;
+  /**
+   * La ficha tiene caja de compra: es de catálogo obligatorio
+   * (listing_strategy catalog_required) y no está a medio armar (quality_type
+   * PRIMITIVE). Las demás nunca tienen ganador: medido el 17-10-2026, 0 de 37
+   * contra 22 de 163.
+   */
+  buyBox: boolean;
+}
+
 /**
  * Fichas de catálogo activas que calzan con una búsqueda dentro de un tipo de
  * producto, en el orden en que ML las devuelve (por parecido con el texto, no
@@ -322,7 +334,7 @@ export async function searchCatalogProducts(
   domainId: string,
   token: string,
   limit = 10
-): Promise<MlListResult<{ id: string; domainId: string | null }>> {
+): Promise<MlListResult<CatalogSearchHit>> {
   const params = new URLSearchParams({
     status: 'active',
     site_id: 'MLC',
@@ -332,10 +344,19 @@ export async function searchCatalogProducts(
   });
   const result = await requestJson(`${API}/products/search?${params}`, token);
   if (!result.ok) return { status: 'error', failure: result.failure };
-  const results = (result.data as { results?: { id?: unknown; domain_id?: unknown }[] } | null)?.results ?? [];
+  type Raw = { id?: unknown; domain_id?: unknown; quality_type?: unknown; settings?: { listing_strategy?: unknown } | null };
+  const results = (result.data as { results?: Raw[] } | null)?.results ?? [];
   const items = results
-    .filter((r): r is { id: string; domain_id?: unknown } => typeof r?.id === 'string' && r.id.length > 0)
-    .map((r) => ({ id: r.id, domainId: typeof r.domain_id === 'string' ? r.domain_id : null }));
+    .filter((r): r is Raw & { id: string } => typeof r?.id === 'string' && r.id.length > 0)
+    .map((r) => {
+      // Sin el dato no se descarta: solo lo que ML dice que no tiene caja de compra.
+      const strategy = r.settings?.listing_strategy;
+      return {
+        id: r.id,
+        domainId: typeof r.domain_id === 'string' ? r.domain_id : null,
+        buyBox: r.quality_type !== 'PRIMITIVE' && (strategy === undefined || strategy === 'catalog_required'),
+      };
+    });
   return { status: 'ok', items };
 }
 
