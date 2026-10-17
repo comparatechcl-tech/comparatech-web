@@ -244,10 +244,10 @@ export async function getSubcategories(rootId: string, token: string): Promise<S
   };
 }
 
-export type HighlightsResult =
-  /** items vacío: ML no tiene destacados para esa categoría (responde 404 en varias). */
-  | { status: 'ok'; items: { id: string; position: number }[] }
-  | { status: 'error'; failure: MlFailure };
+/** Una lista de ML, o por qué no respondió. Vacía si ML no tiene nada (muchas responden 404). */
+export type MlListResult<T> = { status: 'ok'; items: T[] } | { status: 'error'; failure: MlFailure };
+
+export type HighlightsResult = MlListResult<{ id: string; position: number }>;
 
 /**
  * Productos destacados de una categoría con su posición en el ranking de ML
@@ -274,6 +274,68 @@ export async function getHighlightedProducts(categoryId: string, token: string):
     }))
     .filter((c): c is { id: string; type: string; position: number } => c.type === 'PRODUCT' && !!c.id)
     .map((c) => ({ id: c.id, position: c.position }));
+  return { status: 'ok', items };
+}
+
+/**
+ * Lo más buscado en una categoría, de la búsqueda más frecuente a la menos
+ * ("motorola", "s26", "smartphone"…). Desde que ML cerró la lista de más
+ * vendidos (403 desde el 14-10-2026), es la señal de demanda que queda.
+ */
+export async function getTrendKeywords(categoryId: string, token: string): Promise<MlListResult<string>> {
+  const result = await requestJson(`${API}/trends/MLC/${categoryId}`, token);
+  if (!result.ok) return { status: 'error', failure: result.failure };
+  const list = Array.isArray(result.data) ? (result.data as { keyword?: unknown }[]) : [];
+  const items = list
+    .map((t) => (typeof t?.keyword === 'string' ? t.keyword.trim() : ''))
+    .filter((keyword) => keyword.length > 1);
+  return { status: 'ok', items };
+}
+
+/**
+ * Los tipos de producto (dominios de ML) a los que ML asocia una búsqueda,
+ * del más probable al menos: "samsung s26 ultra" → MLC-CELLPHONES. Sirve
+ * para buscar en el catálogo solo dentro del tipo que corresponde: sin él,
+ * la misma búsqueda trae fundas, láminas y libros sobre el teléfono.
+ */
+export async function discoverDomains(query: string, token: string): Promise<MlListResult<string>> {
+  const result = await requestJson(
+    `${API}/sites/MLC/domain_discovery/search?limit=3&q=${encodeURIComponent(query)}`,
+    token
+  );
+  if (!result.ok) return { status: 'error', failure: result.failure };
+  const list = Array.isArray(result.data) ? (result.data as { domain_id?: unknown }[]) : [];
+  const items = list
+    .map((d) => (typeof d?.domain_id === 'string' ? d.domain_id : ''))
+    .filter(Boolean);
+  return { status: 'ok', items: [...new Set(items)] };
+}
+
+/**
+ * Fichas de catálogo activas que calzan con una búsqueda dentro de un tipo de
+ * producto, en el orden en que ML las devuelve (por parecido con el texto, no
+ * por ventas: eso lo deciden después el ganador, el vendedor y la comisión).
+ * Con el tipo responde en menos de medio segundo; sin él, en ~2 s.
+ */
+export async function searchCatalogProducts(
+  query: string,
+  domainId: string,
+  token: string,
+  limit = 10
+): Promise<MlListResult<{ id: string; domainId: string | null }>> {
+  const params = new URLSearchParams({
+    status: 'active',
+    site_id: 'MLC',
+    q: query,
+    domain_id: domainId,
+    limit: String(limit),
+  });
+  const result = await requestJson(`${API}/products/search?${params}`, token);
+  if (!result.ok) return { status: 'error', failure: result.failure };
+  const results = (result.data as { results?: { id?: unknown; domain_id?: unknown }[] } | null)?.results ?? [];
+  const items = results
+    .filter((r): r is { id: string; domain_id?: unknown } => typeof r?.id === 'string' && r.id.length > 0)
+    .map((r) => ({ id: r.id, domainId: typeof r.domain_id === 'string' ? r.domain_id : null }));
   return { status: 'ok', items };
 }
 

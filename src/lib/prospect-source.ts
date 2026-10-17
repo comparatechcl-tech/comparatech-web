@@ -1,19 +1,34 @@
 /**
  * ¿Mercado Libre le respondió a la prospección?
  *
- * La prospección recorre las categorías de ML y pide la lista de más
+ * La prospección recorría las categorías de ML y pedía la lista de más
  * vendidos de cada una. Hasta el 13-10-2026 traía ~1.500 destacados por
  * corrida; desde el 14-10 ML responde 403 a esa lista y la prospección lo
  * tomaba como "no hay destacados": cada corrida quedaba como ok con 0
  * productos y el correo solo decía "0 candidatos nuevos". Así pasaron días
  * sin productos nuevos sin que nada avisara.
  *
- * Esto cuenta cómo respondió ML en cada etapa y decide si la corrida hizo su
- * trabajo. Si no, la corrida queda como fallida en cron_runs y el correo lo
- * dice con una frase que se entiende sin saber de la API.
+ * Esto cuenta cómo respondió ML en cada etapa de la fuente (la de más
+ * vendidos o la de lo más buscado, ver lib/prospect-finders) y decide si la
+ * corrida hizo su trabajo. Si no, la corrida queda como fallida en cron_runs
+ * y el correo lo dice con una frase que se entiende sin saber de la API.
  */
 
 import type { MlFailure } from '@/lib/ml-catalog';
+
+/**
+ * De dónde salen los productos nuevos: la lista de más vendidos de ML
+ * (bloqueada desde el 14-10-2026) o lo más buscado en cada categoría más el
+ * buscador del catálogo.
+ */
+export type ProspectSourceName = 'destacados' | 'busquedas';
+
+/**
+ * Las etapas con consultas a ML. Destacados: categorias → destacados.
+ * Búsquedas: categorias → tendencias (lo más buscado) → tipos (a qué tipo de
+ * producto corresponde cada búsqueda) → busqueda (fichas del catálogo).
+ */
+export type SourceStageName = 'categorias' | 'destacados' | 'tendencias' | 'tipos' | 'busqueda';
 
 /** Las consultas de una etapa de la prospección y cuántas fallaron. */
 export interface SourceStage {
@@ -25,6 +40,8 @@ export interface SourceStage {
   codigo_ml: string | null;
 }
 
+export type SourceStages = Partial<Record<SourceStageName, SourceStage>>;
+
 /**
  * Desde esta proporción de consultas fallidas la corrida cuenta como
  * fallida, como en el refresco de precios: buscó en menos de la mitad de lo
@@ -34,19 +51,35 @@ export interface SourceStage {
 export const MAX_FAILED_RATIO = 0.5;
 
 export interface SourceProblem {
-  /** Qué falló: el árbol de categorías que se recorre o su lista de más vendidos. */
-  etapa: 'categorias' | 'destacados';
+  /** Qué falló. */
+  etapa: SourceStageName;
   /**
    * bloqueo: ML respondió 403 (no deja leer); falla: 429, 5xx, red u otro
-   * error; vacio: respondió, pero sin ningún producto en ninguna categoría.
+   * error; vacio: respondió, pero sin ningún producto que analizar.
    */
   tipo: 'bloqueo' | 'falla' | 'vacio';
   consultas: number;
   fallidas: number;
-  /** El código HTTP más repetido entre las fallas; null si la lista vino vacía. */
+  /** El código HTTP más repetido entre las fallas; null si vino vacía. */
   estado: string | null;
   codigo_ml: string | null;
 }
+
+/**
+ * En qué orden se mira cada etapa. Primero la que trae los productos (o la
+ * primera de la cadena: sin lo más buscado no hay qué clasificar ni buscar);
+ * las categorías al final, porque sin ellas se busca igual en las raíces.
+ */
+const STAGE_ORDER: Record<ProspectSourceName, SourceStageName[]> = {
+  destacados: ['destacados', 'categorias'],
+  busquedas: ['tendencias', 'tipos', 'busqueda', 'categorias'],
+};
+
+/** La etapa que entrega los productos: la que se nombra si no llegó ninguno. */
+const PRODUCT_STAGE: Record<ProspectSourceName, SourceStageName> = {
+  destacados: 'destacados',
+  busquedas: 'busqueda',
+};
 
 /** Mayor primero; a igual cantidad, el primero que apareció. */
 function mostFrequent(counts: Map<string, number>): string | null {
@@ -81,11 +114,11 @@ export function tallyStage(failures: (MlFailure | null)[]): SourceStage {
   };
 }
 
-function failedTooMuch(stage: SourceStage): boolean {
-  return stage.consultas > 0 && stage.fallidas / stage.consultas >= MAX_FAILED_RATIO;
+function failedTooMuch(stage: SourceStage | undefined): stage is SourceStage {
+  return !!stage && stage.consultas > 0 && stage.fallidas / stage.consultas >= MAX_FAILED_RATIO;
 }
 
-function problemFrom(etapa: SourceProblem['etapa'], stage: SourceStage): SourceProblem {
+function problemFrom(etapa: SourceStageName, stage: SourceStage): SourceProblem {
   const estado = mostFrequent(new Map(Object.entries(stage.por_estado)));
   // Un 403 es ML diciendo que no deja leer esa lista. Lo demás (429, 5xx,
   // red, un 401 por token) es una falla, que puede pasar sola.
@@ -101,24 +134,27 @@ function problemFrom(etapa: SourceProblem['etapa'], stage: SourceStage): SourceP
 }
 
 /**
- * El problema de la corrida, o null si ML respondió. Primero la lista de
- * más vendidos (sin ella no entra nada), después las categorías (sin ellas
- * se busca solo en las raíces) y por último una lista que respondió vacía
- * en todas las categorías, que en la práctica es la fuente apagada: en un día
- * normal trae más de mil productos.
+ * El problema de la corrida, o null si ML respondió. Una etapa con la mitad
+ * o más de sus consultas fallidas (en el orden de STAGE_ORDER), o ningún
+ * producto encontrado: en un día normal la lista de más vendidos traía más
+ * de mil, así que cero es la fuente apagada.
  */
 export function assessSource(
-  stages: { categorias: SourceStage; destacados: SourceStage },
-  productosDestacados: number
+  stages: SourceStages,
+  productosEncontrados: number,
+  fuente: ProspectSourceName = 'destacados'
 ): SourceProblem | null {
-  if (failedTooMuch(stages.destacados)) return problemFrom('destacados', stages.destacados);
-  if (failedTooMuch(stages.categorias)) return problemFrom('categorias', stages.categorias);
-  if (productosDestacados === 0) {
+  for (const etapa of STAGE_ORDER[fuente]) {
+    const stage = stages[etapa];
+    if (failedTooMuch(stage)) return problemFrom(etapa, stage);
+  }
+  if (productosEncontrados === 0) {
+    const etapa = PRODUCT_STAGE[fuente];
     return {
-      etapa: 'destacados',
+      etapa,
       tipo: 'vacio',
-      consultas: stages.destacados.consultas,
-      fallidas: stages.destacados.fallidas,
+      consultas: stages[etapa]?.consultas ?? 0,
+      fallidas: stages[etapa]?.fallidas ?? 0,
       estado: null,
       codigo_ml: null,
     };
@@ -126,22 +162,45 @@ export function assessSource(
   return null;
 }
 
+/** Qué hizo ML con cada etapa, dicho en simple, y en qué se cuentan sus consultas. */
+const STAGE_TEXT: Record<SourceStageName, { bloqueo: string; falla: string; unidad: string }> = {
+  categorias: { bloqueo: 'bloqueó su lista de categorías', falla: 'no entregó su lista de categorías', unidad: 'consultas' },
+  destacados: { bloqueo: 'bloqueó la lista de más vendidos', falla: 'no entregó la lista de más vendidos', unidad: 'categorías' },
+  tendencias: {
+    bloqueo: 'bloqueó la lista de lo más buscado',
+    falla: 'no entregó la lista de lo más buscado',
+    unidad: 'categorías',
+  },
+  tipos: {
+    bloqueo: 'bloqueó la clasificación de lo más buscado',
+    falla: 'no entregó la clasificación de lo más buscado',
+    unidad: 'búsquedas',
+  },
+  busqueda: { bloqueo: 'bloqueó su buscador de productos', falla: 'falló en su buscador de productos', unidad: 'búsquedas' },
+};
+
+const EMPTY_LINE: Partial<Record<SourceStageName, string>> = {
+  destacados: 'Mercado Libre entregó vacía la lista de más vendidos: hoy no hubo de dónde sacar productos nuevos.',
+  busqueda: 'Las búsquedas en Mercado Libre no trajeron productos del sitio: hoy no hubo de dónde sacar productos nuevos.',
+};
+
 /**
  * La frase para el correo, sin jerga:
  * "Mercado Libre bloqueó la lista de más vendidos: hoy no se pudo buscar productos nuevos."
  */
 export function sourceProblemLine(problem: SourceProblem): string {
   if (problem.tipo === 'vacio') {
-    return 'Mercado Libre entregó vacía la lista de más vendidos: hoy no hubo de dónde sacar productos nuevos.';
+    return EMPTY_LINE[problem.etapa] ?? 'Mercado Libre no entregó productos: hoy no hubo de dónde sacar productos nuevos.';
   }
-  const verb = problem.tipo === 'bloqueo' ? 'bloqueó' : 'no entregó';
+  const text = STAGE_TEXT[problem.etapa];
+  const what = problem.tipo === 'bloqueo' ? text.bloqueo : text.falla;
   const halfDone = 'hoy la búsqueda de productos nuevos quedó a medias.';
   if (problem.etapa === 'categorias') {
-    return `Mercado Libre ${verb} su lista de categorías (${problem.fallidas} de ${problem.consultas} consultas): ${halfDone}`;
+    return `Mercado Libre ${what} (${problem.fallidas} de ${problem.consultas} consultas): ${halfDone}`;
   }
   return problem.fallidas < problem.consultas
-    ? `Mercado Libre ${verb} la lista de más vendidos en ${problem.fallidas} de ${problem.consultas} categorías: ${halfDone}`
-    : `Mercado Libre ${verb} la lista de más vendidos: hoy no se pudo buscar productos nuevos.`;
+    ? `Mercado Libre ${what} en ${problem.fallidas} de ${problem.consultas} ${text.unidad}: ${halfDone}`
+    : `Mercado Libre ${what}: hoy no se pudo buscar productos nuevos.`;
 }
 
 /**
@@ -150,7 +209,7 @@ export function sourceProblemLine(problem: SourceProblem): string {
  */
 export function sourceProblemError(problem: SourceProblem): string {
   if (problem.tipo === 'vacio') {
-    return `${sourceProblemLine(problem)} (0 productos en ${problem.consultas} categorías)`;
+    return `${sourceProblemLine(problem)} (0 productos en ${problem.consultas} ${STAGE_TEXT[problem.etapa].unidad})`;
   }
   const status = problem.estado === 'red' ? 'sin respuesta' : problem.estado ? `HTTP ${problem.estado}` : null;
   const detail = [status, problem.codigo_ml].filter(Boolean).join(' ');

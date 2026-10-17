@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getHighlightedProducts, getSubcategories, mlErrorsSince } from '@/lib/ml-catalog';
+import {
+  discoverDomains,
+  getHighlightedProducts,
+  getSubcategories,
+  getTrendKeywords,
+  mlErrorsSince,
+  searchCatalogProducts,
+} from '@/lib/ml-catalog';
 
 /*
  * Consultas de catálogo a Mercado Libre que alimentan la prospección. Lo que
@@ -122,6 +129,89 @@ describe('getSubcategories', () => {
     expect(await getSubcategories('MLC1051', 'tok')).toEqual({
       ids: ['MLC1051'],
       failure: { status: 403, code: 'PA_UNAUTHORIZED_RESULT_FROM_POLICIES' },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lo más buscado y el buscador del catálogo (la fuente desde el bloqueo)
+// ---------------------------------------------------------------------------
+
+describe('getTrendKeywords', () => {
+  it('devuelve las búsquedas en el orden de ML, sin vacías', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      json(200, [
+        { keyword: 'motorola', url: 'https://listado.mercadolibre.cl/motorola' },
+        { keyword: ' s26 ', url: 'x' },
+        { keyword: '' },
+        { url: 'sin palabra' },
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await getTrendKeywords('MLC1055', 'tok')).toEqual({ status: 'ok', items: ['motorola', 's26'] });
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.mercadolibre.com/trends/MLC/MLC1055');
+  });
+
+  it('una categoría sin tendencias (404) es una lista vacía; un 403 es un error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(404, { message: 'not found' })));
+    expect(await getTrendKeywords('MLC439912', 'tok')).toEqual({ status: 'ok', items: [] });
+    vi.stubGlobal('fetch', vi.fn(async () => json(403, BLOCKED)));
+    expect(await getTrendKeywords('MLC1055', 'tok')).toEqual({
+      status: 'error',
+      failure: { status: 403, code: 'PA_UNAUTHORIZED_RESULT_FROM_POLICIES' },
+    });
+  });
+});
+
+describe('discoverDomains', () => {
+  it('devuelve los tipos de producto de la búsqueda, sin repetir', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      json(200, [
+        { domain_id: 'MLC-AIR_FRYERS', category_id: 'MLC456045' },
+        { domain_id: 'MLC-AIR_FRYERS', category_id: 'MLC1' },
+        { domain_id: 'MLC-OIL_DEEP_FRYERS', category_id: 'MLC162500' },
+      ])
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await discoverDomains('freidora de aire', 'tok')).toEqual({
+      status: 'ok',
+      items: ['MLC-AIR_FRYERS', 'MLC-OIL_DEEP_FRYERS'],
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://api.mercadolibre.com/sites/MLC/domain_discovery/search?limit=3&q=freidora%20de%20aire'
+    );
+  });
+});
+
+describe('searchCatalogProducts', () => {
+  it('busca fichas activas dentro del tipo y devuelve id y tipo de cada una', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      json(200, {
+        paging: { total: 496 },
+        results: [
+          { id: 'MLC1', domain_id: 'MLC-CELLPHONES', name: 'Samsung S26 Ultra' },
+          { id: '', domain_id: 'MLC-CELLPHONES' },
+          { id: 'MLC2', name: 'sin tipo' },
+        ],
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(await searchCatalogProducts('samsung s26 ultra', 'MLC-CELLPHONES', 'tok', 5)).toEqual({
+      status: 'ok',
+      items: [
+        { id: 'MLC1', domainId: 'MLC-CELLPHONES' },
+        { id: 'MLC2', domainId: null },
+      ],
+    });
+    const url = new URL(fetchMock.mock.calls[0][0]);
+    expect(url.pathname).toBe('/products/search');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      status: 'active',
+      site_id: 'MLC',
+      q: 'samsung s26 ultra',
+      domain_id: 'MLC-CELLPHONES',
+      limit: '5',
     });
   });
 });

@@ -9,13 +9,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const mocks = vi.hoisted(() => {
-  // La base: cada consulta responde las filas que un test deja para su tabla.
+  // La base: cada consulta responde las filas que un test deja para su tabla,
+  // y lo que se guarda con upsert queda anotado para revisarlo.
   const rows: Record<string, unknown[]> = {};
+  const upserts: { table: string; rows: Record<string, unknown>[] }[] = [];
   const from = (table: string) => {
     const builder: Record<string, unknown> = {};
-    for (const method of ['select', 'eq', 'in', 'not', 'lt', 'or', 'order', 'limit', 'range', 'update', 'upsert']) {
+    for (const method of ['select', 'eq', 'in', 'not', 'lt', 'or', 'order', 'limit', 'range', 'update']) {
       builder[method] = () => builder;
     }
+    builder.upsert = (saved: Record<string, unknown>[]) => {
+      upserts.push({ table, rows: saved });
+      return builder;
+    };
     builder.then = (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
       Promise.resolve({ data: rows[table] ?? [], error: null, count: 0 }).then(resolve, reject);
     return builder;
@@ -23,6 +29,7 @@ const mocks = vi.hoisted(() => {
   return {
     admin: { from },
     rows,
+    upserts,
     finish: async (_ok: boolean, _summary: unknown, _error?: string) => {},
     ping: async (_url: string | undefined, _ok: boolean) => {},
     sendEmail: async (_params: { to: string | string[]; subject: string; html: string; text?: string }) =>
@@ -159,6 +166,40 @@ describe('assessSource', () => {
       codigo_ml: null,
     });
   });
+
+  describe('con la fuente de lo más buscado', () => {
+    const okSearch = { categorias: stage(7), tendencias: stage(86), tipos: stage(150), busqueda: stage(90) };
+
+    it('un día normal no es problema', () => {
+      expect(assessSource(okSearch, 600, 'busquedas')).toBeNull();
+    });
+
+    it('nombra la primera etapa de la cadena que falló: sin lo más buscado no hay qué buscar', () => {
+      const trendsBlocked = { ...okSearch, tendencias: stage(86, times(86, blocked)), busqueda: stage(0) };
+      expect(assessSource(trendsBlocked, 0, 'busquedas')).toMatchObject({
+        etapa: 'tendencias',
+        tipo: 'bloqueo',
+        fallidas: 86,
+      });
+      const searchDown = { ...okSearch, busqueda: stage(90, times(60, { status: 503, code: null })) };
+      expect(assessSource(searchDown, 200, 'busquedas')).toMatchObject({ etapa: 'busqueda', tipo: 'falla', estado: '503' });
+    });
+
+    it('si las búsquedas no trajeron nada que el sitio publique, la fuente vino vacía', () => {
+      expect(assessSource(okSearch, 0, 'busquedas')).toEqual({
+        etapa: 'busqueda',
+        tipo: 'vacio',
+        consultas: 90,
+        fallidas: 0,
+        estado: null,
+        codigo_ml: null,
+      });
+    });
+
+    it('lo que falla en la otra fuente no cuenta', () => {
+      expect(assessSource({ ...okSearch, destacados: stage(288, times(288, blocked)) }, 600, 'busquedas')).toBeNull();
+    });
+  });
 });
 
 describe('sourceProblemLine y sourceProblemError', () => {
@@ -186,6 +227,23 @@ describe('sourceProblemLine y sourceProblemError', () => {
     expect(sourceProblemLine(problem({ tipo: 'vacio', fallidas: 0, estado: null, codigo_ml: null }))).toBe(
       'Mercado Libre entregó vacía la lista de más vendidos: hoy no hubo de dónde sacar productos nuevos.'
     );
+  });
+
+  it('nombra cada etapa de la fuente de lo más buscado', () => {
+    expect(sourceProblemLine(problem({ etapa: 'tendencias', consultas: 86, fallidas: 86 }))).toBe(
+      'Mercado Libre bloqueó la lista de lo más buscado: hoy no se pudo buscar productos nuevos.'
+    );
+    expect(sourceProblemLine(problem({ etapa: 'tipos', tipo: 'falla', consultas: 150, fallidas: 100, estado: '429' }))).toBe(
+      'Mercado Libre no entregó la clasificación de lo más buscado en 100 de 150 búsquedas: hoy la búsqueda de productos nuevos quedó a medias.'
+    );
+    expect(sourceProblemLine(problem({ etapa: 'busqueda', tipo: 'falla', consultas: 90, fallidas: 90, estado: '503' }))).toBe(
+      'Mercado Libre falló en su buscador de productos: hoy no se pudo buscar productos nuevos.'
+    );
+    const empty = problem({ etapa: 'busqueda', tipo: 'vacio', consultas: 90, fallidas: 0, estado: null, codigo_ml: null });
+    expect(sourceProblemLine(empty)).toBe(
+      'Las búsquedas en Mercado Libre no trajeron productos del sitio: hoy no hubo de dónde sacar productos nuevos.'
+    );
+    expect(sourceProblemError(empty)).toContain('(0 productos en 90 búsquedas)');
   });
 
   it('para la bitácora agrega el detalle técnico', () => {
@@ -234,6 +292,79 @@ describe('GET /api/cron/prospect', () => {
     );
   }
 
+  /**
+   * ML de mentira para la fuente de lo más buscado: cada raíz con una hija,
+   * tres búsquedas por hija, todas de celulares, `perSearch` fichas por
+   * búsqueda, y cada ficha con un ganador verde que deja buena comisión.
+   */
+  function stubSearchMl({ trendsStatus = 200, perSearch = 3 }: { trendsStatus?: number; perSearch?: number } = {}) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        const url = new URL(input);
+        const path = url.pathname;
+        const category = /^\/categories\/(MLC\d+)$/.exec(path);
+        if (category) {
+          const id = category[1];
+          return json(200, {
+            id,
+            children_categories: ROOT_CATEGORIES.includes(id) ? [{ id: `${id}9` }] : [],
+            path_from_root: [{ id: 'MLC1051' }, { id }],
+          });
+        }
+        const trend = /^\/trends\/MLC\/(MLC\d+)$/.exec(path);
+        if (trend) {
+          if (trendsStatus !== 200) return json(trendsStatus, { status: trendsStatus, code: BLOCK_CODE });
+          return json(200, ['uno', 'dos', 'tres', 'cuatro'].map((n) => ({ keyword: `${trend[1]} ${n}` })));
+        }
+        if (path === '/sites/MLC/domain_discovery/search') return json(200, [{ domain_id: 'MLC-CELLPHONES' }]);
+        if (path === '/products/search') {
+          const q = (url.searchParams.get('q') ?? '').replace(/\s+/g, '-');
+          return json(200, {
+            results: Array.from({ length: perSearch }, (_, i) => ({ id: `P-${q}-${i}`, domain_id: 'MLC-CELLPHONES' })),
+          });
+        }
+        const items = /^\/products\/([^/]+)\/items$/.exec(path);
+        if (items) {
+          return json(200, {
+            paging: { total: 1 },
+            results: [
+              {
+                item_id: `I-${items[1]}`,
+                seller_id: 42,
+                price: 300_000,
+                original_price: 350_000,
+                category_id: 'MLC1055',
+                shipping: { free_shipping: true, logistic_type: 'fulfillment' },
+                official_store_id: null,
+              },
+            ],
+          });
+        }
+        const product = /^\/products\/([^/]+)$/.exec(path);
+        if (product) {
+          return json(200, {
+            id: product[1],
+            name: `Celular ${product[1]}`,
+            domain_id: 'MLC-CELLPHONES',
+            pictures: [{ url: `https://http2.mlstatic.com/D_${product[1]}.jpg` }],
+            attributes: [{ id: 'BRAND', name: 'Marca', value_name: 'Samsung' }],
+          });
+        }
+        if (path === '/users') {
+          return json(
+            200,
+            (url.searchParams.get('ids') ?? '').split(',').map((id) => ({
+              code: 200,
+              body: { id: Number(id), nickname: 'TIENDA', seller_reputation: { level_id: '5_green', transactions: { total: 9000 } } },
+            }))
+          );
+        }
+        throw new Error(`Consulta inesperada a ${path}`);
+      })
+    );
+  }
+
   const request = (query = '') =>
     new NextRequest(`https://comparatech-web.vercel.app/api/cron/prospect${query}`, {
       headers: { authorization: `Bearer ${SECRET}` },
@@ -244,6 +375,7 @@ describe('GET /api/cron/prospect', () => {
     vi.stubEnv('DIGEST_TO', 'dueno@example.com');
     vi.stubEnv('HEALTHCHECK_PROSPECT_URL', 'https://hc.example.com/abc');
     for (const table of Object.keys(mocks.rows)) delete mocks.rows[table];
+    mocks.upserts.length = 0;
     finish = vi.fn<typeof mocks.finish>(async () => {});
     ping = vi.fn<typeof mocks.ping>(async () => {});
     sendEmail = vi.fn<typeof mocks.sendEmail>(async () => ({ ok: true, id: 'correo-1' }) as const);
@@ -287,7 +419,7 @@ describe('GET /api/cron/prospect', () => {
     expect(mail.subject).toBe('ComparaTech · Falló la búsqueda de productos nuevos');
     expect(mail.text?.split('\n')[2]).toBe(`⚠ ${LINE_BLOCKED}`);
     expect(mail.html).toContain(LINE_BLOCKED);
-    expect(mail.html).not.toContain('hay días sin novedades');
+    expect(mail.html).not.toContain('no pasó los filtros');
 
     expect(ping).toHaveBeenCalledWith('https://hc.example.com/abc', false);
   });
@@ -300,7 +432,8 @@ describe('GET /api/cron/prospect', () => {
     const res = await prospectRoute(request());
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toMatchObject({ ok: true, highlighted: 1, already_known: 1, inspected: 0 });
+    // Sin ?fuente=, la de siempre.
+    expect(body).toMatchObject({ ok: true, fuente: 'destacados', highlighted: 1, already_known: 1, inspected: 0 });
     expect(body.fuente_ml.problema).toBeNull();
     expect(body.errores_ml).toEqual({});
 
@@ -339,5 +472,69 @@ describe('GET /api/cron/prospect', () => {
     expect(finish).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
     expect(ping).toHaveBeenCalledWith(undefined, false);
+  });
+
+  describe('con ?fuente=busquedas (lo más buscado)', () => {
+    it('guarda hasta 40 candidatos, marcados como de búsquedas y sin puesto de más vendidos', async () => {
+      stubSearchMl();
+
+      const res = await prospectRoute(request('?fuente=busquedas'));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // 7 subcategorías × 3 búsquedas × 3 fichas.
+      expect(body).toMatchObject({
+        ok: true,
+        fuente: 'busquedas',
+        found: 63,
+        inspected: 63,
+        inserted: 40,
+        would_insert: 40,
+        over_daily_cap: 23,
+        max_new_candidates: 40,
+        busquedas_elegidas: 21,
+        busquedas_en_catalogo: 21,
+      });
+      expect(body.fuente_ml.problema).toBeNull();
+      expect(body.highlighted).toBeUndefined();
+
+      const saved = mocks.upserts.filter((u) => u.table === 'product_candidates').flatMap((u) => u.rows);
+      expect(saved).toHaveLength(40);
+      for (const row of saved) {
+        expect(row).toMatchObject({
+          source: 'ml_trends',
+          highlight_position: null,
+          highlight_category_id: null,
+          status: 'pending_review',
+          seller_reputation: 'verde',
+          category: 'celulares',
+        });
+      }
+      // Primero la primera ficha de la búsqueda más frecuente de la primera categoría.
+      expect(saved[0].ml_product_id).toBe(`P-${ROOT_CATEGORIES[0]}9-uno-0`);
+      // Lo que pasó el tope no queda como descartado: vuelve mañana.
+      expect(mocks.upserts.filter((u) => u.table === 'prospect_seen')).toEqual([]);
+
+      expect(finish).toHaveBeenCalledWith(true, body, undefined);
+    });
+
+    it('si ML bloquea lo más buscado, la corrida falla y el correo lo dice', async () => {
+      stubSearchMl({ trendsStatus: 403 });
+
+      const res = await prospectRoute(request('?fuente=busquedas'));
+      expect(res.status).toBe(502);
+      const body = await res.json();
+      expect(body.fuente_ml.problema).toEqual({
+        etapa: 'tendencias',
+        tipo: 'bloqueo',
+        consultas: 7,
+        fallidas: 7,
+        estado: '403',
+        codigo_ml: BLOCK_CODE,
+      });
+      const line = 'Mercado Libre bloqueó la lista de lo más buscado: hoy no se pudo buscar productos nuevos.';
+      expect(finish.mock.calls[0][2]).toBe(`${line} (HTTP 403 ${BLOCK_CODE} en 7 de 7 consultas)`);
+      expect(sendEmail.mock.calls[0][0].html).toContain(line);
+      expect(mocks.upserts).toEqual([]);
+    });
   });
 });

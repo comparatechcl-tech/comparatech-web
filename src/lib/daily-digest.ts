@@ -331,8 +331,8 @@ export function buildDigestHtml(input: DigestInput): string {
       <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">Hoy no entraron productos nuevos.</p>`
         : `
       <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">
-        Hoy no entraron productos nuevos. Los destacados de Mercado Libre cambian
-        de a poco, así que hay días sin novedades.
+        Hoy no entraron productos nuevos: lo que apareció en Mercado Libre ya
+        estaba en el sitio o no pasó los filtros (vendedor verde y comisión).
       </p>`;
 
   // Lo único del correo que requiere acción además de aprobar: links que

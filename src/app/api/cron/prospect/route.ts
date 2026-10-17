@@ -19,33 +19,37 @@ import {
   passesCommissionFloor,
 } from '@/lib/prospect-filter';
 import {
-  ROOT_CATEGORIES,
   firstPictureUrl,
-  getHighlightedProducts,
   getProduct,
   getRootCategory,
   getSellers,
-  getSubcategories,
   getWinners,
   isGreenSeller,
   mapWithConcurrency,
   mlErrorsSince,
   type MlOffer,
 } from '@/lib/ml-catalog';
-import { assessSource, sourceProblemError, tallyStage, type SourceProblem } from '@/lib/prospect-source';
+import {
+  assessSource,
+  sourceProblemError,
+  type ProspectSourceName,
+  type SourceProblem,
+} from '@/lib/prospect-source';
+import { findByHighlights, findBySearches } from '@/lib/prospect-finders';
 
 /**
  * Prospección diaria del catálogo.
  *
- * Recorre los destacados de las subcategorías de las ramas que sigue el
- * proyecto, descarta lo que ya conoce, analiza el resto y deja en la cola de
- * revisión lo que agrega algo al sitio y deja una comisión que valga la
- * revisión (MIN_COMMISSION_CLP). Después manda el resumen por correo y, con
- * el tiempo que quede, refresca la cola.
+ * Busca productos en Mercado Libre (lib/prospect-finders: la lista de más
+ * vendidos de cada subcategoría, o lo más buscado llevado al catálogo),
+ * descarta lo que ya conoce, analiza el resto y deja en la cola de revisión
+ * lo que agrega algo al sitio y deja una comisión que valga la revisión
+ * (MIN_COMMISSION_CLP). Después manda el resumen por correo y, con el tiempo
+ * que quede, refresca la cola.
  *
  * El orden de las llamadas es lo que hace que todo entre en el techo de 60
  * segundos de la función:
- *   1. destacados de todas las subcategorías (una llamada cada una)
+ *   1. productos de la fuente (destacados o búsquedas)
  *   2. se descarta lo ya visto, sin gastar una sola llamada más
  *   3. ficha de catálogo de lo que queda
  *   4. ganador de la caja de compra SOLO de lo que cae en la taxonomía, y
@@ -57,16 +61,18 @@ import { assessSource, sourceProblemError, tallyStage, type SourceProblem } from
  * los volvía a descartar, y nunca llegaba al resto de la lista. Había 675
  * destacados sin revisar y entraban 1 a 4 candidatos por día.
  *
- * Si Mercado Libre no deja leer las categorías o sus destacados (la mitad o
- * más de las consultas con error, o ningún destacado en ninguna), la corrida
- * queda como fallida en cron_runs, responde 502 y el correo lo dice arriba
+ * Si Mercado Libre no deja leer la fuente (la mitad o más de las consultas
+ * de una etapa con error, o ningún producto encontrado), la corrida queda
+ * como fallida en cron_runs, responde 502 y el correo lo dice arriba
  * (lib/prospect-source). Antes se tomaba por "hoy no hay nada": desde el
  * 14-10-2026 ML responde 403 a los destacados y la prospección pasó días
  * anotándose como ok con 0 productos.
  *
  * Parámetros útiles para correrlo a mano:
- *   ?dry=1    analiza y reporta sin escribir nada ni mandar correo
- *   ?limit=N  cambia el tope de productos nuevos por corrida
+ *   ?dry=1             analiza y reporta sin escribir nada ni mandar correo
+ *   ?limit=N           cambia el tope de productos nuevos analizados por corrida
+ *   ?fuente=busquedas  usa lo más buscado en vez de la fuente por omisión
+ *   ?fuente=destacados usa la lista de más vendidos
  */
 
 export const maxDuration = 60;
@@ -82,12 +88,35 @@ const TIME_BUDGET_MS = 45_000;
  */
 const DEFAULT_MAX_NEW_PRODUCTS = 300;
 
+/**
+ * De dónde salen los productos si la corrida no dice otra cosa. La lista de
+ * más vendidos está bloqueada desde el 14-10-2026; lo más buscado se activa
+ * cuando el dueño apruebe lo que trae en modo prueba.
+ */
+const DEFAULT_SOURCE: ProspectSourceName = 'destacados';
+
+/**
+ * Las búsquedas que no alcanzaron a empezar hasta aquí se dejan para otro
+ * día: después vienen las fichas, ganadores y vendedores de lo encontrado.
+ */
+const SEARCH_DEADLINE_MS = 25_000;
+
+/**
+ * Tope de candidatos nuevos por corrida. Cada producto aprobado suma trabajo
+ * al refresco de precios, que con ~1.180 productos ya usa 35-58 s de sus 60:
+ * mejor que el catálogo crezca de a poco. Lo que sobra no se recuerda como
+ * descartado y vuelve en la corrida siguiente.
+ */
+const MAX_NEW_CANDIDATES = 40;
+
 const CONCURRENCY = 8;
 
 const DAY_MS = 86_400_000;
 
-/** En cuántos días se recorre completo el segundo nivel de subcategorías. */
-const LEVEL2_ROTATION = 3;
+/** ?fuente= de una corrida a mano; sin él, la de siempre. */
+function sourceFrom(param: string | null): ProspectSourceName {
+  return param === 'busquedas' || param === 'destacados' ? param : DEFAULT_SOURCE;
+}
 
 /**
  * Cuándo vuelve a mirarse algo descartado. Los dominios fuera del mapa no
@@ -478,6 +507,7 @@ export async function GET(req: NextRequest) {
   const startedAt = Date.now();
   const outOfTime = () => Date.now() - startedAt > TIME_BUDGET_MS;
   const dryRun = req.nextUrl.searchParams.get('dry') === '1';
+  const source = sourceFrom(req.nextUrl.searchParams.get('fuente'));
   const requestedLimit = Number(req.nextUrl.searchParams.get('limit'));
   const maxNewProducts =
     Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : DEFAULT_MAX_NEW_PRODUCTS;
@@ -510,57 +540,25 @@ export async function GET(req: NextRequest) {
     const token = await getMlToken();
     if (!token) return fail(502, `No se pudo obtener token de ML (${mlTokenError() ?? 'sin detalle'})`);
 
-    // 1. Subcategorías de las ramas que sigue el proyecto, en dos niveles. El
-    //    segundo nivel casi triplica los destacados (en un censo de octubre de
-    //    2026: 870 en el primero y 1.754 más en el segundo), pero son unas 600
-    //    categorías: se reparten en LEVEL2_ROTATION días para que cada corrida
-    //    entre en el tiempo de la función.
-    const level1Results = await mapWithConcurrency(ROOT_CATEGORIES, CONCURRENCY, (root) =>
-      getSubcategories(root, token)
-    );
-    const level1 = level1Results.flatMap((r) => r.ids);
-    const level1Ids = new Set(level1);
-    const level2Results = await mapWithConcurrency(level1, CONCURRENCY, (id) => getSubcategories(id, token));
-    const level2All = level2Results.flatMap((r) => r.ids).filter((id) => !level1Ids.has(id));
-    const turn = Math.floor(Date.now() / DAY_MS) % LEVEL2_ROTATION;
-    const level2 = level2All.filter((_, i) => i % LEVEL2_ROTATION === turn);
-    const subcategories = [...level1, ...level2];
-
-    // 2. Sus destacados, con la mejor posición de cada producto: si aparece
-    //    en varias categorías, vale la mejor. La posición dice qué se vende
-    //    más y ordena la cola de revisión.
-    const best = new Map<string, { position: number; categoryId: string }>();
-    const perCategory = await mapWithConcurrency(subcategories, CONCURRENCY, async (categoryId) => ({
-      categoryId,
-      result: await getHighlightedProducts(categoryId, token),
-    }));
-    for (const { categoryId, result } of perCategory) {
-      if (result.status !== 'ok') continue;
-      for (const { id, position } of result.items) {
-        const current = best.get(id);
-        if (!current || position < current.position) best.set(id, { position, categoryId });
-      }
-    }
-    // Los mejor rankeados primero: si no alcanza el tope de la corrida, lo
-    // que queda para mañana es lo que menos se vende.
-    const highlighted = [...best.entries()]
-      .sort((a, b) => a[1].position - b[1].position)
-      .map(([id]) => id);
+    // 1-2. Los productos de la fuente, el más interesante primero: los más
+    //      vendidos de cada subcategoría, o lo más buscado llevado al catálogo
+    //      (lib/prospect-finders).
+    const findings =
+      source === 'busquedas'
+        ? await findBySearches(token, () => Date.now() - startedAt > SEARCH_DEADLINE_MS)
+        : await findByHighlights(token);
+    const found = findings.ids;
 
     // ¿ML respondió? Lo que llegó se analiza igual; si no alcanzó para hacer
     // el trabajo del día, la corrida termina como fallida y el correo lo dice.
-    const sourceStages = {
-      categorias: tallyStage([...level1Results, ...level2Results].map((r) => r.failure)),
-      destacados: tallyStage(perCategory.map(({ result }) => (result.status === 'error' ? result.failure : null))),
-    };
-    const sourceProblem = assessSource(sourceStages, highlighted.length);
+    const sourceProblem = assessSource(findings.stages, found.length, source);
 
     // 3. Fuera lo ya conocido, antes de gastar llamadas de detalle: lo
     //    publicado, lo que ya pasó por revisión —incluido lo rechazado: si
     //    alguien dijo que no, no vuelve a la cola, salvo los rechazos por un
     //    precio o vendedor del momento— y lo descartado hace poco.
     //
-    //    De candidatos y descartes solo se consultan los ids destacados, de a
+    //    De candidatos y descartes solo se consultan los ids encontrados, de a
     //    200: leer las tablas completas chocaba con el tope de 1.000 filas de
     //    PostgREST. El catálogo se lee entero, de a páginas, porque el
     //    filtro de familias necesita todas las publicadas.
@@ -574,8 +572,8 @@ export async function GET(req: NextRequest) {
             .order('id', { ascending: true })
             .range(from, to) as unknown as PromiseLike<{ data: unknown; error: DbError }>
       ),
-      loadKnownCandidates(admin, highlighted),
-      loadExcludedSeen(admin, highlighted),
+      loadKnownCandidates(admin, found),
+      loadExcludedSeen(admin, found),
     ]);
     if (productsRead.error) return fail(500, `No se pudo leer el catálogo: ${productsRead.error.message}`);
     const knownProducts = productsRead.rows;
@@ -586,7 +584,7 @@ export async function GET(req: NextRequest) {
       ) as string[]
     );
 
-    const unseen = highlighted.filter((id) => !alreadySeen.has(id));
+    const unseen = found.filter((id) => !alreadySeen.has(id));
     const toInspect = unseen.slice(0, maxNewProducts);
     const seenRecords: SeenRecord[] = [];
 
@@ -686,7 +684,9 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      const highlight = best.get(item.productId);
+      // Solo la lista de más vendidos da un puesto; lo encontrado por
+      // búsquedas entra sin él, para no inventar un ranking de ventas.
+      const highlight = findings.highlights.get(item.productId);
       const retrying = known.retryable.has(item.productId);
       candidates.push({
         ml_product_id: item.productId,
@@ -708,7 +708,7 @@ export async function GET(req: NextRequest) {
         seller_nickname: seller?.nickname ?? null,
         seller_reputation: 'verde',
         seller_sales_count: seller?.salesCount ?? 0,
-        source: 'ml_highlights',
+        source: source === 'busquedas' ? 'ml_trends' : 'ml_highlights',
         // Explícitos para que un rechazado que vuelve entre como nuevo: el
         // upsert pisa la fila que ya existía.
         status: 'pending_review',
@@ -738,23 +738,28 @@ export async function GET(req: NextRequest) {
       seenRecords.push({ ml_product_id: candidate.ml_product_id, reason: 'familia_publicada', domain_id: candidate.ml_domain_id });
     }
 
+    // 10. Tope del día, quedándose con los primeros de la fuente (los más
+    //     vendidos o los de las búsquedas más frecuentes). Lo que sobra no
+    //     queda en prospect_seen: vuelve en la corrida siguiente.
+    const accepted = fresh.slice(0, MAX_NEW_CANDIDATES);
+
     let inserted = 0;
     let signalsSaved = true;
     let expiry: { expired: number } | { skipped: string } = { skipped: 'dry_run' };
     if (!dryRun) {
-      if (fresh.length > 0) {
+      if (accepted.length > 0) {
         let { error } = await admin
           .from('product_candidates')
-          .upsert(fresh, { onConflict: 'ml_product_id' });
+          .upsert(accepted, { onConflict: 'ml_product_id' });
         if (error && isMissingSchemaError(error)) {
           // Sin la migración 0018: se guarda sin las señales nuevas.
           signalsSaved = false;
           ({ error } = await admin
             .from('product_candidates')
-            .upsert(fresh.map(withoutOptionalColumns), { onConflict: 'ml_product_id' }));
+            .upsert(accepted.map(withoutOptionalColumns), { onConflict: 'ml_product_id' }));
         }
         if (error) return fail(502, error.message);
-        inserted = fresh.length;
+        inserted = accepted.length;
       }
 
       if (seenRecords.length > 0) {
@@ -766,14 +771,14 @@ export async function GET(req: NextRequest) {
       expiry = await expireStalePending(admin);
     }
 
-    // 10. El resumen sale ANTES de refrescar la cola: refrescar es lo que más
+    // 11. El resumen sale ANTES de refrescar la cola: refrescar es lo que más
     //     tarda, y si se comía el minuto de la función el correo no salía.
     //     Lo que importa del correo es lo que entró hoy, que ya está guardado.
     const digest: DigestResult = dryRun
       ? { ok: true, skipped: 'dry_run' }
       : await sendDailyDigest(admin, sourceProblem);
 
-    // 11. Refresca la cola de revisión: los candidatos pueden esperar días y
+    // 12. Refresca la cola de revisión: los candidatos pueden esperar días y
     //     el precio con que entraron deja de ser el que se ve en la ficha.
     let refreshed: RefreshResult | { error: string };
     try {
@@ -786,23 +791,25 @@ export async function GET(req: NextRequest) {
     const body = {
       ok,
       dry_run: dryRun,
+      fuente: source,
       inserted,
-      would_insert: fresh.length,
+      would_insert: accepted.length,
+      over_daily_cap: fresh.length - accepted.length,
+      max_new_candidates: MAX_NEW_CANDIDATES,
       signals_saved: signalsSaved,
       expired: expiry,
       candidates_refresh: refreshed,
       digest,
-      new_candidates: fresh.map((c) => ({
+      new_candidates: accepted.map((c) => ({
         name: c.name,
         category: c.category,
         price: c.price,
         seller: c.seller_nickname,
         position: c.highlight_position,
       })),
-      subcategories: subcategories.length,
-      subcategories_level2: `${level2.length} de ${level2All.length} (turno ${turn + 1}/${LEVEL2_ROTATION})`,
-      highlighted: highlighted.length,
-      already_known: highlighted.length - unseen.length,
+      ...findings.report,
+      found: found.length,
+      already_known: found.length - unseen.length,
       rejected_retried: toInspect.filter((id) => known.retryable.has(id)).length,
       inspected: toInspect.length,
       pending_for_next_run: Math.max(unseen.length - toInspect.length, 0),
@@ -818,7 +825,7 @@ export async function GET(req: NextRequest) {
       skipped_same_batch_variants: sameBatchVariants.length,
       skipped_already_in_catalog: skippedInCatalog.length,
       // Cómo respondió ML: sin esto, un bloqueo se veía igual que un día sin novedades.
-      fuente_ml: { problema: sourceProblem, ...sourceStages },
+      fuente_ml: { problema: sourceProblem, ...findings.stages },
       errores_ml: mlErrorsThisRun(),
       elapsed_ms: Date.now() - startedAt,
     };

@@ -196,15 +196,15 @@ describe('aviso de la búsqueda de productos nuevos', () => {
     expect(buildDigestSubject(input({ sourceProblem: null }))).toBe('ComparaTech · sin novedades hoy');
   });
 
-  it('el cuerpo lo pone antes que todo y no da la excusa de los días sin novedades', () => {
+  it('el cuerpo lo pone antes que todo y no culpa a los filtros de que no entrara nada', () => {
     const html = buildDigestHtml(input({ sourceProblem: blocked, pendingTotal: 3 }));
     expect(html).toContain(LINE);
     expect(html.indexOf(LINE)).toBeLessThan(html.indexOf('productos listos para aprobar'));
     expect(html).toContain('Hoy no entraron productos nuevos.');
-    expect(html).not.toContain('hay días sin novedades');
+    expect(html).not.toContain('no pasó los filtros');
 
     expect(buildDigestHtml(input())).not.toContain('Mercado Libre bloqueó');
-    expect(buildDigestHtml(input())).toContain('hay días sin novedades');
+    expect(buildDigestHtml(input())).toContain('no pasó los filtros');
   });
 
   it('el texto plano también, en la primera línea después del título', () => {
