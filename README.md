@@ -14,7 +14,9 @@ Cada push a `main` se publica solo en producción.
    sitio, descarta lo que ya conoce o no conviene (vendedor sin reputación
    verde, comisión baja, etc.) y deja el resto en la cola de candidatos
    (`product_candidates`). Al terminar manda el correo diario con lo que
-   entró y lo que falta revisar.
+   entró y lo que falta revisar. Si Mercado Libre no deja leer las listas
+   (desde el 14-10-2026 responde 403 a los destacados), la corrida queda
+   como fallida en `cron_runs` y el correo lo dice arriba.
 2. **Aprobación en el admin.** En `/admin/candidatos` los candidatos se
    aprueban o rechazan, normalmente en bloque: nadie revisa ni prueba cada
    producto. Aprobar los publica en `products` con su link de afiliado

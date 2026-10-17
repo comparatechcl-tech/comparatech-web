@@ -14,6 +14,7 @@ import {
 } from '@/lib/daily-digest';
 import { gatherDigestInput } from '@/lib/digest-data';
 import { minCommissionFromEnv, passesCommissionFloor } from '@/lib/prospect-filter';
+import type { SourceProblem } from '@/lib/prospect-source';
 import { parseRecipients, sendEmail, toBase64, toCsv } from '@/lib/email';
 
 // cache() de React solo existe en el runtime de servidor de Next (lo usa
@@ -165,6 +166,57 @@ describe('buildDigestHtml', () => {
     expect(buildDigestHtml(input({ pendingTotal: 2 }))).toContain('productos listos para aprobar');
     expect(buildDigestText(input({ publishedTotal: 1, clicsAyer: 1 }))).toContain('1 producto publicado');
     expect(buildDigestText(input({ publishedTotal: 1, clicsAyer: 1 }))).toContain('1 clic hacia Mercado Libre ayer');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cuando Mercado Libre no deja buscar productos nuevos
+// ---------------------------------------------------------------------------
+
+describe('aviso de la búsqueda de productos nuevos', () => {
+  // Lo que pasa desde el 14-10-2026: 403 en la lista de más vendidos de todas las categorías.
+  const blocked: SourceProblem = {
+    etapa: 'destacados',
+    tipo: 'bloqueo',
+    consultas: 288,
+    fallidas: 288,
+    estado: '403',
+    codigo_ml: 'PA_UNAUTHORIZED_RESULT_FROM_POLICIES',
+  };
+  const LINE = 'Mercado Libre bloqueó la lista de más vendidos: hoy no se pudo buscar productos nuevos.';
+
+  it('el asunto lo dice primero: explica los días sin publicar y no se arregla aprobando', () => {
+    expect(buildDigestSubject(input({ sourceProblem: blocked, daysSinceLastApproval: 5, pendingTotal: 3 }))).toBe(
+      'ComparaTech · Falló la búsqueda de productos nuevos · 3 por revisar'
+    );
+    expect(buildDigestSubject(input({ sourceProblem: blocked }))).toBe(
+      'ComparaTech · Falló la búsqueda de productos nuevos'
+    );
+    // Sin problema (o sin saberlo, como en la vista previa), el de siempre.
+    expect(buildDigestSubject(input({ sourceProblem: null }))).toBe('ComparaTech · sin novedades hoy');
+  });
+
+  it('el cuerpo lo pone antes que todo y no da la excusa de los días sin novedades', () => {
+    const html = buildDigestHtml(input({ sourceProblem: blocked, pendingTotal: 3 }));
+    expect(html).toContain(LINE);
+    expect(html.indexOf(LINE)).toBeLessThan(html.indexOf('productos listos para aprobar'));
+    expect(html).toContain('Hoy no entraron productos nuevos.');
+    expect(html).not.toContain('hay días sin novedades');
+
+    expect(buildDigestHtml(input())).not.toContain('Mercado Libre bloqueó');
+    expect(buildDigestHtml(input())).toContain('hay días sin novedades');
+  });
+
+  it('el texto plano también, en la primera línea después del título', () => {
+    const text = buildDigestText(input({ sourceProblem: blocked, errors: ['clics de ayer'] }));
+    expect(text.split('\n').slice(0, 5)).toEqual([
+      'ComparaTech — qué aprobar hoy',
+      '',
+      `⚠ ${LINE}`,
+      '',
+      '⚠ Datos incompletos: falló clics de ayer',
+    ]);
+    expect(buildDigestText(input())).not.toContain('⚠');
   });
 });
 

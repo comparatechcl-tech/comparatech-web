@@ -8,7 +8,7 @@ import { fetchAllRows } from '@/lib/admin-stats';
 import { syncTelegramPosts } from '@/lib/social/telegram';
 import { enrichFromMl, getMlToken, mlTokenAttempts, mlTokenError } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
-import { mapWithConcurrency, mlErrorCounts } from '@/lib/ml-catalog';
+import { mapWithConcurrency, mlErrorsSince } from '@/lib/ml-catalog';
 import { resolveLinkTarget } from '@/lib/link-check';
 import { readAffiliateSettings } from '@/lib/settings';
 import {
@@ -175,15 +175,7 @@ export async function GET(req: NextRequest) {
 
   // Los contadores de errores de ML viven en el proceso y se acumulan entre
   // corridas que reutilizan la misma función: se reporta solo lo de esta.
-  const mlErrorsBefore = mlErrorCounts();
-  const mlErrorsThisRun = () => {
-    const delta: Record<string, number> = {};
-    for (const [endpoint, n] of Object.entries(mlErrorCounts())) {
-      const d = n - (mlErrorsBefore[endpoint] ?? 0);
-      if (d > 0) delta[endpoint] = d;
-    }
-    return delta;
-  };
+  const mlErrorsThisRun = mlErrorsSince();
 
   /** Cierra la bitácora, avisa al healthcheck y responde. */
   const finish = async (ok: boolean, body: Record<string, unknown>, status: number, error?: string) => {

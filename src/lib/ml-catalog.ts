@@ -96,6 +96,33 @@ export function mlErrorCounts(): Record<string, number> {
   return Object.fromEntries(errorCounts);
 }
 
+/**
+ * Errores de ML desde este momento, por endpoint. Los contadores viven en el
+ * proceso y se acumulan entre corridas que reutilizan la misma función: cada
+ * cron reporta solo lo suyo.
+ */
+export function mlErrorsSince(): () => Record<string, number> {
+  const before = mlErrorCounts();
+  return () => {
+    const delta: Record<string, number> = {};
+    for (const [endpoint, n] of Object.entries(mlErrorCounts())) {
+      const d = n - (before[endpoint] ?? 0);
+      if (d > 0) delta[endpoint] = d;
+    }
+    return delta;
+  };
+}
+
+/**
+ * Por qué ML no respondió una consulta: el código HTTP (null si falló la
+ * red) y el código de error que manda en el cuerpo, si lo manda. Un bloqueo
+ * de ML se ve así: 403 con PA_UNAUTHORIZED_RESULT_FROM_POLICIES.
+ */
+export interface MlFailure {
+  status: number | null;
+  code: string | null;
+}
+
 /** "/products/MLC123/items" → "/products/:id/items", para agrupar los errores. */
 function endpointOf(url: string): string {
   try {
@@ -150,14 +177,52 @@ async function fetchMl(url: string, token: string, timeoutMs: number): Promise<R
   return res;
 }
 
-async function getJson(url: string, token: string, timeoutMs = 8000): Promise<unknown | null> {
-  const res = await fetchMl(url, token, timeoutMs);
-  if (!res?.ok) return null;
+/**
+ * El código de error que ML manda en el cuerpo ("code" o "error"). Solo
+ * letras, números y signos simples: va a la bitácora tal cual.
+ */
+async function mlErrorCode(res: Response): Promise<string | null> {
   try {
-    return await res.json();
+    const body = JSON.parse(await res.text()) as { code?: unknown; error?: unknown } | null;
+    const code = typeof body?.code === 'string' ? body.code : body?.error;
+    return typeof code === 'string' && /^[\w.:-]{1,80}$/.test(code) ? code : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * GET a ML que distingue "no hay nada" de "ML no respondió". Un 404 es una
+ * respuesta (data null): varios endpoints lo usan para decir que no hay
+ * nada. Lo demás que no sea 200 es una falla, con su motivo.
+ */
+async function requestJson(
+  url: string,
+  token: string,
+  timeoutMs = 8000
+): Promise<{ ok: true; data: unknown | null } | { ok: false; failure: MlFailure }> {
+  const res = await fetchMl(url, token, timeoutMs);
+  if (!res) return { ok: false, failure: { status: null, code: null } };
+  if (res.status === 404) return { ok: true, data: null };
+  if (!res.ok) return { ok: false, failure: { status: res.status, code: await mlErrorCode(res) } };
+  try {
+    return { ok: true, data: await res.json() };
+  } catch {
+    return { ok: false, failure: { status: res.status, code: 'respuesta_no_json' } };
+  }
+}
+
+/** Como requestJson, pero cualquier falla es null: para quien solo necesita el dato. */
+async function getJson(url: string, token: string, timeoutMs = 8000): Promise<unknown | null> {
+  const result = await requestJson(url, token, timeoutMs);
+  return result.ok ? result.data : null;
+}
+
+export interface SubcategoriesResult {
+  /** Las hijas. La misma categoría si no tiene, o si ML no respondió: igual sirve como fuente. */
+  ids: string[];
+  /** Por qué ML no respondió; null si respondió. */
+  failure: MlFailure | null;
 }
 
 /**
@@ -167,33 +232,40 @@ async function getJson(url: string, token: string, timeoutMs = 8000): Promise<un
  * árbol cada tanto, y una lista fija terminaría apuntando a categorías que
  * ya no existen.
  */
-export async function getSubcategories(rootId: string, token: string): Promise<string[]> {
-  const data = (await getJson(`${API}/categories/${rootId}`, token)) as
-    | { children_categories?: { id: string }[] }
-    | null;
+export async function getSubcategories(rootId: string, token: string): Promise<SubcategoriesResult> {
+  const result = await requestJson(`${API}/categories/${rootId}`, token);
+  const data = (result.ok ? result.data : null) as { children_categories?: { id: string }[] } | null;
 
-  const children = (data?.children_categories ?? []).map((c) => c.id).filter(Boolean);
-  // Una raíz sin hijos igual sirve como fuente por sí misma.
-  return children.length > 0 ? children : [rootId];
+  const children = (data?.children_categories ?? []).map((c) => c?.id).filter(Boolean);
+  return {
+    // Una raíz sin hijos igual sirve como fuente por sí misma.
+    ids: children.length > 0 ? children : [rootId],
+    failure: result.ok ? null : result.failure,
+  };
 }
+
+export type HighlightsResult =
+  /** items vacío: ML no tiene destacados para esa categoría (responde 404 en varias). */
+  | { status: 'ok'; items: { id: string; position: number }[] }
+  | { status: 'error'; failure: MlFailure };
 
 /**
  * Productos destacados de una categoría con su posición en el ranking de ML
- * (1 = el primero). Devuelve vacío si ML no tiene destacados para esa
- * categoría (responde 404 en varias).
+ * (1 = el primero).
  *
  * La posición importa: lo que ML destaca arriba es lo que más se vende, y es
  * la mejor señal disponible para decidir qué revisar primero.
+ *
+ * Una falla vuelve como error, no como lista vacía: desde el 14-10-2026 ML
+ * responde 403 a todas las categorías, y tomarlo por "no hay destacados"
+ * dejó la prospección días sin traer nada mientras se anotaba como ok.
  */
-export async function getHighlightedProducts(
-  categoryId: string,
-  token: string
-): Promise<{ id: string; position: number }[]> {
-  const data = (await getJson(`${API}/highlights/MLC/category/${categoryId}`, token)) as
-    | { content?: { id: string; type: string; position?: number }[] }
-    | null;
+export async function getHighlightedProducts(categoryId: string, token: string): Promise<HighlightsResult> {
+  const result = await requestJson(`${API}/highlights/MLC/category/${categoryId}`, token);
+  if (!result.ok) return { status: 'error', failure: result.failure };
+  const data = result.data as { content?: { id: string; type: string; position?: number }[] } | null;
 
-  return (data?.content ?? [])
+  const items = (data?.content ?? [])
     .map((c, index) => ({
       id: c?.id,
       type: c?.type,
@@ -202,14 +274,7 @@ export async function getHighlightedProducts(
     }))
     .filter((c): c is { id: string; type: string; position: number } => c.type === 'PRODUCT' && !!c.id)
     .map((c) => ({ id: c.id, position: c.position }));
-}
-
-/** Compatibilidad con quienes solo necesitan los ids. */
-export async function getHighlightedProductIds(
-  categoryId: string,
-  token: string
-): Promise<string[]> {
-  return (await getHighlightedProducts(categoryId, token)).map((c) => c.id);
+  return { status: 'ok', items };
 }
 
 /**

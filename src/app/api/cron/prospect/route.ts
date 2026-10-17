@@ -29,8 +29,10 @@ import {
   getWinners,
   isGreenSeller,
   mapWithConcurrency,
+  mlErrorsSince,
   type MlOffer,
 } from '@/lib/ml-catalog';
+import { assessSource, sourceProblemError, tallyStage, type SourceProblem } from '@/lib/prospect-source';
 
 /**
  * Prospección diaria del catálogo.
@@ -54,6 +56,13 @@ import {
  * cada día los mismos ~60 destacados —el 82% fuera del mapa de dominios—,
  * los volvía a descartar, y nunca llegaba al resto de la lista. Había 675
  * destacados sin revisar y entraban 1 a 4 candidatos por día.
+ *
+ * Si Mercado Libre no deja leer las categorías o sus destacados (la mitad o
+ * más de las consultas con error, o ningún destacado en ninguna), la corrida
+ * queda como fallida en cron_runs, responde 502 y el correo lo dice arriba
+ * (lib/prospect-source). Antes se tomaba por "hoy no hay nada": desde el
+ * 14-10-2026 ML responde 403 a los destacados y la prospección pasó días
+ * anotándose como ok con 0 productos.
  *
  * Parámetros útiles para correrlo a mano:
  *   ?dry=1    analiza y reporta sin escribir nada ni mandar correo
@@ -425,18 +434,19 @@ type DigestResult =
   | { ok: false; error: string };
 
 /**
- * Arma el resumen del día y lo manda por correo.
+ * Arma el resumen del día y lo manda por correo, con el motivo arriba si
+ * Mercado Libre no dejó buscar productos nuevos.
  *
  * Nunca lanza: si el correo falla, la prospección ya hizo su trabajo y sería
  * absurdo devolver error por eso. El motivo queda en la respuesta del cron y
  * en cron_runs, y el healthcheck recibe el aviso de falla.
  */
-async function sendDailyDigest(admin: SupabaseAdmin): Promise<DigestResult> {
+async function sendDailyDigest(admin: SupabaseAdmin, sourceProblem: SourceProblem | null): Promise<DigestResult> {
   const to = parseRecipients(process.env.DIGEST_TO);
   if (to.length === 0) return { ok: false, error: 'DIGEST_TO no configurado' };
 
   try {
-    const input = await gatherDigestInput(admin);
+    const input = { ...(await gatherDigestInput(admin)), sourceProblem };
     const result = await sendEmail({
       to,
       subject: buildDigestSubject(input),
@@ -482,8 +492,16 @@ export async function GET(req: NextRequest) {
   }
 
   const run = dryRun ? NOOP_RUN : await startCronRun(admin, 'prospect');
+  // 429/5xx/403/red por endpoint de ML, solo de esta corrida.
+  const mlErrorsThisRun = mlErrorsSince();
   const fail = async (status: number, error: string) => {
-    const body = { ok: false, dry_run: dryRun, error, elapsed_ms: Date.now() - startedAt };
+    const body = {
+      ok: false,
+      dry_run: dryRun,
+      error,
+      errores_ml: mlErrorsThisRun(),
+      elapsed_ms: Date.now() - startedAt,
+    };
     await Promise.all([run.finish(false, body, error), pingHealthcheck(healthcheckUrl, false)]);
     return NextResponse.json(body, { status });
   };
@@ -497,15 +515,13 @@ export async function GET(req: NextRequest) {
     //    2026: 870 en el primero y 1.754 más en el segundo), pero son unas 600
     //    categorías: se reparten en LEVEL2_ROTATION días para que cada corrida
     //    entre en el tiempo de la función.
-    const level1 = (
-      await mapWithConcurrency(ROOT_CATEGORIES, CONCURRENCY, (root) => getSubcategories(root, token))
-    ).flat();
+    const level1Results = await mapWithConcurrency(ROOT_CATEGORIES, CONCURRENCY, (root) =>
+      getSubcategories(root, token)
+    );
+    const level1 = level1Results.flatMap((r) => r.ids);
     const level1Ids = new Set(level1);
-    const level2All = (
-      await mapWithConcurrency(level1, CONCURRENCY, (id) => getSubcategories(id, token))
-    )
-      .flat()
-      .filter((id) => !level1Ids.has(id));
+    const level2Results = await mapWithConcurrency(level1, CONCURRENCY, (id) => getSubcategories(id, token));
+    const level2All = level2Results.flatMap((r) => r.ids).filter((id) => !level1Ids.has(id));
     const turn = Math.floor(Date.now() / DAY_MS) % LEVEL2_ROTATION;
     const level2 = level2All.filter((_, i) => i % LEVEL2_ROTATION === turn);
     const subcategories = [...level1, ...level2];
@@ -516,10 +532,11 @@ export async function GET(req: NextRequest) {
     const best = new Map<string, { position: number; categoryId: string }>();
     const perCategory = await mapWithConcurrency(subcategories, CONCURRENCY, async (categoryId) => ({
       categoryId,
-      items: await getHighlightedProducts(categoryId, token),
+      result: await getHighlightedProducts(categoryId, token),
     }));
-    for (const { categoryId, items } of perCategory) {
-      for (const { id, position } of items) {
+    for (const { categoryId, result } of perCategory) {
+      if (result.status !== 'ok') continue;
+      for (const { id, position } of result.items) {
         const current = best.get(id);
         if (!current || position < current.position) best.set(id, { position, categoryId });
       }
@@ -529,6 +546,14 @@ export async function GET(req: NextRequest) {
     const highlighted = [...best.entries()]
       .sort((a, b) => a[1].position - b[1].position)
       .map(([id]) => id);
+
+    // ¿ML respondió? Lo que llegó se analiza igual; si no alcanzó para hacer
+    // el trabajo del día, la corrida termina como fallida y el correo lo dice.
+    const sourceStages = {
+      categorias: tallyStage([...level1Results, ...level2Results].map((r) => r.failure)),
+      destacados: tallyStage(perCategory.map(({ result }) => (result.status === 'error' ? result.failure : null))),
+    };
+    const sourceProblem = assessSource(sourceStages, highlighted.length);
 
     // 3. Fuera lo ya conocido, antes de gastar llamadas de detalle: lo
     //    publicado, lo que ya pasó por revisión —incluido lo rechazado: si
@@ -744,7 +769,9 @@ export async function GET(req: NextRequest) {
     // 10. El resumen sale ANTES de refrescar la cola: refrescar es lo que más
     //     tarda, y si se comía el minuto de la función el correo no salía.
     //     Lo que importa del correo es lo que entró hoy, que ya está guardado.
-    const digest: DigestResult = dryRun ? { ok: true, skipped: 'dry_run' } : await sendDailyDigest(admin);
+    const digest: DigestResult = dryRun
+      ? { ok: true, skipped: 'dry_run' }
+      : await sendDailyDigest(admin, sourceProblem);
 
     // 11. Refresca la cola de revisión: los candidatos pueden esperar días y
     //     el precio con que entraron deja de ser el que se ve en la ficha.
@@ -755,8 +782,9 @@ export async function GET(req: NextRequest) {
       refreshed = { error: err instanceof Error ? err.message : String(err) };
     }
 
+    const ok = sourceProblem === null;
     const body = {
-      ok: true,
+      ok,
       dry_run: dryRun,
       inserted,
       would_insert: fresh.length,
@@ -789,16 +817,22 @@ export async function GET(req: NextRequest) {
       skipped_no_green_seller: skippedNoGreenSeller,
       skipped_same_batch_variants: sameBatchVariants.length,
       skipped_already_in_catalog: skippedInCatalog.length,
+      // Cómo respondió ML: sin esto, un bloqueo se veía igual que un día sin novedades.
+      fuente_ml: { problema: sourceProblem, ...sourceStages },
+      errores_ml: mlErrorsThisRun(),
       elapsed_ms: Date.now() - startedAt,
     };
 
-    // La prospección terminó bien aunque el correo haya fallado, y la
-    // bitácora lo dice así (el admin lee el correo aparte, en summary.digest).
-    // El healthcheck sí recibe la falla: un correo que no llega no avisa de
-    // ninguna otra forma.
-    const digestError = digest.ok ? undefined : `correo: ${digest.error}`;
-    await Promise.all([run.finish(true, body, digestError), pingHealthcheck(healthcheckUrl, digest.ok)]);
-    return NextResponse.json(body);
+    // Un correo que falla no tumba la corrida, y la bitácora lo dice así
+    // (el admin lee el correo aparte, en summary.digest). El healthcheck sí
+    // recibe la falla: un correo que no llega no avisa de ninguna otra forma.
+    // Lo que sí la tumba es que ML no haya dejado buscar.
+    const error =
+      [sourceProblem ? sourceProblemError(sourceProblem) : null, digest.ok ? null : `correo: ${digest.error}`]
+        .filter(Boolean)
+        .join(' · ') || undefined;
+    await Promise.all([run.finish(ok, body, error), pingHealthcheck(healthcheckUrl, ok && digest.ok)]);
+    return NextResponse.json(body, { status: ok ? 200 : 502 });
   } catch (err) {
     return fail(500, err instanceof Error ? err.message : String(err));
   }

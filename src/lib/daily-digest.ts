@@ -20,6 +20,7 @@
 import { formatCLP, formatDiscountPct } from '@/lib/format';
 import { getCategoryInfo } from '@/lib/categories';
 import { estimateCommission } from '@/lib/commission';
+import { sourceProblemLine, type SourceProblem } from '@/lib/prospect-source';
 
 export interface DigestCandidate {
   name: string;
@@ -63,6 +64,11 @@ export interface DigestInput {
   clicsAyer: number | null;
   /** Consultas que fallaron al armar el correo. */
   errors: string[];
+  /**
+   * Por qué la búsqueda de hoy no trajo productos nuevos, si Mercado Libre
+   * no respondió (lo pone la prospección; la vista previa no lo sabe).
+   */
+  sourceProblem?: SourceProblem | null;
 }
 
 const BG = '#f4f6f9';
@@ -186,7 +192,16 @@ function isStale(days: number | null): days is number {
 }
 
 export function buildDigestSubject(input: DigestInput): string {
-  const { newCandidates, pendingTotal, needsLink, daysSinceLastApproval } = input;
+  const { newCandidates, pendingTotal, needsLink, daysSinceLastApproval, sourceProblem } = input;
+
+  // Si Mercado Libre no dejó buscar, eso explica todo lo demás (por qué no
+  // hay nuevos, por qué se acumulan los días sin publicar) y no se arregla
+  // aprobando: va primero.
+  if (sourceProblem) {
+    const parts = ['Falló la búsqueda de productos nuevos'];
+    if (pendingTotal > 0) parts.push(`${pendingTotal} por revisar`);
+    return `ComparaTech · ${parts.join(' · ')}`;
+  }
 
   // Lo más caro de todo es no publicar: el ingreso sale de productos nuevos
   // en el sitio. Cuando eso pasa, el asunto lo dice antes que nada.
@@ -249,9 +264,16 @@ export function buildDigestHtml(input: DigestInput): string {
     daysSinceLastApproval,
     clicsAyer,
     errors,
+    sourceProblem,
   } = input;
 
   const top = topToApprove.slice(0, TOP_TO_APPROVE);
+  const sourceBlock = sourceProblem
+    ? `
+      <div style="margin-top:20px;padding:14px 16px;background:${WARN_BG};border:1px solid ${WARN_BORDER};border-radius:10px;font-size:14px;color:${WARN_TEXT};font-weight:600;line-height:1.5;">
+        ${escapeHtml(sourceProblemLine(sourceProblem))}
+      </div>`
+    : '';
   const staleNote = isStale(daysSinceLastApproval)
     ? `<div style="font-size:13px;color:${WARN_TEXT};margin-top:8px;font-weight:600;">
          ${daysSinceLastApproval} días sin publicar productos nuevos
@@ -303,7 +325,11 @@ export function buildDigestHtml(input: DigestInput): string {
       ? `
       <h2 style="font-size:15px;color:${TEXT};margin:28px 0 4px;">Nuevos desde ayer (${newCandidates.length})</h2>
       <p style="font-size:13px;color:${MUTED};margin:0;line-height:1.5;">${escapeHtml(countByCategory(newCandidates))}</p>`
-      : `
+      : sourceProblem
+        ? // La explicación de "días sin novedades" sería falsa: el motivo va arriba.
+          `
+      <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">Hoy no entraron productos nuevos.</p>`
+        : `
       <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">
         Hoy no entraron productos nuevos. Los destacados de Mercado Libre cambian
         de a poco, así que hay días sin novedades.
@@ -368,6 +394,7 @@ export function buildDigestHtml(input: DigestInput): string {
           </div>
           <div style="font-size:13px;color:${MUTED};margin-top:2px;">Qué aprobar hoy</div>
 
+          ${sourceBlock}
           ${errorsBlock}
 
           <div style="margin-top:20px;padding:18px;background:${BG};border-radius:10px;text-align:center;">
@@ -405,9 +432,11 @@ export function buildDigestText(input: DigestInput): string {
     daysSinceLastApproval,
     clicsAyer,
     errors,
+    sourceProblem,
   } = input;
 
   const lines = [`ComparaTech — qué aprobar hoy`, ``];
+  if (sourceProblem) lines.push(`⚠ ${sourceProblemLine(sourceProblem)}`, ``);
   if (errors.length > 0) lines.push(errorsLine(errors), ``);
   if (isStale(daysSinceLastApproval)) lines.push(`${daysSinceLastApproval} días sin publicar productos nuevos.`);
 
