@@ -94,6 +94,11 @@ const privateHeaders = [
   { key: 'Cache-Control', value: 'no-store' },
 ];
 
+/** El dominio de Vercel donde vivió el sitio hasta el 17-10-2026. */
+const OLD_PRODUCTION_HOST = 'comparatech-web.vercel.app';
+/** El dominio propio (comparatech.cl redirige a www en Vercel → Domains). */
+const CANONICAL_ORIGIN = 'https://www.comparatech.cl';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // No anunciar con qué está hecho el sitio: solo ayuda a quien busca
@@ -114,6 +119,29 @@ const nextConfig = {
       { protocol: 'https', hostname: '*.mlstatic.com' },
       { protocol: 'https', hostname: 'mlstatic.com' },
     ],
+  },
+  async redirects() {
+    // Mudanza al dominio propio (17-10-2026): las páginas públicas del
+    // dominio viejo de Vercel llevan al propio con 301, que es lo que Google
+    // y Bing piden para un cambio permanente (y la herramienta "Cambio de
+    // dirección" de Search Console revisa). Se quedan donde están:
+    // - /api: pg_cron (migración 0011), GitHub Actions y los scripts llaman
+    //   ahí con el secreto, y curl ni sigue la redirección ni reenvía la
+    //   clave a otro host: el refresco de precios se cortaría.
+    // - /social: las imágenes de lo que ya está programado en Metricool.
+    // - /admin: los accesos guardados del dueño (la clave es por dominio).
+    // - /_next: los archivos del propio sitio.
+    // Las vistas previas de Vercel tienen otro host y no se tocan.
+    const oldHost = [{ type: 'host', value: OLD_PRODUCTION_HOST }];
+    return [
+      { source: '/', has: oldHost, destination: `${CANONICAL_ORIGIN}/`, statusCode: 301 },
+      {
+        source: '/:path((?!api(?:/|$)|social(?:/|$)|admin(?:/|$)|_next/).*)',
+        has: oldHost,
+        destination: `${CANONICAL_ORIGIN}/:path`,
+        statusCode: 301,
+      },
+    ];
   },
   async headers() {
     const siteHeaders =

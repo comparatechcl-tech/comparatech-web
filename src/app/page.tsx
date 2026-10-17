@@ -13,10 +13,27 @@ import { BrandFace } from '@/components/brand/BrandFace';
 import { BRAND_GRADIENT, COMPARADOR_ICON, IconTile, categoryIconStyle } from '@/components/brand/CategoryIcon';
 import { QuickCompare } from '@/components/compare/QuickCompare';
 import { getSiteCategories } from '@/lib/queries/site-categories';
+import { jsonLdString } from '@/components/seo/ProductJsonLd';
+import { SITE_URL } from '@/lib/site';
 
 // El canonical va por pagina y no en el layout: ahi convertiria a todo el
 // sitio en duplicado de la home.
 export const metadata: Metadata = { alternates: { canonical: '/' } };
+
+/**
+ * El nombre del sitio para Google ("site name" en los resultados), en la
+ * portada como pide su guía. Hace falta porque "Compara Tech" también es un
+ * canal de YouTube grande y un sitio de Francia: con esto Google sabe que
+ * este dominio se llama ComparaTech y que comparatech.cl es otra forma de
+ * decirlo.
+ */
+const WEBSITE_JSON_LD = jsonLdString({
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'ComparaTech',
+  alternateName: ['comparatech.cl', 'ComparaTech Chile'],
+  url: `${SITE_URL}/`,
+});
 
 // Revalida sola: así el catálogo se actualiza (sin tener que hacer un
 // redeploy manual) cuando se cargan productos nuevos en Supabase. En la
@@ -142,6 +159,7 @@ export default async function HomePage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 sm:pt-8">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: WEBSITE_JSON_LD }} />
       {/* Hero. En el celular queda solo el título y el buscador: todo lo
           demás empujaba la primera oferta fuera de la pantalla, y el tráfico
           de redes llega casi entero desde el teléfono. En escritorio, la

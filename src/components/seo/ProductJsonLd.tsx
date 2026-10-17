@@ -1,6 +1,7 @@
 import { Product } from '@/lib/types';
 import { resolveDescription } from '@/lib/product-description';
 import { buyUrl } from '@/lib/outbound';
+import { SITE_URL } from '@/lib/site';
 
 /**
  * JSON dentro de un <script>. Un nombre o una spec con "</script>" cerraría
@@ -49,6 +50,11 @@ export function ProductJsonLd({ product }: { product: Product }) {
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: product.name,
+    // La ficha de este sitio (la misma del canonical) y el código del
+    // producto en el catálogo de Mercado Libre: con eso Google sabe que
+    // varias páginas hablan del mismo producto.
+    url: `${SITE_URL}/producto/${product.slug}`,
+    ...(product.ml_product_id ? { sku: product.ml_product_id } : {}),
     image: [product.image_url],
     description: resolveDescription(product),
     // Google marca el dato estructurado como inválido si `brand.name` viene
