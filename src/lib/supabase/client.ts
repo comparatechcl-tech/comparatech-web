@@ -5,7 +5,8 @@ let cached: SupabaseClient | null | undefined;
 /**
  * Cliente público (anon key) para lecturas server-side de datos de catálogo.
  * Devuelve null si aún no se configuraron las variables de entorno de
- * Supabase — en ese caso lib/queries cae de vuelta a los datos mock.
+ * Supabase. Ya no hay datos de ejemplo: en ese caso las lecturas del
+ * catálogo (lib/queries/products.ts) fallan a propósito.
  */
 export function getSupabase(): SupabaseClient | null {
   if (cached !== undefined) return cached;

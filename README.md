@@ -180,8 +180,9 @@ cp .env.local.example .env.local   # y completar los valores
 npm run dev                        # http://localhost:3000
 ```
 
-Sin las variables de Supabase el sitio muestra 8 productos de ejemplo, para
-poder navegarlo igual.
+Sin las variables de Supabase el sitio no funciona, a propósito: ya no hay
+datos de ejemplo, porque un deploy con las variables mal puestas habría
+publicado productos inventados.
 
 Antes de subir un cambio:
 
