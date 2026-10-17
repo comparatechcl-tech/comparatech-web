@@ -30,8 +30,9 @@ Cada push a `main` se publica solo en producción.
 | Origen | Qué llama | Cuándo |
 |---|---|---|
 | Supabase `pg_cron` (migración `0011`) | `/api/cron/refresh-prices` | Cada 30 minutos. Es el que manda. |
-| Vercel Cron (`vercel.json`) | `/api/cron/prospect` y `/api/cron/refresh-prices` | Una vez al día cada uno (Hobby no permite más). |
+| Vercel Cron (`vercel.json`) | `/api/cron/prospect`, `/api/cron/refresh-prices`, `/api/cron/social-telegram` y `/api/cron/backup` | Una vez al día cada uno (el respaldo, los lunes). Hobby no permite más. |
 | GitHub Actions (`.github/workflows/refresh-prices.yml`) | `/api/cron/refresh-prices` | Respaldo, y para lanzarlo a mano desde Actions. |
+| GitHub Actions (`.github/workflows/reels.yml`) | `/api/social/videos/plan` | Arma los videos del día con ffmpeg (`scripts/reels/generar.mjs`) y los sube a Supabase Storage. |
 
 Todos se identifican con `Authorization: Bearer <CRON_SECRET>`. El secreto
 tiene que ser el mismo en los tres lugares: variable de Vercel, secreto
@@ -85,8 +86,20 @@ Lo que el código no puede hacer y queda a mano: Instagram y Facebook piden
 la etiqueta "Colaboración pagada" en el contenido con links de afiliado, y
 solo se puede poner desde sus aplicaciones.
 
-El canal de Telegram sigue aparte y se publica solo
-(`/api/cron/social-telegram`).
+Además de lo programado en Metricool, el admin prepara dos cosas que el
+dueño sube a mano desde el teléfono:
+
+- **Historias** (`/admin/historias`): las ofertas del momento con su imagen
+  9:16 y el link de afiliado listo para el sticker de enlace de Instagram,
+  que ninguna herramienta para programar publicaciones puede poner.
+- **Videos** (`/admin/videos`): los reels del día, que arma GitHub Actions
+  (`.github/workflows/reels.yml`) y guarda en el bucket `reels` de Supabase
+  Storage. Se marcan por red al subirlos.
+
+El canal de Telegram (`/api/cron/social-telegram`) publica solo, pero solo
+si están `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHANNEL_ID`; sin ellas no hace
+nada. El botón "Recibe las ofertas en Telegram" aparece con
+`NEXT_PUBLIC_TELEGRAM_URL`.
 
 ### Admin
 
@@ -94,10 +107,16 @@ El canal de Telegram sigue aparte y se publica solo
 Cada persona tiene la suya en `ADMIN_USERS` y cada acción del admin vuelve a
 verificarla en el servidor. Secciones:
 
+- **Resumen**: salud del sitio, clics hacia Mercado Libre y cobertura por
+  categoría.
 - **Candidatos**: la cola para aprobar o rechazar, con carga de links en
   bloque.
 - **Productos**: el catálogo publicado; ocultar, cambiar el link, etc.
+- **Historias** y **Videos**: lo que hay para subir hoy a las redes.
 - **Problemas**: productos que salieron del sitio y por qué.
+- **Métricas**: clics hacia Mercado Libre y los datos de la Central de
+  Afiliados que se anotan a mano.
+- **Actividad**: quién hizo qué en el admin.
 - **Configuración**: parámetros de afiliado y links directos.
 
 ## Variables de entorno
@@ -136,7 +155,7 @@ después publicar, o publicar y aplicarla apenas se pueda.
 - `0011`: refresco cada 30 minutos con `pg_cron`. Ya aplicada. Antes de
   correrla por primera vez se guarda el secreto en el Vault:
   `select vault.create_secret('<valor de CRON_SECRET>', 'cron_secret');`
-- Pendientes, en este orden:
+- `0012` a `0018`: ya aplicadas (comprobado el 05-10-2026).
   1. `0012_seguridad.sql` — cierra la función de aprobación para que solo
      la use el servidor, oculta de la API pública los productos ocultos y
      evita productos repetidos. Para comprobar que quedó bien:
