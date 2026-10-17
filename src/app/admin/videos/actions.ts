@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { requireAdmin } from '@/lib/admin-auth';
 import { logAdminEvent } from '@/lib/admin-audit';
+import { markPriceWarning } from '@/lib/social/live-price';
 import { isOnSale, selectSocialProducts } from '@/lib/social/telegram';
 import { VIDEO_MARK, VIDEO_NETWORKS, VIDEO_RULES, type VideoNetwork } from '@/lib/social/videos';
 
@@ -24,8 +25,15 @@ import { VIDEO_MARK, VIDEO_NETWORKS, VIDEO_RULES, type VideoNetwork } from '@/li
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** posted_price es un entero de 32 bits en la base. */
 const MAX_PRICE = 2_147_483_647;
+/** Sin marca: un producto que ya no se vende no vuelve a sugerirse igual. Lo que importa es lo que ya está subido. */
+const NOT_ON_SALE = 'Ese producto ya no está a la venta en el sitio, así que no hace falta marcarlo. Si ya lo subiste, bórralo de esa red.';
 
-type MarkResult = { ok: true; postId: number } | { ok: false; error: string };
+/**
+ * `priceNow` y `warning` van solo cuando el precio de la base ya no es el que
+ * lleva el video: la marca se guarda igual (puede que el video ya esté
+ * arriba), y la página muestra el aviso para que se mire la publicación.
+ */
+type MarkResult = { ok: true; postId: number; priceNow?: number; warning?: string } | { ok: false; error: string };
 /** `gone`: no había una marca vigente con ese id (ya estaba deshecha), que no es lo mismo que una falla. */
 type UndoResult = { ok: true } | { ok: false; error: string; gone?: true };
 
@@ -55,7 +63,10 @@ export async function markVideoPosted(productId: string, network: VideoNetwork, 
   const read = await selectSocialProducts((columns) => admin.from('products').select(columns).eq('id', productId));
   if (read.error) return { ok: false, error: read.error };
   const product = read.rows[0];
-  if (!isOnSale(product)) return { ok: false, error: 'Ese producto ya no está a la venta en el sitio.' };
+  if (!isOnSale(product)) return { ok: false, error: NOT_ON_SALE };
+  // El precio cambió desde que se cargó la lista: se anota lo que se subió y se avisa.
+  const warning = markPriceWarning(price, product.price, 'lo');
+  const changed = warning ? { priceNow: product.price, warning } : {};
 
   // Un segundo toque sobre la misma red (la respuesta del primero se perdió,
   // o hay otra pestaña abierta) no la anota dos veces: con dos filas, al
@@ -74,7 +85,7 @@ export async function markVideoPosted(productId: string, network: VideoNetwork, 
     .limit(1);
   const already = ((previous.data ?? []) as { id: number }[])[0];
   // Si esta lectura falla se anota igual: es peor perder la marca que repetirla.
-  if (!previous.error && already) return { ok: true, postId: already.id };
+  if (!previous.error && already) return { ok: true, postId: already.id, ...changed };
 
   const { data, error } = await admin
     .from('social_posts')
@@ -100,7 +111,7 @@ export async function markVideoPosted(productId: string, network: VideoNetwork, 
     target: product.id,
     after: { video: 'subido', red: network, precio: price },
   });
-  return { ok: true, postId: (data as { id: number }).id };
+  return { ok: true, postId: (data as { id: number }).id, ...changed };
 }
 
 /**

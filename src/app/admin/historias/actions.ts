@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { requireAdmin } from '@/lib/admin-auth';
 import { logAdminEvent } from '@/lib/admin-audit';
+import { markPriceWarning } from '@/lib/social/live-price';
 import { STORY_MARK } from '@/lib/social/networks';
 import { STORY_RULES } from '@/lib/social/stories';
 import { isOnSale, selectSocialProducts } from '@/lib/social/telegram';
@@ -19,7 +20,12 @@ import { isOnSale, selectSocialProducts } from '@/lib/social/telegram';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-type MarkResult = { ok: true; postId: number } | { ok: false; error: string };
+/**
+ * `priceNow` y `warning` van solo cuando el precio de la base ya no es el de
+ * la tarjeta: la marca se guarda igual (puede que la historia ya esté
+ * arriba), y la página muestra el aviso para que se mire la publicación.
+ */
+type MarkResult = { ok: true; postId: number; priceNow?: number; warning?: string } | { ok: false; error: string };
 type UndoResult = { ok: true } | { ok: false; error: string };
 
 /**
@@ -29,8 +35,9 @@ type UndoResult = { ok: true } | { ok: false; error: string };
  * `shownPrice` es el precio que llevaba la imagen compartida. Es el que se
  * anota, y no el de la base en este instante: la lista de la página no se
  * actualiza sola y el precio pudo cambiar entre que se cargó y este toque.
- * Opcional, para que una pestaña abierta con la versión anterior siga
- * funcionando.
+ * Si cambió, la marca se guarda igual y la respuesta lo avisa (priceNow y
+ * warning). Opcional, para que una pestaña abierta con la versión anterior
+ * siga funcionando.
  */
 export async function markStoryPublished(productId: string, shownPrice?: number): Promise<MarkResult> {
   const actor = await requireAdmin();
@@ -42,13 +49,22 @@ export async function markStoryPublished(productId: string, shownPrice?: number)
   const read = await selectSocialProducts((columns) => admin.from('products').select(columns).eq('id', productId));
   if (read.error) return { ok: false, error: read.error };
   const product = read.rows[0];
-  if (!isOnSale(product)) return { ok: false, error: 'Ese producto ya no está a la venta en el sitio.' };
+  // Sin marca: un producto que ya no se vende no vuelve a la lista igual. Lo que importa es lo que ya está subido.
+  if (!isOnSale(product)) {
+    return {
+      ok: false,
+      error: 'Ese producto ya no está a la venta en el sitio, así que no hace falta marcarla. Si ya la subiste, bórrala de Instagram.',
+    };
+  }
 
   const price = Math.round(
     typeof shownPrice === 'number' && Number.isFinite(shownPrice) && shownPrice > 0 && shownPrice <= 2_147_483_647
       ? shownPrice
       : product.price
   );
+  // El precio cambió desde que se cargó la lista: se anota lo que se subió y se avisa.
+  const warning = markPriceWarning(price, product.price);
+  const changed = warning ? { priceNow: product.price, warning } : {};
 
   // Un segundo toque sobre la misma historia (la respuesta del primero se
   // perdió, o hay otra pestaña abierta) no la anota dos veces: con dos filas,
@@ -67,7 +83,7 @@ export async function markStoryPublished(productId: string, shownPrice?: number)
     .limit(1);
   const already = ((previous.data ?? []) as { id: number }[])[0];
   // Si esta lectura falla se anota igual: es peor perder la marca que repetirla.
-  if (!previous.error && already) return { ok: true, postId: already.id };
+  if (!previous.error && already) return { ok: true, postId: already.id, ...changed };
 
   const { data, error } = await admin
     .from('social_posts')
@@ -93,7 +109,7 @@ export async function markStoryPublished(productId: string, shownPrice?: number)
     target: product.id,
     after: { historia: 'publicada', precio: price },
   });
-  return { ok: true, postId: (data as { id: number }).id };
+  return { ok: true, postId: (data as { id: number }).id, ...changed };
 }
 
 /** Deshace una marca hecha por error: la oferta vuelve a estar disponible. */

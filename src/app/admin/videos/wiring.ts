@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction, TransitionStartFunction } from 'react';
 import type { VideoNetwork } from '@/lib/social/videos';
 import { markKey, type FileState, type GestureEnv, type GestureUi, type Mark, type Note } from './gestures';
+import type { LiveChecker } from './live';
 
 /**
  * El cableado de /admin/videos: lo que une las reglas de ./gestures con el
@@ -92,6 +93,52 @@ export function browserEnv(web: BrowserGlobals): GestureEnv {
     later: (run, ms) => {
       setTimeout(run, ms);
     },
+  };
+}
+
+/** Cada cuánto se mueve el reloj de la lista: el "hace N min" de cada tarjeta y la revisión sola. */
+export const LIVE_CLOCK_MS = 30_000;
+
+/** Lo que la revisión en vivo usa del navegador, fuera de los toques. Los tests, dobles. */
+export interface LiveGlobals {
+  document: {
+    visibilityState: string;
+    addEventListener(type: 'visibilitychange', listener: () => void): void;
+    removeEventListener(type: 'visibilitychange', listener: () => void): void;
+  };
+  /** Corre `run` cada `ms`; devuelve cómo pararlo. */
+  every(run: () => void, ms: number): () => void;
+  now(): number;
+}
+
+/**
+ * Lo que mueve la revisión en vivo sin que nadie toque nada: al montar la
+ * lista revisa todo; al volver a la pestaña, si la última revisión tiene más
+ * de 5 minutos; y cada medio minuto adelanta el reloj de las tarjetas y, con
+ * la pestaña a la vista, revisa antes de que el "mismo precio" venza.
+ * Devuelve cómo soltarlo todo al desmontar.
+ */
+export function watchLive(
+  web: LiveGlobals,
+  checker: Pick<LiveChecker, 'start' | 'stop' | 'visible' | 'tick'>,
+  clock: (now: number) => void
+): () => void {
+  const shown = () => web.document.visibilityState === 'visible';
+  const onChange = () => {
+    if (!shown()) return;
+    clock(web.now());
+    checker.visible();
+  };
+  checker.start();
+  web.document.addEventListener('visibilitychange', onChange);
+  const stop = web.every(() => {
+    clock(web.now());
+    if (shown()) checker.tick();
+  }, LIVE_CLOCK_MS);
+  return () => {
+    web.document.removeEventListener('visibilitychange', onChange);
+    stop();
+    checker.stop();
   };
 }
 

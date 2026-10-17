@@ -167,7 +167,13 @@ describe('markVideoPosted', () => {
     db.tables.products = [product({ price: 45_990 })];
 
     const result = await markVideoPosted(PRODUCT, 'tiktok', 49_990);
-    expect(result).toEqual({ ok: true, postId: 1000 });
+    // Se anota igual (puede que ya esté arriba), y la respuesta trae el precio de ahora y el aviso.
+    expect(result).toEqual({
+      ok: true,
+      postId: 1000,
+      priceNow: 45_990,
+      warning: 'Ojo: el precio cambió a $45.990 desde que cargaste la lista. Si ya lo subiste, revisa la publicación.',
+    });
     expect(posts()).toHaveLength(1);
     expect(posts()[0]).toMatchObject({
       id: 1000,
@@ -231,8 +237,11 @@ describe('markVideoPosted', () => {
     expect(db.ops).toHaveLength(0);
   });
 
-  it('no anota un producto que ya no está a la venta', async () => {
-    const gone = { ok: false, error: 'Ese producto ya no está a la venta en el sitio.' };
+  it('no anota un producto que ya no está a la venta, y dice qué hacer con lo ya subido', async () => {
+    const gone = {
+      ok: false,
+      error: 'Ese producto ya no está a la venta en el sitio, así que no hace falta marcarlo. Si ya lo subiste, bórralo de esa red.',
+    };
     for (const state of [{ is_active: false }, { is_hidden: true }, { deleted_at: '2026-10-12T10:00:00.000Z' }]) {
       db.tables.products = [product(state)];
       expect(await markVideoPosted(PRODUCT, 'instagram', 49_990)).toEqual(gone);
@@ -297,6 +306,37 @@ describe('markVideoPosted', () => {
   it('redondea el precio a pesos enteros, como lo guarda la base', async () => {
     await markVideoPosted(PRODUCT, 'instagram', 49_989.6);
     expect(posts()[0].posted_price).toBe(49_990);
+  });
+
+  it('con el precio de la base igual al de la tarjeta, la respuesta no trae aviso', async () => {
+    expect(await markVideoPosted(PRODUCT, 'instagram', 49_990)).toEqual({ ok: true, postId: 1000 });
+    // Medio peso de diferencia es el mismo precio una vez redondeado.
+    expect(await markVideoPosted(PRODUCT, 'tiktok', 49_989.6)).toEqual({ ok: true, postId: 1001 });
+  });
+
+  it('si el precio cambió, la marca se guarda con el de la tarjeta y la respuesta trae el de ahora y el aviso', async () => {
+    // Subió desde que se cargó la lista.
+    db.tables.products = [product({ price: 52_990 })];
+    const result = await markVideoPosted(PRODUCT, 'instagram', 49_990);
+    expect(result).toEqual({
+      ok: true,
+      postId: 1000,
+      priceNow: 52_990,
+      warning: 'Ojo: el precio cambió a $52.990 desde que cargaste la lista. Si ya lo subiste, revisa la publicación.',
+    });
+    // Lo que se anota es lo que se subió: el precio que lleva el video.
+    expect(posts()[0]).toMatchObject({ posted_price: 49_990, channel: 'instagram', status: 'publicado' });
+    // Y la bitácora dice ese mismo precio.
+    expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toMatchObject({ after: { video: 'subido', red: 'instagram', precio: 49_990 } });
+  });
+
+  it('un segundo toque con el precio ya cambiado repite el aviso sin anotar otra vez', async () => {
+    db.tables.products = [product({ price: 45_990 })];
+    const first = await markVideoPosted(PRODUCT, 'youtube', 49_990);
+    const second = await markVideoPosted(PRODUCT, 'youtube', 49_990);
+    expect(second).toEqual(first);
+    expect(second).toMatchObject({ ok: true, priceNow: 45_990, warning: expect.stringContaining('Si ya lo subiste') });
+    expect(posts()).toHaveLength(1);
   });
 
   it('sin sesión de admin no lee ni escribe nada', async () => {

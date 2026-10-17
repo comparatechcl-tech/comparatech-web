@@ -59,9 +59,14 @@ vi.mock('@/app/admin/videos/gestures', async (importOriginal) => {
 
 // Las acciones escriben en la base: acá solo importa que la lista se las entregue a las reglas.
 vi.mock('@/app/admin/videos/actions', () => ({ markVideoPosted: vi.fn(), undoVideoPosted: vi.fn() }));
+// La revisión en vivo pregunta a Mercado Libre (y su módulo lee la configuración con cache() de React,
+// que fuera de Next no existe): acá se le entregan las respuestas a mano.
+vi.mock('@/app/admin/live-price-actions', () => ({ checkLivePrices: vi.fn(async () => ({})) }));
 
+import { checkLivePrices } from '@/app/admin/live-price-actions';
 import { markVideoPosted, undoVideoPosted } from '@/app/admin/videos/actions';
 import type { GestureActions, GestureConfig, GestureEnv, GestureUi, Mark, Note } from '@/app/admin/videos/gestures';
+import { SKIPPED_LINE } from '@/app/admin/videos/live';
 import { VideoCard, VideoList, visitFor, type VideoCardProps } from '@/app/admin/videos/VideoList';
 import type { ReadyVideo } from '@/lib/social/videos';
 
@@ -98,6 +103,9 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
       youtubeDescription: `Descripción de YouTube ${seq}`,
     },
     posted: {},
+    mlUrl: `https://www.mercadolibre.cl/p/MLC${seq}`,
+    freeShipping: true,
+    full: false,
     ...over,
   };
 }
@@ -119,7 +127,12 @@ function phone({ canShare = true, touch = true } = {}) {
     },
     clipboard: { writeText: async () => {} },
   };
+  const listeners = new Set<() => void>();
   const document = {
+    // La revisión en vivo mira si la pestaña está a la vista y escucha cuando vuelve.
+    visibilityState: 'visible',
+    addEventListener: (_type: string, listener: () => void) => void listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) => void listeners.delete(listener),
     createElement: () => {
       const anchor = {
         href: '',
@@ -140,7 +153,7 @@ function phone({ canShare = true, touch = true } = {}) {
       return { matches: touch };
     },
   });
-  return { log, navigator };
+  return { log, navigator, listeners };
 }
 
 /** Un elemento de React ya armado, sin dibujar. */
@@ -193,6 +206,7 @@ beforeEach(() => {
   hooks.effects = [];
   hooks.transitions = 0;
   made.length = 0;
+  vi.mocked(checkLivePrices).mockClear();
   // Cada test con su propia carga: las visitas se guardan por carga, fuera del componente.
   renderedAt += 1000;
 });
@@ -211,7 +225,8 @@ describe('VideoList arma las reglas con lo de verdad', () => {
     pass(props);
     pass(props);
     const { config } = wiring();
-    expect(config).toEqual({ maxPriceAgeMs: 6 * HOUR, openedAt: T0 - 50 * 60_000 });
+    expect(config).toMatchObject({ maxPriceAgeMs: 6 * HOUR, openedAt: T0 - 50 * 60_000 });
+    expect(Object.keys(config).sort()).toEqual(['live', 'maxPriceAgeMs', 'openedAt']);
     expect(config.openedAt).toBe(visit.openedAt);
   });
 
@@ -354,5 +369,111 @@ describe('VideoList al entrar y salir de la pantalla', () => {
       expect(p.log.media).toEqual(['(pointer: coarse)']);
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('VideoList: la revisión en vivo', () => {
+  const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const at = (ms: number) => new Date(ms).toISOString();
+  const everywhere = (when: number) => ({
+    instagram: { postId: 1, at: at(when) },
+    tiktok: { postId: 2, at: at(when) },
+    youtube: { postId: 3, at: at(when) },
+    facebook: { postId: 4, at: at(when) },
+  });
+
+  it('al montar pide revisar todos los videos con lo que muestra cada uno, y la respuesta llega a su tarjeta', async () => {
+    phone();
+    const a = video();
+    const b = video({ price: 129_990, listPrice: null, discount: 0, freeShipping: false, full: true });
+    vi.mocked(checkLivePrices).mockResolvedValueOnce({
+      [a.id]: { status: 'same', checkedAt: at(T0) },
+      [b.id]: {
+        status: 'changed',
+        checkedAt: at(T0),
+        price: 119_990,
+        listPrice: null,
+        freeShipping: false,
+        full: true,
+        saved: true,
+        what: 'El precio cambió de $129.990 a $119.990.',
+      },
+    });
+    const props = { videos: [a, b], maxPriceAgeMs: 6 * HOUR, renderedAt };
+    const { first, unmount } = mount(props);
+    // El primer dibujo (el del servidor) no sabe nada todavía.
+    expect(first.cards.map((card) => card.live)).toEqual([undefined, undefined]);
+
+    // Una sola llamada, con lo que la tarjeta y el video muestran: el precio, la cifra tachada, el envío y Full.
+    expect(vi.mocked(checkLivePrices).mock.calls).toEqual([
+      [
+        [
+          { productId: a.id, shown: { price: 49_990, listPrice: 99_990, freeShipping: true, full: false } },
+          { productId: b.id, shown: { price: 129_990, listPrice: null, freeShipping: false, full: true } },
+        ],
+      ],
+    ]);
+    // Mientras viaja, las tarjetas dicen que está revisando.
+    expect(pass(props).cards.map((card) => card.live?.checking)).toEqual([true, true]);
+
+    await settle();
+    const [cardA, cardB] = pass(props).cards;
+    expect(cardA.live?.result?.check).toEqual({ status: 'same', checkedAt: at(T0) });
+    expect(cardB.live?.result?.check).toMatchObject({ status: 'changed', price: 119_990, saved: true });
+    expect(cardA.live?.checking).toBe(false);
+    // Las reglas de los toques leen la misma revisión que dibuja la tarjeta.
+    const { config } = wiring();
+    expect(config.live.entry(a.id)).toEqual(cardA.live);
+    expect(config.live.entry(b.id)).toEqual(cardB.live);
+    unmount();
+  });
+
+  it('una respuesta que no se entiende queda como "no pude revisar", nunca como "mismo precio"', async () => {
+    phone();
+    const a = video();
+    // Un "cambió" sin el precio nuevo no se puede mostrar.
+    vi.mocked(checkLivePrices).mockResolvedValueOnce({ [a.id]: { status: 'changed', what: 'algo' } } as never);
+    const props = { videos: [a], maxPriceAgeMs: 6 * HOUR, renderedAt };
+    const { unmount } = mount(props);
+    await settle();
+    expect(pass(props).cards[0].live?.result?.check).toEqual({ status: 'unknown', what: 'No pude revisar Mercado Libre ahora.' });
+    unmount();
+  });
+
+  it('lo que está en las cuatro redes desde hace más de un día (contado desde la carga, no desde el reloj) no se revisa', () => {
+    phone();
+    const old = video({ posted: everywhere(renderedAt - 25 * HOUR) });
+    // Hace 23 horas según la carga; según el reloj de este PC, días. Vale la carga: el primer dibujo sale igual en los dos lados.
+    const recent = video({ posted: everywhere(renderedAt - 23 * HOUR) });
+    const pending = video();
+    const props = { videos: [old, recent, pending], maxPriceAgeMs: 6 * HOUR, renderedAt };
+    const { unmount } = mount(props);
+    const asked = vi.mocked(checkLivePrices).mock.calls[0][0].map((item) => item.productId);
+    expect(asked).toEqual([recent.id, pending.id]);
+
+    const cards = pass(props).cards;
+    const byId = new Map(cards.map((card) => [card.video.id, card]));
+    expect(byId.get(old.id)?.live).toEqual({ result: null, checking: false, skipped: true });
+    expect(SKIPPED_LINE).toContain('lo subiste a las cuatro redes hace más de un día');
+    unmount();
+  });
+
+  it('escucha la pestaña mientras está en pantalla, y al salir deja de escucharla', () => {
+    const p = phone();
+    const { unmount } = mount({ videos: [video()], maxPriceAgeMs: 6 * HOUR, renderedAt });
+    expect(p.listeners.size).toBe(1);
+    unmount();
+    expect(p.listeners.size).toBe(0);
+  });
+
+  it('volver a la pestaña antes de 5 minutos no vuelve a preguntar', async () => {
+    const p = phone();
+    const { unmount } = mount({ videos: [video()], maxPriceAgeMs: 6 * HOUR, renderedAt });
+    await settle();
+    expect(checkLivePrices).toHaveBeenCalledTimes(1);
+    for (const listener of p.listeners) listener();
+    await settle();
+    expect(checkLivePrices).toHaveBeenCalledTimes(1);
+    unmount();
   });
 });

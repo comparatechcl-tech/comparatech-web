@@ -3,7 +3,10 @@
 import { useEffect, useState, useTransition } from 'react';
 import { AlertTriangle, Check, Circle, Copy, Download, ExternalLink, Loader2, Share2 } from 'lucide-react';
 import { chileDateTime, formatPrice } from '@/lib/content/captions';
-import type { ReadyVideo, VideoNetwork } from '@/lib/social/videos';
+import { safeMlUrl } from '@/lib/social/live-price';
+import type { ReadyVideo } from '@/lib/social/videos';
+import { explainWarning } from '@/lib/social/warning-help';
+import { checkLivePrices } from '../live-price-actions';
 import { markVideoPosted, undoVideoPosted } from './actions';
 import {
   canShareVideos,
@@ -17,7 +20,9 @@ import {
   type Note,
   type VideoGestures,
 } from './gestures';
-import { browserEnv, screenUi, type ManualCopy, type PostedByNetwork, type Visit } from './wiring';
+import { createLiveChecker, isPriceOff, liveLine, liveTargets, type LiveEntry, type LiveTone } from './live';
+import { NETWORK_KEYS, NETWORK_LABELS } from './texts';
+import { browserEnv, screenUi, watchLive, type LiveGlobals, type ManualCopy, type PostedByNetwork, type Visit } from './wiring';
 
 /**
  * Los videos del día, pensados para el teléfono: compartir el archivo directo
@@ -32,25 +37,17 @@ import { browserEnv, screenUi, type ManualCopy, type PostedByNetwork, type Visit
  * El reproductor muestra la portada y no pide el video hasta que se le da
  * play (preload="none"), por lo mismo.
  *
+ * Al montar, la lista pide revisar el precio de cada video en Mercado Libre
+ * (./live): cada tarjeta dice si es el mismo, y Compartir, Guardar y Copiar
+ * texto se frenan si cambió. La revisión se repite al volver a la pestaña y
+ * antes de que venza, nunca dentro del toque de Compartir.
+ *
  * Lo que pasa al tocar cada botón está en ./gestures, que no sabe de React ni
  * del navegador; lo que une esas reglas con el navegador y con el estado de
  * la pantalla, en ./wiring. Acá queda el estado y el dibujo.
  */
 
 export type { Mark, PostedByNetwork };
-
-/**
- * Las redes, en el orden en que se muestran. Un Record y no una lista: si el
- * contrato suma una red, esto deja de compilar en vez de quedar sin botón.
- * Se escribe acá porque lib/social/videos es solo de servidor.
- */
-const NETWORK_LABELS: Record<VideoNetwork, string> = {
-  instagram: 'Instagram',
-  tiktok: 'TikTok',
-  youtube: 'YouTube',
-  facebook: 'Facebook',
-};
-const NETWORK_KEYS = Object.keys(NETWORK_LABELS) as VideoNetwork[];
 
 const BUTTON_SHAPE =
   'flex min-h-11 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition disabled:opacity-50';
@@ -60,6 +57,14 @@ const BUTTON = `${BUTTON_SHAPE} border-border bg-surface text-fg hover:border-ac
  * de texto en el mismo botón los resuelve el orden del CSS, no el de las clases.
  */
 const BUTTON_MARKED = `${BUTTON_SHAPE} border-accent/60 bg-accent/10 text-accent`;
+
+/** El color de la línea de la revisión en vivo: rojo frena, ámbar pide mirar, el de la marca dice que está bien. */
+const LIVE_TONE: Record<LiveTone, string> = {
+  checking: 'text-muted',
+  ok: 'text-accent',
+  bad: 'font-medium text-red-400',
+  warn: 'text-amber-400',
+};
 
 /**
  * Lo hecho en cada carga de la página (hora del servidor en que se armó la
@@ -111,12 +116,6 @@ export function isEverywhere(posted: PostedByNetwork | undefined): boolean {
   return NETWORK_KEYS.every((network) => Boolean(posted?.[network]));
 }
 
-/** Primero lo que falta por subir a alguna red y al final lo ya subido a todas, sin tocar el orden de cada grupo. Puro. */
-export function pendingFirst(videos: ReadyVideo[], posted: Record<string, PostedByNetwork>): ReadyVideo[] {
-  const done = (video: ReadyVideo) => isEverywhere(posted[video.id]);
-  return [...videos.filter((video) => !done(video)), ...videos.filter(done)];
-}
-
 /** Así separa lib/social/videos el motivo de lo que hay que mirar antes de subir el video. */
 const WARNING_MARK = '. Ojo: ';
 
@@ -128,6 +127,31 @@ export function splitReason(reason: string): { why: string; warning: string | nu
   const at = reason.indexOf(WARNING_MARK);
   if (at < 0) return { why: reason, warning: null };
   return { why: reason.slice(0, at), warning: reason.slice(at + WARNING_MARK.length) };
+}
+
+/** Los tres grupos de la lista, cada uno en el orden en que vino. */
+export interface VideoGroups {
+  /** Lo que falta subir a alguna red, sin nada que mirar. */
+  clean: ReadyVideo[];
+  /** Lo que falta subir y trae un "Ojo": va después, en "Con algo que mirar". */
+  warned: ReadyVideo[];
+  /** Lo ya subido a las cuatro redes: al final, plegado. */
+  done: ReadyVideo[];
+}
+
+/**
+ * Reparte los videos en los tres grupos, sin cambiar el orden dentro de cada
+ * uno. Se decide una vez, al montar: si una tarjeta se fuera abajo al marcar
+ * la cuarta red, las de abajo se correrían bajo el dedo. Puro.
+ */
+export function arrange(videos: ReadyVideo[], posted: Record<string, PostedByNetwork>): VideoGroups {
+  const groups: VideoGroups = { clean: [], warned: [], done: [] };
+  for (const video of videos) {
+    if (isEverywhere(posted[video.id])) groups.done.push(video);
+    else if (splitReason(video.reason).warning !== null) groups.warned.push(video);
+    else groups.clean.push(video);
+  }
+  return groups;
 }
 
 /** Lo que dice el botón Compartir según cómo va la descarga del archivo. Puro. */
@@ -194,6 +218,12 @@ export interface VideoCardProps {
   /** El texto que no se pudo copiar, para copiarlo a mano. */
   manual: ManualCopy | undefined;
   gestures: CardGestures;
+  /** Lo que dijo la revisión en vivo del precio en Mercado Libre (nada todavía: está revisando). */
+  live: LiveEntry | undefined;
+  /** La hora de este teléfono, para el "hace N min" de la revisión. */
+  now: number;
+  /** Va en "Ya subidos a las cuatro redes": la tarjeta no repite que está en las cuatro. */
+  settled?: boolean;
 }
 
 /**
@@ -201,28 +231,65 @@ export interface VideoCardProps {
  * llama a su regla. Así un test puede armarla, "tocar" un botón y ver qué
  * pidió, sin navegador.
  */
-export function VideoCard({ video, posted, fileState: state, saving, canShare, copied, busy, note, manual, gestures }: VideoCardProps) {
+export function VideoCard({
+  video,
+  posted,
+  fileState: state,
+  saving,
+  canShare,
+  copied,
+  busy,
+  note,
+  manual,
+  gestures,
+  live,
+  now,
+  settled = false,
+}: VideoCardProps) {
   const everywhere = isEverywhere(posted);
   const made = chileDateTime(video.renderedAt);
   const { why, warning } = splitReason(video.reason);
   const texts = textTargets(video);
+  // Lo que el video dice ya no es lo de Mercado Libre: el reproductor no se
+  // ofrece (desde su menú se podría bajar igual) y tampoco el video directo.
+  const off = isPriceOff(live);
+  const line = liveLine(live, now);
+  // Solo la ficha de Mercado Libre Chile y sin parámetros: nunca el link de afiliado (igual que Historias).
+  const mlUrl = safeMlUrl(video.mlUrl);
+  const help = warning ? explainWarning(warning) : [];
 
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4">
       {/* Ancho fijo: en el escritorio un video vertical a todo el ancho no cabría en la pantalla. */}
-      <div
-        className={`aspect-[9/16] w-36 self-start overflow-hidden rounded-md bg-bg sm:row-span-2 sm:w-44 ${everywhere ? 'opacity-60' : ''}`}
-      >
-        <video
-          controls
-          playsInline
-          preload="none"
-          poster={video.coverUrl}
-          src={video.videoUrl}
-          aria-label={`Video de ${video.name}`}
-          className="h-full w-full object-contain"
-        />
-      </div>
+      {off ? (
+        <div
+          role="img"
+          aria-label={`Video de ${video.name}: ya no calza con Mercado Libre`}
+          className="relative aspect-[9/16] w-36 self-start overflow-hidden rounded-md bg-bg sm:row-span-2 sm:w-44"
+        >
+          {isWebUrl(video.coverUrl) && (
+            // eslint-disable-next-line @next/next/no-img-element -- la portada está en el almacén, fuera del optimizador de imágenes.
+            <img src={video.coverUrl} alt="" className="h-full w-full object-contain opacity-20" />
+          )}
+          <p className="absolute inset-0 flex items-center justify-center p-3 text-center text-xs font-semibold text-red-400">
+            Ya no calza con Mercado Libre. No lo subas: toca Actualizar.
+          </p>
+        </div>
+      ) : (
+        <div
+          className={`aspect-[9/16] w-36 self-start overflow-hidden rounded-md bg-bg sm:row-span-2 sm:w-44 ${everywhere ? 'opacity-60' : ''}`}
+        >
+          <video
+            controls
+            playsInline
+            preload="none"
+            poster={video.coverUrl}
+            src={video.videoUrl}
+            aria-label={`Video de ${video.name}`}
+            className="h-full w-full object-contain"
+          />
+        </div>
+      )}
 
       <div className="min-w-0">
         {/* Hay nombres que parten por el código del modelo: la marca dice de qué se trata. */}
@@ -237,6 +304,24 @@ export function VideoCard({ video, posted, fileState: state, saving, canShare, c
             </span>
           )}
         </p>
+        {/* Junto al precio: si es el mismo de Mercado Libre ahora. Cambia sola cuando llega la revisión. */}
+        <p aria-live="polite" className={`mt-1 flex items-start gap-1.5 text-xs leading-snug ${LIVE_TONE[line.tone]}`}>
+          {line.tone === 'checking' && <Loader2 size={13} className="mt-0.5 shrink-0 animate-spin" aria-hidden />}
+          <span>
+            {line.text}
+            {line.detail ? <span className="text-muted"> {line.detail}</span> : null}
+          </span>
+        </p>
+        {/*
+          La ficha de Mercado Libre, sin nada de afiliado: es para mirar el
+          precio, no una visita que cuente como clic. noreferrer: Mercado
+          Libre no se entera de que viene del admin.
+        */}
+        {mlUrl && (
+          <a href={mlUrl} target="_blank" rel="noopener noreferrer" className={`${BUTTON} mt-2 w-full sm:w-auto`}>
+            <ExternalLink size={15} className="shrink-0" aria-hidden /> Ver en Mercado Libre
+          </a>
+        )}
         {/* Por qué se sugiere este producto y, si desde que se armó el video apareció algo que mirar, eso aparte. */}
         {why && <p className="mt-1 text-xs leading-snug text-muted">{why}.</p>}
         {warning && (
@@ -245,15 +330,25 @@ export function VideoCard({ video, posted, fileState: state, saving, canShare, c
             <span>Ojo: {warning}.</span>
           </p>
         )}
+        {/* Bajo el "Ojo", qué quiere decir cada aviso y qué hacer, en palabras simples. */}
+        {help.length > 0 && (
+          <ul className="mt-1 space-y-0.5 pl-5 text-xs leading-snug text-muted">
+            {help.map((item, i) => (
+              <li key={i}>
+                {item.meaning} {item.whatToDo}
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="mt-1 text-[11px] text-muted">
           Plantilla {video.template}
           {made ? ` · hecho el ${made.date} a las ${made.time}` : ''}
         </p>
         {/* Junto al video, que es más alto que este bloque: aparece al marcar la cuarta red sin correr los botones. */}
-        {everywhere && (
+        {everywhere && !settled && (
           <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-accent">
             <Check size={14} className="mt-0.5 shrink-0" aria-hidden />
-            <span>Ya está en las cuatro redes.</span>
+            <span>Ya está en las cuatro redes. Al tocar Actualizar pasa abajo, a los ya subidos.</span>
           </p>
         )}
       </div>
@@ -349,9 +444,10 @@ export function VideoCard({ video, posted, fileState: state, saving, canShare, c
         {/*
           La salida cuando la página no pudo bajar el archivo: el video directo,
           que el navegador abre por su cuenta y deja descargar desde su menú.
-          Sin el atributo download, que entre dominios no hace nada.
+          Sin el atributo download, que entre dominios no hace nada. Con un
+          precio que ya no calza no se ofrece: no hay nada que subir.
         */}
-        {note?.openVideo && isWebUrl(video.videoUrl) && (
+        {note?.openVideo && !off && isWebUrl(video.videoUrl) && (
           <a href={video.videoUrl} target="_blank" rel="noopener noreferrer" className={BUTTON}>
             <ExternalLink size={15} className="shrink-0" aria-hidden /> Abrir el video
           </a>
@@ -359,6 +455,18 @@ export function VideoCard({ video, posted, fileState: state, saving, canShare, c
       </div>
     </li>
   );
+}
+
+/** Lo que la revisión en vivo usa del navegador de verdad. Solo se arma al montar: en el servidor no hay document. */
+function liveGlobals(): LiveGlobals {
+  return {
+    document,
+    every: (run, ms) => {
+      const id = setInterval(run, ms);
+      return () => clearInterval(id);
+    },
+    now: () => Date.now(),
+  };
 }
 
 export function VideoList({
@@ -378,11 +486,11 @@ export function VideoList({
     for (const video of initial) start[video.id] = mergePosted(video, visit.changes);
     return start;
   });
-  // Copia local, y el orden se decide una sola vez: si una tarjeta se fuera al
-  // final al marcar la cuarta red, las de abajo se correrían bajo el dedo.
+  // Copia local, y los grupos se deciden una sola vez: si una tarjeta se fuera
+  // abajo al marcar la cuarta red, las de abajo se correrían bajo el dedo.
   // Videos y precios nuevos llegan con otra carga de la página, que monta esta
   // lista de cero (la página le pone de key la hora de la carga).
-  const [videos] = useState(() => pendingFirst(initial, posted));
+  const [groups] = useState(() => arrange(initial, posted));
 
   const [fileState, setFileState] = useState<Record<string, FileState>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -396,11 +504,22 @@ export function VideoList({
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, Note>>({});
   const [, startTransition] = useTransition();
+  /** La hora de este teléfono, que avanza sola: el "hace N min" de cada tarjeta. */
+  const [clock, setClock] = useState(() => Date.now());
 
-  // Las reglas se arman una vez por lista: guardan los archivos ya bajados y
-  // los candados de doble toque, que tienen que durar de un toque al siguiente.
-  const [gestures] = useState(() =>
-    createVideoGestures(
+  // La revisión en vivo y las reglas de los toques se arman una vez por lista:
+  // guardan lo que dijo Mercado Libre, los archivos ya bajados y los candados
+  // de doble toque, que tienen que durar de un toque al siguiente. Las reglas
+  // leen la revisión en el momento del toque, sin esperarla.
+  const [{ checker, gestures }] = useState(() => {
+    // Con la hora de la carga y no la del reloj: el primer dibujo del servidor y el del teléfono salen iguales.
+    const live = createLiveChecker(initial, liveTargets(initial, posted, isEverywhere, renderedAt), {
+      check: checkLivePrices,
+      now: () => Date.now(),
+      publish: (entries) => setLive(entries),
+      settled: (videoIds) => rules.liveSettled(videoIds),
+    });
+    const rules = createVideoGestures(
       BROWSER,
       { mark: markVideoPosted, undo: undoVideoPosted },
       screenUi(
@@ -408,9 +527,11 @@ export function VideoList({
         visit
       ),
       // La edad de la lista cuenta desde la visita, no desde que se armaron las reglas: volver con "atrás" no la rejuvenece.
-      { maxPriceAgeMs, openedAt: visit.openedAt }
-    )
-  );
+      { maxPriceAgeMs, openedAt: visit.openedAt, live }
+    );
+    return { checker: live, gestures: rules };
+  });
+  const [live, setLive] = useState<Record<string, LiveEntry>>(() => checker.entries());
 
   useEffect(() => {
     const probe = new File([''], 'reel.mp4', { type: 'video/mp4' });
@@ -421,6 +542,28 @@ export function VideoList({
     gestures.attach();
     return () => gestures.detach();
   }, [gestures]);
+
+  // Revisa al montar, al volver a la pestaña y antes de que la revisión venza.
+  useEffect(() => watchLive(liveGlobals(), checker, setClock), [checker]);
+
+  const card = (video: ReadyVideo, settled = false) => (
+    <VideoCard
+      key={video.id}
+      video={video}
+      posted={posted[video.id] ?? {}}
+      fileState={fileState[video.id]}
+      saving={Boolean(saving[video.id])}
+      canShare={canShare}
+      copied={copied}
+      busy={busy}
+      note={notes[video.id]}
+      manual={manual[video.id]}
+      gestures={gestures}
+      live={live[video.id]}
+      now={clock}
+      settled={settled}
+    />
+  );
 
   return (
     <div className="mt-6 flex flex-col gap-4">
@@ -433,23 +576,30 @@ export function VideoList({
           puedes guardar el video y copiar los textos.
         </p>
       )}
-      <ul className="flex flex-col gap-4">
-        {videos.map((video) => (
-          <VideoCard
-            key={video.id}
-            video={video}
-            posted={posted[video.id] ?? {}}
-            fileState={fileState[video.id]}
-            saving={Boolean(saving[video.id])}
-            canShare={canShare}
-            copied={copied}
-            busy={busy}
-            note={notes[video.id]}
-            manual={manual[video.id]}
-            gestures={gestures}
-          />
-        ))}
-      </ul>
+      {groups.clean.length > 0 && <ul className="flex flex-col gap-4">{groups.clean.map((video) => card(video))}</ul>}
+
+      {groups.warned.length > 0 && (
+        <section aria-labelledby="videos-con-algo" className="flex flex-col gap-3">
+          <h2 id="videos-con-algo" className="font-heading text-base font-semibold text-fg">
+            Con algo que mirar
+          </h2>
+          <p className="text-sm text-muted">
+            Después de armar estos videos apareció un &quot;Ojo&quot;. Lee lo que dice y mira el precio con el botón
+            antes de subirlos.
+          </p>
+          <ul className="flex flex-col gap-4">{groups.warned.map((video) => card(video))}</ul>
+        </section>
+      )}
+
+      {/* Plegados: ya no hay que subirlos, pero quedan a mano para desmarcar o compartir de nuevo. */}
+      {groups.done.length > 0 && (
+        <details className="rounded-xl border border-border bg-surface">
+          <summary className="flex min-h-11 cursor-pointer items-center px-4 py-2 text-sm font-medium text-fg">
+            Ya subidos a las cuatro redes ({groups.done.length})
+          </summary>
+          <ul className="flex flex-col gap-4 p-3">{groups.done.map((video) => card(video, true))}</ul>
+        </details>
+      )}
     </div>
   );
 }

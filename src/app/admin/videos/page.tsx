@@ -1,7 +1,11 @@
 import Link from 'next/link';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { chileDateTime } from '@/lib/content/captions';
+import { HISTORY_UNREAD_EXAMPLE } from '@/lib/social/warning-help';
 import { VIDEO_RULES, readVideoBoard, type VideoBoard } from '@/lib/social/videos';
+import { WarningGuide } from '../WarningGuide';
+import { NextPass } from './NextPass';
+import { changedAfterPostingText, staleText } from './texts';
 import { VideoList } from './VideoList';
 
 export const dynamic = 'force-dynamic';
@@ -18,14 +22,18 @@ export const dynamic = 'force-dynamic';
  * video tome un minuto.
  */
 
-/** Las pasadas del día en que se arman los videos, en hora de Chile. */
-const RENDER_TIMES = 'cerca de las 8, las 13 y las 18 horas';
-
 export default async function VideosPage() {
   const admin = getSupabaseAdmin();
   const now = new Date();
 
-  let board: VideoBoard = { videos: [], stale: 0, lastRenderedAt: null, storageReady: true, hiddenUnread: 0 };
+  let board: VideoBoard = {
+    videos: [],
+    stale: 0,
+    lastRenderedAt: null,
+    storageReady: true,
+    hiddenUnread: 0,
+    changedAfterPosting: [],
+  };
   let error: string | null = null;
   if (!admin) error = 'Supabase admin no configurado';
   else {
@@ -39,6 +47,8 @@ export default async function VideosPage() {
   const { videos, stale } = board;
   // Comparado y no tomado tal cual: un número que no sea mayor que cero no se cuenta.
   const hidden = board.hiddenUnread > 0 ? board.hiddenUnread : 0;
+  // Lo ya subido cuyo precio ya no es el que se subió: las publicaciones de las redes siguen diciendo el viejo.
+  const changedAfter = Array.isArray(board.changedAfterPosting) ? board.changedAfterPosting : [];
   const last = chileDateTime(board.lastRenderedAt);
   const maxAgeHours = Math.round(VIDEO_RULES.maxPriceAgeMs / 3_600_000);
 
@@ -61,10 +71,47 @@ export default async function VideosPage() {
         </a>
       </div>
 
+      {/*
+        Siempre a la vista: cuándo llegan videos nuevos. La hora sale del
+        horario de GitHub en UTC, pasado a hora de Chile: el cambio de hora se
+        ajusta solo.
+      */}
+      <p className="mt-3 text-sm text-muted">
+        <NextPass renderedAt={now.getTime()} />
+      </p>
+
+      {/*
+        Un video ya subido no se corrige: si el precio cambió después de
+        marcarlo, lo que está en las redes dice otro precio. Arriba y en rojo,
+        porque hay que ir a esas apps.
+      */}
+      {changedAfter.length > 0 && (
+        <div role="alert" className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <ul className="space-y-1.5">
+            {/* Uno por producto y precio marcado: el mismo producto puede venir dos veces. */}
+            {changedAfter.map((item, i) => (
+              <li key={`${item.productId}|${item.postedPrice}|${i}`} className="font-medium">
+                {changedAfterPostingText(item)}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs">
+            Un video subido no se puede editar: lo que promete un precio más bajo que el de ahora hay que sacarlo de
+            esa red. Si bajó de precio no hace falta: no se avisa.
+          </p>
+        </div>
+      )}
+
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         <li>
           Elige <strong>uno o dos videos al día</strong>. Para una cuenta que parte de cero vale más subir uno todos
           los días que muchos de una vez.
+        </li>
+        {/* Antes de copiar nada: el texto y el video llevan el precio escrito. */}
+        <li>
+          Mira la línea bajo el precio. Si dice <strong>✓ Mismo precio que en Mercado Libre</strong>, súbelo. Si dice
+          en rojo que cambió, no lo subas y toca <strong>Actualizar</strong>. Si no pude revisar, toca{' '}
+          <strong>Ver en Mercado Libre</strong> y compara el precio antes de subirlo.
         </li>
         {/* Antes de Compartir: Compartir manda solo el archivo, y una vez en la app ya no hay de dónde copiar. */}
         <li>
@@ -105,12 +152,16 @@ export default async function VideosPage() {
         </div>
       )}
 
-      {/* Con videos escondidos por un rato no se dice que no hay: sí hay, y el aviso de abajo dice por qué no se ven. */}
+      {/*
+        Con videos escondidos por un rato no se dice que no hay: sí hay, y el
+        aviso de abajo dice por qué no se ven. La hora de la próxima pasada ya
+        está arriba: acá no se repite (ni se escribe a mano).
+      */}
       {!error && videos.length === 0 && hidden === 0 && (
         <p className="mt-6 rounded-xl border border-border bg-surface px-4 py-6 text-sm text-muted">
-          {board.storageReady ? 'Ahora no hay videos listos.' : 'Todavía no se ha generado el primer video.'} Se
-          preparan solos tres veces al día ({RENDER_TIMES}) y aparecen acá cuando están listos.
-          {board.storageReady ? ' Vuelve a mirar más tarde.' : ''}
+          {board.storageReady ? 'Ahora no hay videos listos.' : 'Todavía no se ha generado el primer video.'} Aparecen
+          acá cuando una pasada los arma.
+          {board.storageReady ? ' Vuelve a mirar después de la próxima pasada.' : ''}
         </p>
       )}
 
@@ -128,13 +179,12 @@ export default async function VideosPage() {
 
       {/*
         Sin prometer que se rehace: un video deja de mostrarse también cuando
-        el producto salió del sitio o ya no entra entre los sugeridos, y esos
-        no vuelven.
+        el producto salió del sitio o ya no entra entre los sugeridos, y uno ya
+        marcado en alguna red no se vuelve a armar en 14 días.
       */}
       {stale > 0 && (
         <p className="mt-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          {stale === 1 ? '1 video ya no se muestra' : `${stale} videos ya no se muestran`} porque el producto cambió (de
-          precio, de oferta o salió del sitio). Si sigue entre los sugeridos, se arma uno nuevo en la próxima pasada.
+          {staleText(stale, VIDEO_RULES.repeatAfterDays)}
         </p>
       )}
 
@@ -153,6 +203,9 @@ export default async function VideosPage() {
         />
       )}
 
+      {/* Un video sin historial de precios no se muestra: ese aviso no se explica acá. */}
+      {!error && <WarningGuide className="mt-6" omit={[HISTORY_UNREAD_EXAMPLE]} />}
+
       {!error && (
         <p className="mt-6 text-xs text-muted">
           {last ? `Último video generado el ${last.date} a las ${last.time}. ` : ''}
@@ -160,8 +213,9 @@ export default async function VideosPage() {
           esté al alcance), sumando lo que figura entre los más vendidos de Mercado Libre y lo que recibe más clics en
           el sitio. Solo ofertas sin avisos y con el precio revisado en las últimas {maxAgeHours} horas. Si un producto
           cambia de precio o de oferta, su video deja de mostrarse; si después de armado aparece algo que mirar, la
-          tarjeta lo dice con un &quot;Ojo&quot;. Lo que marcas acá no cuenta para las publicaciones del feed ni para
-          las historias.
+          tarjeta lo dice con un &quot;Ojo&quot;. Al abrir esta página, cada video se compara con su ficha de Mercado
+          Libre: si ya no calza, no deja compartirlo, guardarlo ni copiar su texto. Lo que marcas acá no cuenta para
+          las publicaciones del feed ni para las historias.
         </p>
       )}
     </div>

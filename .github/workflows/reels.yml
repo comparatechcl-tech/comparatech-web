@@ -25,13 +25,17 @@ name: Videos del día
 
 on:
   schedule:
-    # Cerca de las 08:10, 13:10 y 18:10 de Chile. GitHub usa UTC y no sabe del
-    # cambio de hora: estas horas calzan con el horario de verano (UTC-3); en
-    # invierno (UTC-4) corre una hora antes, a las 07:10, 12:10 y 17:10.
-    # Además GitHub atrasa las ejecuciones programadas cuando tiene carga, y a
-    # veces se salta alguna: por eso son tres al día, y la siguiente arma lo
-    # que haya faltado. Minuto 10 y no en punto, que es cuando más atrasa.
-    - cron: '10 11,16,21 * * *'
+    # Seis pasadas al día: cerca de las 07:10, 10:10, 13:10, 16:10, 19:10 y
+    # 22:10 de Chile. GitHub usa UTC y no sabe del cambio de hora: estas horas
+    # calzan con el horario de verano (UTC-3); en invierno (UTC-4) corre una
+    # hora antes, a las 06:10, 09:10, 12:10, 15:10, 18:10 y 21:10.
+    # Además GitHub atrasa las ejecuciones programadas cuando tiene carga (a
+    # veces unas horas), y a veces se salta alguna: la siguiente arma lo que
+    # haya faltado. Minuto 10 y no en punto, que es cuando más atrasa.
+    # Si cambias estas horas, cambia también REEL_PASSES_UTC en
+    # src/lib/social/content-timing.ts: con eso /admin/videos dice cuándo es
+    # la próxima pasada (un test compara los dos).
+    - cron: '10 1,10,13,16,19,22 * * *'
   workflow_dispatch:
     inputs:
       cantidad:
@@ -86,7 +90,7 @@ jobs:
           DRY: ${{ inputs.seco }}
         run: |
           # Sin el secreto no hay nada que hacer, pero tampoco es una falla:
-          # así no llega un correo de error tres veces al día mientras no se
+          # así no llega un correo de error en cada pasada mientras no se
           # configura. El aviso queda en la pestaña Actions.
           if [ -z "$CRON_SECRET" ]; then
             echo "::warning::Falta el secreto CRON_SECRET en Settings → Secrets and variables → Actions"

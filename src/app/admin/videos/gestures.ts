@@ -1,5 +1,6 @@
 import type { ReadyVideo, VideoNetwork, VideoTexts } from '@/lib/social/videos';
 import type { markVideoPosted, undoVideoPosted } from './actions';
+import { CHECKING_NOTE, RECHECK_AFTER_MS, uploadGate, wantsRecheck, type LiveSource } from './live';
 
 /**
  * Lo que pasa al tocar un botón de /admin/videos: compartir, guardar, copiar
@@ -10,7 +11,8 @@ import type { markVideoPosted, undoVideoPosted } from './actions';
  * servidor (las acciones), para poder probarlo con dobles: los tests corren
  * sin navegador, y acá están justo las reglas que no se ven a simple vista.
  * Que Compartir se llame dentro del toque, que un doble toque no haga las
- * cosas dos veces, que la memoria del teléfono se suelte.
+ * cosas dos veces, que la memoria del teléfono se suelte, y que nada con un
+ * precio que ya no es el de Mercado Libre salga del teléfono (./live).
  */
 
 export type FileState = 'cargando' | 'lista' | 'error';
@@ -127,6 +129,8 @@ export interface GestureConfig {
   maxPriceAgeMs: number;
   /** Cuándo se vio esta lista por primera vez en este teléfono. */
   openedAt: number;
+  /** La revisión en vivo del precio en Mercado Libre: lo que dijo y cómo pedir otra. */
+  live: LiveSource;
 }
 
 export interface VideoGestures {
@@ -139,10 +143,10 @@ export interface VideoGestures {
   attach(): void;
   /** La lista salió de pantalla: se sueltan los archivos bajados. */
   detach(): void;
+  /** Llegó la revisión en vivo de estos videos: se va el "estoy revisando" que quedó en su tarjeta. */
+  liveSettled(videoIds: string[]): void;
 }
 
-/** Pasado este rato hay que recargar: los precios se revisan cada media hora. */
-const MAX_LIST_AGE_MS = 60 * 60_000;
 /** Dos toques más seguidos que esto son un doble toque, no dos pedidos. */
 const SHARE_GAP_MS = 1500;
 const SAVE_GAP_MS = 1500;
@@ -153,7 +157,6 @@ const COPIED_MS = 2500;
 
 const COPY_ERROR = 'El teléfono no dejó copiar. Mantén el dedo sobre el texto de abajo y elige Copiar.';
 const RELOAD_HINT = 'Revisa tu conexión; si sigue igual, toca Actualizar, arriba.';
-const OLD_LIST = 'Esta lista ya tiene rato y el precio puede haber cambiado. Toca Actualizar, arriba, antes de subir el video.';
 /**
  * La descarga pasa por otro dominio (el almacén) y puede fallar aunque haya
  * conexión, mientras el reproductor sí funciona: por eso el aviso no culpa
@@ -194,13 +197,27 @@ export function createVideoGestures(
     ui.note(videoId, null);
   }
 
-  /** Una pestaña que quedó abierta lleva los precios de cuando se cargó, y el video también. */
-  function tooOld(video: ReadyVideo): boolean {
-    const oldPrice = video.checkedAt ? env.now() - new Date(video.checkedAt).getTime() > config.maxPriceAgeMs : false;
-    const oldList = env.now() - config.openedAt > MAX_LIST_AGE_MS;
-    if (!oldPrice && !oldList) return false;
-    fail(video.id, OLD_LIST);
-    return true;
+  /** La regla de ./live para este video, con lo que se sabe ahora: no espera nada. */
+  function verdictFor(video: ReadyVideo) {
+    return uploadGate(config.live.entry(video.id), env.now(), {
+      openedAt: config.openedAt,
+      checkedAt: video.checkedAt,
+      maxPriceAgeMs: config.maxPriceAgeMs,
+    });
+  }
+
+  /**
+   * ¿Se puede subir ahora? Solo con el precio confirmado en Mercado Libre
+   * hace poco o, si no se pudo revisar, con la regla de siempre (./live). Si
+   * no, lo dice en la tarjeta y, si sirve, pide otra revisión: sin esperarla,
+   * porque el toque de Compartir no puede esperar al servidor.
+   */
+  function allowed(video: ReadyVideo): boolean {
+    const verdict = verdictFor(video);
+    if (verdict.ok) return true;
+    if (verdict.recheck) config.live.recheck([video.id]);
+    fail(video.id, verdict.text);
+    return false;
   }
 
   /** Baja el video una sola vez, aunque se pida desde Compartir y desde Guardar. */
@@ -228,17 +245,30 @@ export function createVideoGestures(
   }
 
   function share(video: ReadyVideo) {
-    if (tooOld(video)) return;
     const file = files.get(video.id);
     if (!file) {
       // Primer toque: solo baja. La hoja de compartir no se puede abrir cuando
-      // termine, porque el permiso del toque ya venció.
+      // termine, porque el permiso del toque ya venció. Bajar no sube nada:
+      // se frena solo si ya se sabe que no se va a poder subir, y de paso pide
+      // otra revisión si la que hay está vieja, para tenerla al segundo toque.
+      const verdict = verdictFor(video);
+      if (!verdict.ok) {
+        if (verdict.recheck) config.live.recheck([video.id]);
+        if (verdict.text !== CHECKING_NOTE) {
+          fail(video.id, verdict.text);
+          return;
+        }
+      } else if (wantsRecheck(config.live.entry(video.id), env.now(), RECHECK_AFTER_MS)) {
+        config.live.recheck([video.id]);
+      }
       clear(video.id);
       void load(video).then((got) => {
         if (got) say(video.id, { tone: 'info', text: SHARE_READY });
       });
       return;
     }
+    // Segundo toque: comparte solo con el precio confirmado, leído de lo que ya se sabe.
+    if (!allowed(video)) return;
     // Un doble toque no vuelve a pedir Compartir: el navegador rechaza el segundo y quedaría un error falso.
     if (env.now() - lastShare < SHARE_GAP_MS) return;
     lastShare = env.now();
@@ -263,7 +293,7 @@ export function createVideoGestures(
    * se baja a memoria y la descarga se dispara desde ese archivo.
    */
   function save(video: ReadyVideo) {
-    if (tooOld(video)) return;
+    if (!allowed(video)) return;
     // Un doble toque no lo guarda dos veces. Mientras se baja, el botón está apagado.
     if (env.now() - (lastSave.get(video.id) ?? 0) < SAVE_GAP_MS) return;
     lastSave.set(video.id, env.now());
@@ -284,6 +314,8 @@ export function createVideoGestures(
 
   async function copy(video: ReadyVideo, target: CopyTarget) {
     const key = `${video.id}|${target.what}`;
+    // Los textos llevan el precio escrito; el link no.
+    if (target.what !== 'link' && !allowed(video)) return;
     try {
       await env.writeText(target.text);
     } catch {
@@ -324,12 +356,16 @@ export function createVideoGestures(
           ui.posted(video.id, network, null);
         } else {
           // Con el precio de la tarjeta, que es el que lleva escrito el video.
+          // Se marca siempre, aunque el precio haya cambiado: puede que ya esté subido.
           const result = await actions.mark(video.id, network, video.price);
           if (!result.ok) {
             fail(video.id, result.error);
             return;
           }
           ui.posted(video.id, network, { postId: result.postId, at: new Date(env.now()).toISOString() });
+          // Lo subido lleva el precio de la tarjeta: si ya no es el de ahora, que se revise.
+          const warning = markWarning(result) ?? livePriceWarning(video.id);
+          if (warning) fail(video.id, warning);
         }
         lastToggle.set(key, env.now());
       } catch {
@@ -339,6 +375,14 @@ export function createVideoGestures(
         ui.busy(null);
       }
     });
+  }
+
+  /** Lo que la revisión en vivo ya sabe del video recién marcado: si cambió, que lo subido se revise. */
+  function livePriceWarning(videoId: string): string | null {
+    const result = config.live.entry(videoId)?.result;
+    const check = result?.check;
+    if (!check || (check.status !== 'changed' && check.status !== 'unavailable')) return null;
+    return `Lo marqué, pero ojo: ${check.what} Revisa lo que subiste en esa red.`;
   }
 
   return {
@@ -355,5 +399,18 @@ export function createVideoGestures(
       files.clear();
       downloads.clear();
     },
+    liveSettled(videoIds) {
+      for (const id of videoIds) if (shown.get(id)?.text === CHECKING_NOTE) clear(id);
+    },
   };
+}
+
+/**
+ * El aviso con que la acción de marcar dice que el precio de la base ya no es
+ * el de la tarjeta, si lo trae. Se lee con cuidado: es una respuesta del servidor.
+ */
+export function markWarning(result: unknown): string | null {
+  if (typeof result !== 'object' || result === null) return null;
+  const warning = (result as { warning?: unknown }).warning;
+  return typeof warning === 'string' && warning.trim() ? warning.trim() : null;
 }

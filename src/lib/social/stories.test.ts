@@ -183,7 +183,7 @@ describe('droppedSinceStory', () => {
   });
 
   it('vuelve solo si bajó 3% o más respecto del precio más bajo con que se subió', () => {
-    const history = { lowest: 100_000, lastAt: NOW.toISOString() };
+    const history = { lowest: 100_000, lowestAt: NOW.toISOString(), lastAt: NOW.toISOString() };
     expect(STORY_REPOST_DROP).toBe(0.03);
     expect(droppedSinceStory(history, 100_000)).toBe(false);
     expect(droppedSinceStory(history, 97_001)).toBe(false);
@@ -192,12 +192,12 @@ describe('droppedSinceStory', () => {
   });
 
   it('una historia sin precio anotado no permite decir que bajó', () => {
-    expect(droppedSinceStory({ lowest: null, lastAt: NOW.toISOString() }, 1)).toBe(false);
+    expect(droppedSinceStory({ lowest: null, lowestAt: null, lastAt: NOW.toISOString() }, 1)).toBe(false);
   });
 });
 
 describe('readStoryHistory', () => {
-  it('pide solo las historias vigentes y junta el precio más bajo y la última fecha', async () => {
+  it('pide solo las historias vigentes y junta el precio más bajo, cuándo se subió a ese precio y la última fecha', async () => {
     const since = new Date(NOW.getTime() - 14 * 86_400_000);
     // De la más nueva a la más antigua, como las entrega la consulta.
     const { admin, calls } = fakeAdmin([
@@ -210,8 +210,10 @@ describe('readStoryHistory', () => {
     ]);
     const history = await readStoryHistory(admin, since);
 
-    expect(history.get('a')).toEqual({ lowest: 90_000, lastAt: story('a', 0, 1).posted_at });
-    expect(history.get('b')).toEqual({ lowest: 50_000, lastAt: story('b', 0, 2).posted_at });
+    // La fecha del precio más bajo es la de esa historia, no la de la última.
+    expect(history.get('a')).toEqual({ lowest: 90_000, lowestAt: story('a', 0, 5).posted_at, lastAt: story('a', 0, 1).posted_at });
+    // La última no anotó precio: el más bajo y su fecha salen de la que sí lo anotó.
+    expect(history.get('b')).toEqual({ lowest: 50_000, lowestAt: story('b', 0, 10).posted_at, lastAt: story('b', 0, 2).posted_at });
     expect(history.size).toBe(2);
 
     expect(calls).toContainEqual(['from', 'social_posts']);
@@ -226,6 +228,18 @@ describe('readStoryHistory', () => {
     expect((await readStoryHistory(missing.admin, NOW)).size).toBe(0);
     const broken = fakeAdmin([], { code: '500', message: 'se cayó' });
     await expect(readStoryHistory(broken.admin, NOW)).rejects.toThrow('se cayó');
+  });
+
+  it('con dos historias al mismo precio más bajo, la fecha es la de la más nueva', async () => {
+    const { admin } = fakeAdmin([story('a', 80_000, 1), story('a', 70_000, 3), story('a', 70_000, 6), story('a', 75_000, 8)]);
+    const history = await readStoryHistory(admin, new Date(NOW.getTime() - 14 * 86_400_000));
+    expect(history.get('a')).toEqual({ lowest: 70_000, lowestAt: story('a', 0, 3).posted_at, lastAt: story('a', 0, 1).posted_at });
+  });
+
+  it('sin ningún precio anotado no hay precio más bajo ni fecha de ese precio', async () => {
+    const { admin } = fakeAdmin([story('a', null, 1), story('a', 0, 2)]);
+    const history = await readStoryHistory(admin, new Date(NOW.getTime() - 14 * 86_400_000));
+    expect(history.get('a')).toEqual({ lowest: null, lowestAt: null, lastAt: story('a', 0, 1).posted_at });
   });
 });
 
@@ -522,10 +536,54 @@ describe('buildStoryItem', () => {
     expect(item).toMatchObject({ id: p.id, discount: 20, reason: '', warning: null, points: 0 });
   });
 
-  it('si ya se subió, dice a cuánto y cuándo', () => {
-    const history = { lowest: 90_000, lastAt: '2026-10-09T12:00:00.000Z' };
+  it('si ya se subió, dice a cuánto y cuándo: la fecha y el precio de la misma historia', () => {
+    // La más baja se subió el 6; la última, a otro precio, el 9.
+    const history = { lowest: 90_000, lowestAt: '2026-10-06T12:00:00.000Z', lastAt: '2026-10-09T12:00:00.000Z' };
     const item = buildStoryItem(pickOne(product()), { now: NOW, settings: DIRECT, key: KEY, history })!;
-    expect(item.again).toEqual({ price: 90_000, at: '2026-10-09T12:00:00.000Z' });
+    expect(item.again).toEqual({ price: 90_000, at: '2026-10-06T12:00:00.000Z' });
+
+    // Sin la fecha del precio más bajo (un historial armado antes), queda la de la última.
+    const older = buildStoryItem(pickOne(product()), {
+      now: NOW,
+      settings: DIRECT,
+      key: KEY,
+      history: { lowest: 90_000, lowestAt: null, lastAt: '2026-10-09T12:00:00.000Z' },
+    })!;
+    expect(older.again).toEqual({ price: 90_000, at: '2026-10-09T12:00:00.000Z' });
+
+    // Sin precio anotado no se dice "ya la subiste".
+    const unknown = buildStoryItem(pickOne(product()), {
+      now: NOW,
+      settings: DIRECT,
+      key: KEY,
+      history: { lowest: null, lowestAt: null, lastAt: '2026-10-09T12:00:00.000Z' },
+    })!;
+    expect(unknown.again).toBeNull();
+  });
+
+  it('lleva la ficha limpia de Mercado Libre para mirar el precio, nunca el link de afiliado', () => {
+    const item = buildStoryItem(pickOne(product({ ml_product_id: 'MLC123' })), { now: NOW, settings: DIRECT, key: KEY })!;
+    expect(item.mlUrl).toBe('https://www.mercadolibre.cl/p/MLC123');
+    expect(item.link).toContain('matt_word');
+    expect(item.mlUrl).not.toMatch(/matt_|meli\.la|\?/);
+    // Con los links guardados (meli.la) tampoco cambia: la ficha sale del producto, no del link.
+    const saved = buildStoryItem(pickOne(product({ ml_product_id: 'MLC123' })), { now: NOW, settings: MELI_LA, key: KEY })!;
+    expect(saved.mlUrl).toBe('https://www.mercadolibre.cl/p/MLC123');
+
+    // Sin ficha, o con un id que no es de Mercado Libre, no hay botón.
+    for (const ml_product_id of [null, '', 'MLC123?matt_word=x', 'mlc123']) {
+      const none = buildStoryItem(pickOne(product({ ml_product_id })), { now: NOW, settings: DIRECT, key: KEY })!;
+      expect(none.mlUrl, String(ml_product_id)).toBeNull();
+    }
+  });
+
+  it('dice lo mismo que la pieza del envío: solo con un sí explícito', () => {
+    const both = product({ offer_info: { free_shipping: true, is_full: true } });
+    expect(buildStoryItem(pickOne(both), { now: NOW, settings: DIRECT, key: KEY })).toMatchObject({ freeShipping: true, full: true });
+    const none = product({ offer_info: { free_shipping: false, is_full: false } });
+    expect(buildStoryItem(pickOne(none), { now: NOW, settings: DIRECT, key: KEY })).toMatchObject({ freeShipping: false, full: false });
+    const unknown = product({ offer_info: null });
+    expect(buildStoryItem(pickOne(unknown), { now: NOW, settings: DIRECT, key: KEY })).toMatchObject({ freeShipping: false, full: false });
   });
 
   it('acorta el nombre y arma un nombre de archivo sin caracteres raros', () => {
@@ -557,6 +615,64 @@ describe('readStoryPicks', () => {
       perCategory.set(category, (perCategory.get(category) ?? 0) + 1);
     }
     expect(Math.max(...perCategory.values())).toBe(2);
+    // Las otras 17 califican igual y esperan su turno.
+    expect(items.waiting).toBe(17);
+  });
+
+  it('waiting cuenta lo que quedó fuera por los cupos de variedad, no lo ya subido ni lo que no califica', async () => {
+    // Cinco ofertas buenas de la misma categoría: entran dos (dos por categoría) y esperan tres.
+    const audio = Array.from({ length: 5 }, () => strong({ category: 'audio' }));
+    // Una que interesa poco: no entra ni espera.
+    const cable = product({
+      name: 'Cable Usb Tipo C 2 Metros Carga Rápida',
+      brand: 'Genérica',
+      category: 'electronica',
+      price: 3_990,
+      original_price: 9_990,
+      seller_sales_count: 800,
+      offer_info: { free_shipping: false, is_full: false },
+    });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [...audio, cable], error: null });
+    const first = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    expect(first).toHaveLength(2);
+    expect(first.waiting).toBe(3);
+
+    // Una de las que esperaban ya se subió (al precio de hoy): no espera más.
+    const posted = audio.find((p) => !first.some((item) => item.id === p.id))!;
+    const second = await readStoryPicks(fakeAdmin([story(posted.id, 60_000, 2)]).admin, NOW, KEY);
+    expect(second).toHaveLength(2);
+    expect(second.waiting).toBe(2);
+  });
+
+  it('waiting cuenta una por modelo: dos colores del mismo producto esperan como uno', async () => {
+    const shown = [strong({ category: 'audio' }), strong({ category: 'audio' })];
+    const black = strong({ category: 'audio', ml_family_id: 'FAM-1', name: 'Audífonos Bluetooth Sony WH-CH520 Negro', brand: 'Sony' });
+    const blue = strong({ category: 'audio', ml_family_id: 'FAM-1', name: 'Audífonos Bluetooth Sony WH-CH520 Azul', brand: 'Sony' });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [...shown, black, blue], error: null });
+    const items = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    expect(items).toHaveLength(2);
+    expect(items.waiting).toBe(1);
+  });
+
+  it('sin nada más que califique, waiting es 0; sin ofertas, la lista vacía también lo trae', async () => {
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [strong({ category: 'audio' })], error: null });
+    const one = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    expect(one).toHaveLength(1);
+    expect(one.waiting).toBe(0);
+
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [], error: null });
+    const none = await readStoryPicks(fakeAdmin([]).admin, NOW, KEY);
+    expect([...none]).toEqual([]);
+    expect(none.waiting).toBe(0);
+  });
+
+  it('la que vuelve porque bajó dice la fecha de la historia de su precio más bajo, no la de la última', async () => {
+    const back = strong({ category: 'audio', price: 58_000 });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [back], error: null });
+    // Hace 4 días se subió a $60.000; hace 1 día, a $75.000. Hoy está a $58.000: bajó 3% o más desde el más bajo.
+    const { admin } = fakeAdmin([story(back.id, 75_000, 1), story(back.id, 60_000, 4)]);
+    const [item] = await readStoryPicks(admin, NOW, KEY);
+    expect(item.again).toEqual({ price: 60_000, at: story(back.id, 0, 4).posted_at });
   });
 
   it('no repite una historia ya subida, salvo que haya bajado; esas van primero', async () => {
@@ -722,7 +838,7 @@ describe('readPostedStories', () => {
     posted_at: new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString(),
   });
 
-  it('entrega la última marca de cada producto que sigue a la venta, con lo necesario para compartirla de nuevo', async () => {
+  it('entrega la última marca de cada producto, con lo necesario para compartirla de nuevo; lo que ya no se vende viene marcado', async () => {
     const a = product({ price: 75_000 });
     const b = product();
     const gone = product({ is_active: false });
@@ -733,17 +849,48 @@ describe('readPostedStories', () => {
     });
 
     const stories = await readPostedStories(admin, NOW, KEY);
-    expect(stories.map((st) => [st.id, st.postId])).toEqual([
-      [b.id, 30],
-      [a.id, 11],
+    // La que ya no está a la venta sigue en Instagram: viene, con onSale en false, para pedir que se borre.
+    expect(stories.map((st) => [st.id, st.postId, st.onSale])).toEqual([
+      [b.id, 30, true],
+      [gone.id, 20, false],
+      [a.id, 11, true],
     ]);
     // La imagen y el precio son los de ahora; el precio con que se subió queda aparte.
-    expect(stories[1]).toMatchObject({ price: 75_000, postedPrice: 80_000, postedAt: mark(11, a.id, 0, 3).posted_at, again: null });
+    expect(stories[2]).toMatchObject({ price: 75_000, postedPrice: 80_000, postedAt: mark(11, a.id, 0, 3).posted_at, again: null });
     // Ya se decidió subirlas: no llevan motivo ni aviso, y no leen el historial de precios.
-    expect(stories[1]).toMatchObject({ reason: '', warning: null });
+    expect(stories[2]).toMatchObject({ reason: '', warning: null });
     expect(vi.mocked(getPriceStatsMany)).not.toHaveBeenCalled();
-    expect(stories[1].image).toContain(`/social/pieza/${a.id}/story-75000-100000-`);
-    expect(stories[1].link).toBe('https://www.mercadolibre.cl/p/MLC123?matt_word=comparatech&matt_tool=12345');
+    expect(stories[2].image).toContain(`/social/pieza/${a.id}/story-75000-100000-`);
+    expect(stories[2].link).toBe('https://www.mercadolibre.cl/p/MLC123?matt_word=comparatech&matt_tool=12345');
+    // La ficha limpia, para mirar el precio.
+    expect(stories[2].mlUrl).toBe('https://www.mercadolibre.cl/p/MLC123');
+  });
+
+  it('ocultado, en pausa o marcado como borrado viene con onSale false; borrado de la base no viene', async () => {
+    const hidden = product({ is_hidden: true });
+    const paused = product({ is_active: false });
+    const removed = product({ deleted_at: '2026-10-12T10:00:00.000Z' });
+    const live = product();
+    const erased = product();
+    const { admin } = fakeTables({
+      social_posts: [
+        mark(5, hidden.id, 80_000, 1),
+        mark(4, paused.id, 80_000, 2),
+        mark(3, removed.id, 80_000, 3),
+        mark(2, live.id, 80_000, 4),
+        // Su fila ya no existe: no hay nada que mostrar.
+        mark(1, erased.id, 80_000, 5),
+      ],
+      products: [hidden, paused, removed, live],
+    });
+
+    const stories = await readPostedStories(admin, NOW, KEY);
+    expect(stories.map((st) => [st.id, st.onSale])).toEqual([
+      [hidden.id, false],
+      [paused.id, false],
+      [removed.id, false],
+      [live.id, true],
+    ]);
   });
 
   it('sin marcas no lee los productos', async () => {

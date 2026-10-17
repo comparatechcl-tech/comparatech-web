@@ -13,11 +13,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/app/admin/videos/actions', () => ({ markVideoPosted: vi.fn(), undoVideoPosted: vi.fn() }));
 
 import { createVideoGestures, type FileState, type GestureActions, type Mark, type Note } from '@/app/admin/videos/gestures';
+import type { LiveSource } from '@/app/admin/videos/live';
 import {
+  LIVE_CLOCK_MS,
   browserEnv,
   screenUi,
+  watchLive,
   without,
   type BrowserGlobals,
+  type LiveGlobals,
   type ManualCopy,
   type PostedByNetwork,
   type ScreenSetters,
@@ -62,9 +66,21 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
       youtubeDescription: `Descripción de YouTube ${seq}`,
     },
     posted: {},
+    mlUrl: `https://www.mercadolibre.cl/p/MLC${seq}`,
+    freeShipping: true,
+    full: false,
     ...over,
   };
 }
+
+/**
+ * La revisión en vivo de mentira: "mismo precio", recién llegada a la hora T0.
+ * Las reglas de los toques que dependen de ella están en video-page-gestures.test.tsx.
+ */
+const confirmed = (): LiveSource => ({
+  entry: () => ({ result: { check: { status: 'same', checkedAt: new Date(T0).toISOString() }, at: T0 }, checking: false }),
+  recheck: vi.fn(),
+});
 
 /** Deja correr las promesas pendientes. setImmediate no lo tocan los relojes de mentira de este archivo. */
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -252,7 +268,7 @@ describe('browserEnv con las reglas de verdad: Guardar y Compartir de punta a pu
         posted: () => {},
         run: (job) => void job(),
       },
-      { maxPriceAgeMs: 6 * 3600_000, openedAt: T0 }
+      { maxPriceAgeMs: 6 * 3600_000, openedAt: T0, live: confirmed() }
     );
     return { b, gestures, notes };
   }
@@ -485,7 +501,7 @@ describe('screenUi con las reglas de verdad', () => {
         undo: vi.fn<GestureActions['undo']>(async () => ({ ok: true })),
       },
       s.ui,
-      { maxPriceAgeMs: 6 * 3600_000, openedAt: T0 }
+      { maxPriceAgeMs: 6 * 3600_000, openedAt: T0, live: confirmed() }
     );
     return { s, gestures };
   }
@@ -524,5 +540,103 @@ describe('screenUi con las reglas de verdad', () => {
     expect(s.manual.box.value[item.id]).toEqual({ label: 'Instagram', text: item.texts.instagram });
     expect(s.notes.box.value[item.id]?.tone).toBe('error');
     expect(s.copied.box.value).toBeNull();
+  });
+});
+
+describe('watchLive: la revisión en vivo sin que nadie toque nada', () => {
+  /** Un document y un reloj de mentira: anotan qué se registró y dejan disparar los eventos a mano. */
+  function fakePage(state = 'visible') {
+    const listeners = new Set<() => void>();
+    const added: unknown[] = [];
+    const removed: unknown[] = [];
+    const intervals: { run: () => void; ms: number; stopped: boolean }[] = [];
+    let now = T0;
+    const web: LiveGlobals = {
+      document: {
+        visibilityState: state,
+        addEventListener: (type, listener) => {
+          added.push([type, listener]);
+          listeners.add(listener);
+        },
+        removeEventListener: (type, listener) => {
+          removed.push([type, listener]);
+          listeners.delete(listener);
+        },
+      },
+      every: (run, ms) => {
+        const entry = { run, ms, stopped: false };
+        intervals.push(entry);
+        return () => {
+          entry.stopped = true;
+        };
+      },
+      now: () => now,
+    };
+    const checker = { start: vi.fn(), stop: vi.fn(), visible: vi.fn(), tick: vi.fn() };
+    const clock = vi.fn<(at: number) => void>();
+    return {
+      web,
+      checker,
+      clock,
+      listeners,
+      added,
+      removed,
+      intervals,
+      advance: (ms: number) => (now += ms),
+      /** La pestaña se vuelve a ver (o se esconde) y el navegador avisa. */
+      show: (next: string) => {
+        (web.document as { visibilityState: string }).visibilityState = next;
+        for (const listener of [...listeners]) listener();
+      },
+    };
+  }
+
+  it('al montar revisa de una vez, escucha el cambio de pestaña y mueve el reloj cada medio minuto', () => {
+    const p = fakePage();
+    watchLive(p.web, p.checker, p.clock);
+    expect(p.checker.start).toHaveBeenCalledTimes(1);
+    expect(p.added).toHaveLength(1);
+    expect((p.added[0] as unknown[])[0]).toBe('visibilitychange');
+    expect(p.intervals.map((i) => i.ms)).toEqual([LIVE_CLOCK_MS]);
+    expect(LIVE_CLOCK_MS).toBe(30_000);
+    // Nada más: no revisa de nuevo por montar.
+    expect(p.checker.visible).not.toHaveBeenCalled();
+    expect(p.checker.tick).not.toHaveBeenCalled();
+  });
+
+  it('al volver a la pestaña adelanta el reloj y pide revisar (la regla de los 5 minutos la decide la revisión)', () => {
+    const p = fakePage('hidden');
+    watchLive(p.web, p.checker, p.clock);
+    p.advance(7 * 60_000);
+    p.show('visible');
+    expect(p.clock).toHaveBeenCalledWith(T0 + 7 * 60_000);
+    expect(p.checker.visible).toHaveBeenCalledTimes(1);
+    // Esconderla no revisa nada.
+    p.show('hidden');
+    expect(p.checker.visible).toHaveBeenCalledTimes(1);
+  });
+
+  it('cada medio minuto mueve el reloj; solo con la pestaña a la vista pide la revisión que se adelanta al vencimiento', () => {
+    const p = fakePage('visible');
+    watchLive(p.web, p.checker, p.clock);
+    p.advance(LIVE_CLOCK_MS);
+    p.intervals[0].run();
+    expect(p.clock).toHaveBeenLastCalledWith(T0 + LIVE_CLOCK_MS);
+    expect(p.checker.tick).toHaveBeenCalledTimes(1);
+
+    (p.web.document as { visibilityState: string }).visibilityState = 'hidden';
+    p.intervals[0].run();
+    expect(p.clock).toHaveBeenCalledTimes(2);
+    expect(p.checker.tick).toHaveBeenCalledTimes(1);
+  });
+
+  it('al desmontar suelta todo: el mismo escuchador, el reloj y la revisión', () => {
+    const p = fakePage();
+    const stop = watchLive(p.web, p.checker, p.clock);
+    stop();
+    expect(p.removed).toEqual(p.added);
+    expect(p.listeners.size).toBe(0);
+    expect(p.intervals[0].stopped).toBe(true);
+    expect(p.checker.stop).toHaveBeenCalledTimes(1);
   });
 });

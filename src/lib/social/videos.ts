@@ -9,6 +9,7 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { reelProductName } from '@/lib/text';
 import { addInterestSignals, countUnreadHistory, readInterestEvidence, readSocialEvidence } from '@/lib/social/drops';
 import { interestScore, type InterestEvidence } from '@/lib/social/interest';
+import { mlCheckUrl, postedPriceShift } from '@/lib/social/live-price';
 import { NETWORK_RULES, VIDEO_MARK } from '@/lib/social/networks';
 import {
   evidenceDrop,
@@ -479,17 +480,15 @@ interface MarkRow {
   id: number;
   product_id: string | null;
   channel: string;
+  posted_price?: number | null;
   posted_at: string;
 }
 
-/**
- * Las marcas de video vigentes desde `since`, por producto y por red. Una
- * marca deshecha (status 'error') no cuenta. Sin la tabla, ninguna.
- */
-export async function readVideoMarks(admin: SupabaseClient, since: Date): Promise<Map<string, VideoPosted>> {
+/** Las filas de las marcas de video vigentes desde `since`, de la más nueva a la más antigua. Sin la tabla, ninguna. */
+async function readVideoMarkRows(admin: SupabaseClient, since: Date): Promise<MarkRow[]> {
   const { data, error } = await admin
     .from('social_posts')
-    .select('id, product_id, channel, posted_at')
+    .select('id, product_id, channel, posted_price, posted_at')
     .in('channel', [...VIDEO_NETWORKS])
     .eq('caption', VIDEO_MARK)
     .eq('status', 'publicado')
@@ -497,15 +496,22 @@ export async function readVideoMarks(admin: SupabaseClient, since: Date): Promis
     .order('posted_at', { ascending: false })
     .limit(2000);
   if (error) {
-    if (isMissingSchemaError(error)) return new Map();
+    if (isMissingSchemaError(error)) return [];
     throw new Error(`No se pudo leer los videos ya subidos: ${error.message}`);
   }
+  return (data ?? []) as MarkRow[];
+}
 
+function isVideoNetwork(channel: string): channel is VideoNetwork {
+  return (VIDEO_NETWORKS as readonly string[]).includes(channel);
+}
+
+/** Por producto y por red, la marca más nueva. Las filas vienen de la más nueva a la más antigua. */
+function groupVideoMarks(rows: MarkRow[]): Map<string, VideoPosted> {
   const marks = new Map<string, VideoPosted>();
-  // Vienen de la más nueva a la más antigua: la primera de cada red es la que vale.
-  for (const row of (data ?? []) as MarkRow[]) {
-    const network = row.channel as VideoNetwork;
-    if (!row.product_id || !VIDEO_NETWORKS.includes(network)) continue;
+  for (const row of rows) {
+    const network = row.channel;
+    if (!row.product_id || !isVideoNetwork(network)) continue;
     let posted = marks.get(row.product_id);
     if (!posted) {
       posted = {};
@@ -514,6 +520,68 @@ export async function readVideoMarks(admin: SupabaseClient, since: Date): Promis
     if (!posted[network]) posted[network] = { postId: row.id, at: row.posted_at };
   }
   return marks;
+}
+
+/**
+ * Las marcas de video vigentes desde `since`, por producto y por red. Una
+ * marca deshecha (status 'error') no cuenta. Sin la tabla, ninguna.
+ */
+export async function readVideoMarks(admin: SupabaseClient, since: Date): Promise<Map<string, VideoPosted>> {
+  return groupVideoMarks(await readVideoMarkRows(admin, since));
+}
+
+/** Una marca reciente, con el precio que se subió. */
+interface RecentMark {
+  productId: string;
+  postedPrice: number;
+  networks: VideoNetwork[];
+  at: string;
+}
+
+/**
+ * Las marcas hechas desde `since`, juntas por producto y precio marcado, de
+ * la más nueva a la más antigua. Sin precio anotado no hay con qué comparar.
+ */
+function recentMarksByPrice(rows: MarkRow[], since: Date): RecentMark[] {
+  const from = since.getTime();
+  const groups = new Map<string, RecentMark>();
+  for (const row of rows) {
+    const at = new Date(row.posted_at).getTime();
+    if (!row.product_id || !isVideoNetwork(row.channel) || !Number.isFinite(at) || at < from) continue;
+    const price = typeof row.posted_price === 'number' && row.posted_price > 0 ? row.posted_price : null;
+    if (price === null) continue;
+    const key = `${row.product_id}|${price}`;
+    const group = groups.get(key);
+    if (!group) groups.set(key, { productId: row.product_id, postedPrice: price, networks: [row.channel], at: row.posted_at });
+    else if (!group.networks.includes(row.channel)) group.networks.push(row.channel);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * De las marcas recientes, las que ya no dicen la verdad: el producto ahora
+ * está más caro (1% o más) o salió del sitio. Que haya bajado no se avisa:
+ * la publicación no promete nada que no exista, y ese producto no vuelve a
+ * armarse en 14 días, así que no hay otro video que subir. Puro.
+ */
+function changedAfterPostingOf(recent: RecentMark[], products: Map<string, SocialProduct>): VideoPriceChange[] {
+  const changed: VideoPriceChange[] = [];
+  for (const mark of recent) {
+    const product = products.get(mark.productId);
+    const price = isOnSale(product) ? product.price : null;
+    const shift = postedPriceShift(mark.postedPrice, price);
+    if (shift !== 'higher' && shift !== 'gone') continue;
+    changed.push({
+      productId: mark.productId,
+      name: product ? reelProductName(product.name) : null,
+      // En el orden de siempre: Instagram, TikTok, YouTube, Facebook.
+      networks: VIDEO_NETWORKS.filter((network) => mark.networks.includes(network)),
+      postedPrice: mark.postedPrice,
+      price,
+      at: mark.at,
+    });
+  }
+  return changed;
 }
 
 // ---------------------------------------------------------------------------
@@ -642,6 +710,33 @@ export interface ReadyVideo {
   texts: VideoTexts;
   /** Marcas vigentes de los últimos 14 días. */
   posted: VideoPosted;
+  /**
+   * La ficha de Mercado Libre para mirar el precio, sin parámetros de afiliado
+   * (lib/social/live-price: mlCheckUrl). Nunca `link`: abrirlo para mirar
+   * contaría como un clic de afiliado. null si el producto no tiene ficha.
+   */
+  mlUrl: string | null;
+  /** Lo que el video dice del envío (los mismos datos de la huella). */
+  freeShipping: boolean;
+  full: boolean;
+}
+
+/**
+ * Un video ya marcado como subido cuyo precio dejó de ser cierto: lo que está
+ * en la red dice `postedPrice` y el sitio dice `price`, más caro (null: ya no
+ * está a la venta). Un reel subido no se puede corregir: hay que mirar la
+ * publicación.
+ */
+export interface VideoPriceChange {
+  productId: string;
+  /** El nombre que lleva el video; null si el producto ya no está en la base. */
+  name: string | null;
+  /** Las redes donde se marcó con ese precio. */
+  networks: VideoNetwork[];
+  postedPrice: number;
+  price: number | null;
+  /** La marca más nueva de ese precio. */
+  at: string;
 }
 
 export interface VideoBoard {
@@ -670,7 +765,18 @@ export interface VideoBoard {
   lastRenderedAt: string | null;
   /** false si el bucket todavía no existe (el generador no ha corrido nunca). */
   storageReady: boolean;
+  /**
+   * Los videos marcados en las últimas 24 horas que ahora están más caros (1%
+   * o más) que el precio marcado, o cuyo producto ya no está a la venta
+   * (price null). Uno por producto y precio marcado, del más nuevo al más
+   * antiguo. Esa tarjeta ya no se muestra para subir (el video dice otro
+   * precio), pero lo que está en la red sigue diciéndolo.
+   */
+  changedAfterPosting: VideoPriceChange[];
 }
+
+/** Cuánto atrás se buscan videos marcados cuyo precio cambió. */
+export const VIDEO_CHANGED_WINDOW_MS = 24 * 3600_000;
 
 const NO_EVIDENCE: InterestEvidence = { drop: null, min30: null, daysTracked: 0 };
 
@@ -722,13 +828,22 @@ async function readProductsById(admin: SupabaseClient, ids: string[]): Promise<M
  */
 export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<VideoBoard> {
   if (!(await videoBucketExists(admin))) {
-    return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: false };
+    return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: false, changedAfterPosting: [] };
   }
 
   const today = chileDateKey(now);
-  const folders = await Promise.all([today, shiftDateKey(today, -1)].map((date) => listVideoFolder(admin, date)));
+  const since = new Date(now.getTime() - VIDEO_RULES.repeatAfterDays * DAY_MS);
+  // Las marcas se leen de una vez: dicen a qué redes se subió cada video y,
+  // las de las últimas 24 horas, qué video subido ya no tiene el precio de ahora.
+  const [folders, markRows] = await Promise.all([
+    Promise.all([today, shiftDateKey(today, -1)].map((date) => listVideoFolder(admin, date))),
+    readVideoMarkRows(admin, since),
+  ]);
   const stored = folders[0].concat(folders[1]);
-  if (stored.length === 0) return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: true };
+  const recent = recentMarksByPrice(markRows, new Date(now.getTime() - VIDEO_CHANGED_WINDOW_MS));
+  if (stored.length === 0 && recent.length === 0) {
+    return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: true, changedAfterPosting: [] };
+  }
 
   // Del más nuevo al más antiguo: el día de la carpeta y, dentro del día, la hora en que se subió.
   stored.sort((a, b) => (a.date === b.date ? timeOf(b.renderedAt) - timeOf(a.renderedAt) : a.date < b.date ? 1 : -1));
@@ -743,7 +858,12 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
     if (list) list.push(video);
     else byProduct.set(video.productId, [video]);
   }
-  const products = await readProductsById(admin, [...byProduct.keys()]);
+  // Una sola lectura del catálogo: los productos con video y los marcados en las últimas 24 horas.
+  const wanted = new Set<string>(byProduct.keys());
+  for (const mark of recent) wanted.add(mark.productId);
+  const products = await readProductsById(admin, [...wanted]);
+  const changedAfterPosting = changedAfterPostingOf(recent, products);
+  const marks = groupVideoMarks(markRows);
 
   // Lo que se sabe sin el historial: el producto salió del sitio, o ningún
   // video suyo lleva el precio de ahora con una plantilla que todavía se arma.
@@ -757,7 +877,7 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
     if (!isOnSale(product) || list.length === 0) stale++;
     else priced.push({ product, list });
   }
-  if (priced.length === 0) return { videos: [], stale, hiddenUnread: 0, lastRenderedAt, storageReady: true };
+  if (priced.length === 0) return { videos: [], stale, hiddenUnread: 0, lastRenderedAt, storageReady: true, changedAfterPosting };
 
   // La baja del historial es parte de lo que el video dice: sin leerlo no se
   // puede saber cuál es el nombre de hoy.
@@ -791,10 +911,9 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
     // diciendo la verdad: no se muestra, pero tampoco quedó viejo.
     if (isFreshlyChecked(product, now)) live.push({ video, product, claims });
   }
-  if (live.length === 0) return { videos: [], stale, hiddenUnread, lastRenderedAt, storageReady: true };
+  if (live.length === 0) return { videos: [], stale, hiddenUnread, lastRenderedAt, storageReady: true, changedAfterPosting };
 
-  const since = new Date(now.getTime() - VIDEO_RULES.repeatAfterDays * DAY_MS);
-  const [evidence, marks, settings] = await Promise.all([
+  const [evidence, settings] = await Promise.all([
     // Las señales, solo de los que se pueden mostrar: los clics se le piden
     // a la base por producto, no la semana entera de todo el sitio.
     addInterestSignals(
@@ -803,7 +922,6 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
       history,
       now
     ),
-    readVideoMarks(admin, since),
     readAffiliateSettings(admin),
   ]);
 
@@ -835,6 +953,9 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
       link: resolveOutboundUrl(p, settings),
       texts: buildVideoTexts(p, now),
       posted: marks.get(p.id) ?? {},
+      mlUrl: mlCheckUrl(p.ml_product_id),
+      freeShipping: claims.envio_gratis,
+      full: claims.full,
     });
   }
 
@@ -843,5 +964,5 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
     (a, b) => Number(pending(b)) - Number(pending(a)) || b.points - a.points || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   );
 
-  return { videos: videos.slice(0, VIDEO_BOARD_MAX), stale, hiddenUnread, lastRenderedAt, storageReady: true };
+  return { videos: videos.slice(0, VIDEO_BOARD_MAX), stale, hiddenUnread, lastRenderedAt, storageReady: true, changedAfterPosting };
 }

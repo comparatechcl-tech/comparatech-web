@@ -1220,15 +1220,30 @@ describe('el almacén', () => {
 describe('readVideoBoard', () => {
   it('sin el bucket avisa que el almacén no está listo y no lee nada más', async () => {
     const { admin, read, ops } = fakeSite({ bucket: false, products: [strong()] });
-    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: false });
+    expect(await readVideoBoard(admin, NOW)).toEqual({
+      videos: [],
+      stale: 0,
+      hiddenUnread: 0,
+      lastRenderedAt: null,
+      storageReady: false,
+      changedAfterPosting: [],
+    });
     expect(read).toEqual([]);
     expect(ops).toEqual(['getBucket reels']);
   });
 
-  it('con el bucket vacío no hay videos, y no se lee la base', async () => {
+  it('con el bucket vacío y sin marcas recientes no hay videos, y de la base solo se leen las marcas', async () => {
     const { admin, read } = fakeSite({ products: [strong()] });
-    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: true });
-    expect(read).toEqual([]);
+    expect(await readVideoBoard(admin, NOW)).toEqual({
+      videos: [],
+      stale: 0,
+      hiddenUnread: 0,
+      lastRenderedAt: null,
+      storageReady: true,
+      changedAfterPosting: [],
+    });
+    // Las marcas se leen siempre (dicen qué video subido cambió de precio); sin videos ni marcas no hay productos que leer.
+    expect(read).toEqual(['social_posts']);
   });
 
   it('si el almacén no responde, falla en vez de decir que no hay videos', async () => {
@@ -1623,9 +1638,16 @@ describe('readVideoBoard', () => {
 
     vi.mocked(getPriceStatsManyChecked).mockRejectedValueOnce(new Error('sin conexión'));
     // Pero dice cuántos quedaron escondidos por eso.
-    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 0, hiddenUnread: 2, lastRenderedAt: hoursAgo(2), storageReady: true });
-    // Ni señales ni marcas: no hay nada que mostrar.
-    expect(read).toEqual(['products']);
+    expect(await readVideoBoard(admin, NOW)).toEqual({
+      videos: [],
+      stale: 0,
+      hiddenUnread: 2,
+      lastRenderedAt: hoursAgo(2),
+      storageReady: true,
+      changedAfterPosting: [],
+    });
+    // Las marcas y los productos, una vez cada uno; ni señales: no hay nada que mostrar.
+    expect(read).toEqual(['social_posts', 'products']);
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
@@ -1734,8 +1756,15 @@ describe('readVideoBoard', () => {
   it('con todos los videos caídos lo dice, y no calcula nada más', async () => {
     const repriced = strong({ price: 70_000 });
     const { admin, read } = fakeSite({ products: [repriced], objects: stored([fileOf(TODAY, repriced, 60_000)], hoursAgo(2)) });
-    expect(await readVideoBoard(admin, NOW)).toEqual({ videos: [], stale: 1, hiddenUnread: 0, lastRenderedAt: hoursAgo(2), storageReady: true });
-    expect(read).toEqual(['products']);
+    expect(await readVideoBoard(admin, NOW)).toEqual({
+      videos: [],
+      stale: 1,
+      hiddenUnread: 0,
+      lastRenderedAt: hoursAgo(2),
+      storageReady: true,
+      changedAfterPosting: [],
+    });
+    expect(read).toEqual(['social_posts', 'products']);
   });
 });
 
@@ -2219,5 +2248,191 @@ describe('las señales ordenan, pero no habilitan', () => {
 
     const plan = await readVideoPicks(fakeSite({ clicks }).admin, NOW, 6);
     expect(plan.picks).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Al final del archivo a propósito: los ids de strong() salen de un contador, y
+// un test de la ruta del plan espera la plantilla que le toca a su id.
+
+describe('readVideoBoard: lo ya subido cuyo precio cambió (changedAfterPosting)', () => {
+  /** El tablero con solo las marcas: sin videos en el almacén, que para esto no hacen falta. */
+  async function changed(products: SocialProduct[], posts: Row[]) {
+    const fake = fakeSite({ products, posts });
+    const board = await readVideoBoard(fake.admin, NOW);
+    return { board, fake, list: board.changedAfterPosting };
+  }
+
+  it('avisa lo marcado en las últimas 24 horas que ahora está más caro: una marca de hace 23 horas sí, una de hace 25 no', async () => {
+    const recent = strong({ category: 'audio', price: 64_990 });
+    const old = strong({ category: 'gaming', price: 64_990 });
+    const { board, list } = await changed(
+      [recent, old],
+      [videoMark(recent.id, 'instagram', hoursAgo(23)), videoMark(old.id, 'instagram', hoursAgo(25))]
+    );
+    expect(list).toEqual([
+      { productId: recent.id, name: reelProductName(recent.name), networks: ['instagram'], postedPrice: 60_000, price: 64_990, at: hoursAgo(23) },
+    ]);
+    // Sin videos en el almacén igual se avisa: lo que está en las redes sigue diciendo el precio viejo.
+    expect(board).toMatchObject({ videos: [], stale: 0, storageReady: true });
+  });
+
+  it('a las 24 horas justas todavía avisa', async () => {
+    const p = strong({ price: 64_990 });
+    const { list } = await changed([p], [videoMark(p.id, 'tiktok', hoursAgo(24))]);
+    expect(list.map((item) => item.productId)).toEqual([p.id]);
+  });
+
+  it('una marca deshecha no cuenta', async () => {
+    const p = strong({ price: 64_990 });
+    const { list } = await changed([p], [videoMark(p.id, 'instagram', hoursAgo(2), { status: 'error', error: 'Marcada por error' })]);
+    expect(list).toEqual([]);
+  });
+
+  it('con el mismo precio no avisa', async () => {
+    const p = strong();
+    const { list } = await changed([p], [videoMark(p.id, 'instagram', hoursAgo(2))]);
+    expect(list).toEqual([]);
+  });
+
+  it('una subida de menos de 1% no avisa (el vaivén de dos vendedores); desde 1% sí', async () => {
+    const small = strong({ category: 'audio', price: 60_590 });
+    const exact = strong({ category: 'gaming', price: 60_600 });
+    const big = strong({ category: 'hogar', price: 72_000 });
+    const { list } = await changed(
+      [small, exact, big],
+      [videoMark(small.id, 'instagram', hoursAgo(1)), videoMark(exact.id, 'instagram', hoursAgo(2)), videoMark(big.id, 'instagram', hoursAgo(3))]
+    );
+    expect(list.map((item) => [item.productId, item.price])).toEqual([
+      [exact.id, 60_600],
+      [big.id, 72_000],
+    ]);
+  });
+
+  it('una baja no se avisa: lo subido no promete nada que no exista', async () => {
+    const p = strong({ price: 45_000 });
+    const { list } = await changed([p], [videoMark(p.id, 'youtube', hoursAgo(2))]);
+    expect(list).toEqual([]);
+  });
+
+  it('un producto que salió del sitio (ocultado, en pausa o borrado a mano) se avisa sin precio', async () => {
+    const hidden = strong({ category: 'audio', is_hidden: true });
+    const paused = strong({ category: 'gaming', is_active: false });
+    const deleted = strong({ category: 'hogar', deleted_at: daysAgo(1) });
+    const { list } = await changed(
+      [hidden, paused, deleted],
+      [videoMark(hidden.id, 'instagram', hoursAgo(1)), videoMark(paused.id, 'tiktok', hoursAgo(2)), videoMark(deleted.id, 'facebook', hoursAgo(3))]
+    );
+    expect(list.map((item) => [item.productId, item.price, item.name])).toEqual([
+      [hidden.id, null, reelProductName(hidden.name)],
+      [paused.id, null, reelProductName(paused.name)],
+      [deleted.id, null, reelProductName(deleted.name)],
+    ]);
+  });
+
+  it('un producto que ya no está en la base se avisa sin nombre y sin precio', async () => {
+    const erased = '00000000-0000-4000-8000-0000000fffff';
+    const { list, fake } = await changed([], [videoMark(erased, 'instagram', hoursAgo(5), { posted_price: 39_990 })]);
+    expect(list).toEqual([{ productId: erased, name: null, networks: ['instagram'], postedPrice: 39_990, price: null, at: hoursAgo(5) }]);
+    // Se preguntó por él: los productos de las marcas recientes se leen junto con los de los videos.
+    const products = fake.asked.filter((query) => query.table === 'products');
+    expect(products).toHaveLength(1);
+    expect(products[0].in.id).toEqual([erased]);
+  });
+
+  it('junta las redes del mismo producto y precio, en el orden de la tarjeta, con la marca más nueva', async () => {
+    const p = strong({ price: 64_990 });
+    const { list } = await changed(
+      [p],
+      [
+        videoMark(p.id, 'facebook', hoursAgo(1)),
+        videoMark(p.id, 'tiktok', hoursAgo(3)),
+        videoMark(p.id, 'instagram', hoursAgo(5)),
+        // La misma red marcada dos veces al mismo precio cuenta una.
+        videoMark(p.id, 'tiktok', hoursAgo(6)),
+      ]
+    );
+    expect(list).toEqual([
+      {
+        productId: p.id,
+        name: reelProductName(p.name),
+        networks: ['instagram', 'tiktok', 'facebook'],
+        postedPrice: 60_000,
+        price: 64_990,
+        at: hoursAgo(1),
+      },
+    ]);
+  });
+
+  it('el mismo producto marcado a dos precios va dos veces, de la marca más nueva a la más antigua; uno más caro y otro más barato que hoy, solo el que engaña', async () => {
+    const p = strong({ price: 64_990 });
+    const q = strong({ category: 'gaming', price: 64_990 });
+    const { list } = await changed(
+      [p, q],
+      [
+        videoMark(p.id, 'instagram', hoursAgo(2), { posted_price: 62_000 }),
+        videoMark(q.id, 'youtube', hoursAgo(3)),
+        videoMark(p.id, 'tiktok', hoursAgo(4), { posted_price: 60_000 }),
+        // Marcado más caro que hoy: no se avisa.
+        videoMark(p.id, 'facebook', hoursAgo(5), { posted_price: 70_000 }),
+      ]
+    );
+    expect(list.map((item) => [item.productId, item.postedPrice, item.networks, item.at])).toEqual([
+      [p.id, 62_000, ['instagram'], hoursAgo(2)],
+      [q.id, 60_000, ['youtube'], hoursAgo(3)],
+      [p.id, 60_000, ['tiktok'], hoursAgo(4)],
+    ]);
+  });
+
+  it('una marca sin precio anotado, de una historia, del feed o de Telegram no cuenta', async () => {
+    const p = strong({ price: 64_990 });
+    const { list } = await changed(
+      [p],
+      [
+        videoMark(p.id, 'instagram', hoursAgo(1), { posted_price: null }),
+        videoMark(p.id, 'tiktok', hoursAgo(1), { posted_price: 0 }),
+        { product_id: p.id, channel: 'instagram', caption: STORY_MARK, posted_price: 60_000, posted_at: hoursAgo(1) },
+        { product_id: p.id, channel: 'facebook', caption: 'Texto del post', posted_price: 60_000, posted_at: hoursAgo(1) },
+        { product_id: p.id, channel: 'telegram', caption: VIDEO_MARK, posted_price: 60_000, posted_at: hoursAgo(1) },
+      ]
+    );
+    expect(list).toEqual([]);
+  });
+
+  it('con videos en pantalla, la tarjeta del producto que cambió ya no se ofrece y el aviso igual sale', async () => {
+    const fine = strong({ category: 'audio' });
+    const repriced = strong({ category: 'gaming', price: 64_990 });
+    const { admin } = fakeSite({
+      products: [fine, repriced],
+      objects: stored([fileOf(TODAY, fine), fileOf(TODAY, repriced, 60_000)]),
+      posts: [videoMark(repriced.id, 'instagram', hoursAgo(2)), videoMark(fine.id, 'tiktok', hoursAgo(2))],
+    });
+    const board = await readVideoBoard(admin, NOW);
+    expect(board.videos.map((video) => video.id)).toEqual([fine.id]);
+    expect(board.stale).toBe(1);
+    expect(board.changedAfterPosting.map((item) => item.productId)).toEqual([repriced.id]);
+    // Las marcas de los que sí se muestran siguen llegando a su tarjeta, de la misma lectura.
+    expect(board.videos[0].posted).toEqual({ tiktok: { postId: 2, at: hoursAgo(2) } });
+  });
+
+  it('sin la tabla de publicaciones no hay nada que avisar', async () => {
+    const p = strong({ price: 64_990 });
+    const fake = fakeSite({ products: [p], tableErrors: { social_posts: { code: 'PGRST205', message: 'no existe' } } });
+    expect((await readVideoBoard(fake.admin, NOW)).changedAfterPosting).toEqual([]);
+  });
+
+  it('cada video lleva la ficha limpia de Mercado Libre y lo que dice del envío', async () => {
+    const p = strong({ offer_info: { free_shipping: false, is_full: true, official_store: true, sold_by_ml: false, is_lowest: true } as SocialProduct['offer_info'] });
+    const { admin } = fakeSite({ products: [p], objects: stored([fileOf(TODAY, p)]) });
+    const [video] = (await readVideoBoard(admin, NOW)).videos;
+    expect(video.mlUrl).toBe(`https://www.mercadolibre.cl/p/${p.ml_product_id}`);
+    expect(video.mlUrl).not.toMatch(/matt_|meli\.la|\?/);
+    expect(video.link).toContain('matt_word');
+    expect(video).toMatchObject({ freeShipping: false, full: true });
+
+    const none = strong({ category: 'gaming', ml_product_id: null });
+    const other = fakeSite({ products: [none], objects: stored([fileOf(TODAY, none)]) });
+    const boardNone = await readVideoBoard(other.admin, NOW);
+    for (const v of boardNone.videos) expect(v.mlUrl).toBeNull();
   });
 });

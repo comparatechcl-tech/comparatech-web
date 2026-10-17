@@ -12,17 +12,22 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 // La tarjeta importa las acciones de verdad, que escriben en la base: acá no se usan.
 vi.mock('@/app/admin/videos/actions', () => ({ markVideoPosted: vi.fn(), undoVideoPosted: vi.fn() }));
+// La revisión en vivo pregunta a Mercado Libre: acá se le entregan las respuestas a mano.
+vi.mock('@/app/admin/live-price-actions', () => ({ checkLivePrices: vi.fn() }));
 
 import { VideoCard, saveLabel, visitFor, type Mark, type VideoCardProps } from '@/app/admin/videos/VideoList';
 import {
   canShareVideos,
   createVideoGestures,
   linkTarget,
+  markWarning,
   textTargets,
   type FileState,
   type GestureActions,
   type Note,
 } from '@/app/admin/videos/gestures';
+import { CHECKING_NOTE, OLD_LIST, OLD_PRICE, type LiveEntry } from '@/app/admin/videos/live';
+import type { LiveCheck } from '@/lib/social/live-price';
 import type { ReadyVideo } from '@/lib/social/videos';
 
 const T0 = new Date('2026-10-13T15:00:00Z').getTime();
@@ -59,9 +64,34 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
       youtubeDescription: `Descripción de YouTube ${seq}`,
     },
     posted: {},
+    mlUrl: `https://www.mercadolibre.cl/p/MLC${seq}`,
+    freeShipping: true,
+    full: false,
     ...over,
   };
 }
+
+/** Lo que dijo la revisión en vivo, llegado a la hora `at` del reloj del teléfono. */
+const done = (check: LiveCheck, at = T0): LiveEntry => ({ result: { check, at }, checking: false });
+const SAME = (at = T0) => done({ status: 'same', checkedAt: new Date(at).toISOString() }, at);
+const CHANGED = (at = T0, saved = false) =>
+  done(
+    {
+      status: 'changed',
+      checkedAt: new Date(at).toISOString(),
+      price: 45_990,
+      listPrice: 99_990,
+      freeShipping: true,
+      full: false,
+      saved,
+      what: 'El precio cambió de $49.990 a $45.990.',
+    },
+    at
+  );
+const UNAVAILABLE = (at = T0) =>
+  done({ status: 'unavailable', checkedAt: new Date(at).toISOString(), what: 'Ya no está a la venta con un vendedor de reputación verde.' }, at);
+const UNKNOWN = (at = T0, what = 'No pude revisar Mercado Libre ahora.') => done({ status: 'unknown', what }, at);
+const CHECKING: LiveEntry = { result: null, checking: true };
 
 /** Una promesa que se resuelve cuando el test lo decide: una descarga o una llamada que todavía viaja. */
 function deferred<T>() {
@@ -79,9 +109,20 @@ const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 const named = (name: string) => Object.assign(new Error(name), { name });
 
-/** Las reglas con todo de mentira, y la "pantalla" anotada en un objeto para mirarla. */
-function setup(config: { maxPriceAgeMs?: number } = {}) {
+/**
+ * Las reglas con todo de mentira, y la "pantalla" anotada en un objeto para
+ * mirarla. La revisión en vivo dice "mismo precio", recién llegada, salvo
+ * que el test diga otra cosa (`live.set` para un video, `live.fallback` para todos).
+ */
+function setup(config: { maxPriceAgeMs?: number; fallback?: LiveEntry | undefined } = {}) {
   const clock = { now: T0 };
+  const answers = new Map<string, LiveEntry | undefined>();
+  const live = {
+    fallback: 'fallback' in config ? config.fallback : SAME(),
+    set: (videoId: string, entry: LiveEntry | undefined) => void answers.set(videoId, entry),
+    entry: vi.fn((videoId: string) => (answers.has(videoId) ? answers.get(videoId) : live.fallback)),
+    recheck: vi.fn<(videoIds: string[]) => void>(),
+  };
   const timers: { run: () => void; at: number }[] = [];
   let blobs = 0;
 
@@ -140,7 +181,7 @@ function setup(config: { maxPriceAgeMs?: number } = {}) {
       posted: (videoId, network, mark) => void screen.posted.set(`${videoId}|${network}`, mark),
       run: (job) => void screen.jobs.push(job()),
     },
-    { maxPriceAgeMs: config.maxPriceAgeMs ?? 6 * HOUR, openedAt: T0 }
+    { maxPriceAgeMs: config.maxPriceAgeMs ?? 6 * HOUR, openedAt: T0, live }
   );
 
   /** Adelanta el reloj y dispara los temporizadores que vencieron. */
@@ -152,10 +193,9 @@ function setup(config: { maxPriceAgeMs?: number } = {}) {
     }
   }
 
-  return { env, actions, screen, gestures, advance, timers };
+  return { env, actions, screen, gestures, advance, timers, live, clock };
 }
 
-const OLD_LIST = 'Esta lista ya tiene rato y el precio puede haber cambiado. Toca Actualizar, arriba, antes de subir el video.';
 const DOWNLOAD_ERROR =
   'No se pudo bajar el video. Revisa tu conexión y prueba otra vez. Si sigue igual, toca Abrir el video, acá abajo, y descárgalo desde el menú del reproductor (los tres puntos).';
 const COPY_ERROR = 'El teléfono no dejó copiar. Mantén el dedo sobre el texto de abajo y elige Copiar.';
@@ -281,8 +321,9 @@ describe('Compartir', () => {
     expect(screen.notes.get(item.id)?.openVideo).toBe(true);
   });
 
-  it('una lista con más de una hora no se comparte ni se guarda: manda a actualizar', async () => {
-    const { env, screen, gestures, advance } = setup();
+  it('sin revisión en vivo, una lista con más de una hora no se comparte ni se guarda: manda a actualizar', async () => {
+    // "No pude revisar": vale la regla de siempre (con "mismo precio" reciente, la edad de la lista no importa).
+    const { env, screen, gestures, advance } = setup({ fallback: UNKNOWN() });
     const item = video({ checkedAt: null });
 
     advance(60 * MINUTE);
@@ -305,8 +346,8 @@ describe('Compartir', () => {
     expect(screen.notes.get(item.id)).toEqual({ tone: 'error', text: OLD_LIST });
   });
 
-  it('con el precio revisado hace más del plazo tampoco, aunque la lista sea reciente', async () => {
-    const { env, screen, gestures } = setup({ maxPriceAgeMs: 6 * HOUR });
+  it('sin revisión en vivo y con el precio revisado hace más del plazo tampoco, aunque la lista sea reciente: lo dice así', async () => {
+    const { env, screen, gestures, live } = setup({ maxPriceAgeMs: 6 * HOUR, fallback: UNKNOWN() });
     const fresh = video({ checkedAt: new Date(T0 - 6 * HOUR).toISOString() });
     const old = video({ checkedAt: new Date(T0 - 6 * HOUR - 1).toISOString() });
 
@@ -315,8 +356,23 @@ describe('Compartir', () => {
     gestures.save(old);
     await settle();
     expect(env.fetchFile.mock.calls.map((call) => call[0])).toEqual([fresh.videoUrl]);
-    expect(screen.notes.get(old.id)).toEqual({ tone: 'error', text: OLD_LIST });
+    // Su propio mensaje: el precio es el viejo, no la lista.
+    expect(screen.notes.get(old.id)).toEqual({ tone: 'error', text: OLD_PRICE });
+    expect(OLD_PRICE).not.toContain('lista');
     expect(env.download).not.toHaveBeenCalled();
+    // Y pide otra revisión, sin esperarla.
+    expect(live.recheck).toHaveBeenCalledWith([old.id]);
+  });
+
+  it('con "mismo precio" reciente, la lista vieja y el precio viejo del sitio no importan: Mercado Libre lo confirmó', async () => {
+    const { env, gestures, advance, live } = setup();
+    const item = video({ checkedAt: new Date(T0 - 9 * HOUR).toISOString() });
+    advance(2 * HOUR);
+    live.fallback = SAME(T0 + 2 * HOUR - MINUTE);
+    gestures.share(item);
+    await settle();
+    gestures.share(item);
+    expect(env.share).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -490,16 +546,21 @@ describe('Copiar', () => {
     expect(screen.manual.get(item.id)).toEqual({ label: 'Copiar link', text: item.link });
   });
 
-  it('copiar no borra otro aviso de la tarjeta', async () => {
-    const { screen, gestures, advance } = setup();
+  it('copiar el link no borra otro aviso de la tarjeta; un texto, que lleva el precio, sigue la regla de Compartir', async () => {
+    const { env, screen, gestures, advance } = setup({ fallback: UNKNOWN() });
     const item = video();
     advance(61 * MINUTE);
     gestures.share(item);
     expect(screen.notes.get(item.id)?.text).toBe(OLD_LIST);
 
-    // Copiar sigue funcionando con la lista vieja, y el aviso de actualizar queda a la vista.
-    await gestures.copy(item, textTargets(item)[0]);
+    // El link no lleva precio: se copia con la lista vieja, y el aviso de actualizar queda a la vista.
+    await gestures.copy(item, linkTarget(item));
     expect(screen.copied.size).toBe(1);
+    expect(screen.notes.get(item.id)?.text).toBe(OLD_LIST);
+
+    // El texto lleva el precio escrito: no se copia.
+    await gestures.copy(item, textTargets(item)[0]);
+    expect(env.writeText.mock.calls).toEqual([[item.link]]);
     expect(screen.notes.get(item.id)?.text).toBe(OLD_LIST);
   });
 });
@@ -753,6 +814,9 @@ function drawCard(over: Partial<VideoCardProps> & Pick<VideoCardProps, 'video' |
     busy: null,
     note: undefined,
     manual: undefined,
+    // Sin revisión todavía, salvo que el test diga otra cosa.
+    live: undefined,
+    now: T0,
     ...over,
   };
   // La tarjeta no usa hooks: se puede llamar como función y recorrer lo que devuelve.
@@ -909,7 +973,8 @@ describe('la tarjeta, al tocar cada botón', () => {
 
   it('el aviso se lee en la tarjeta, y solo el de la descarga fallida trae el enlace al video', () => {
     const { gestures } = setup();
-    const item = video();
+    // Sin ficha de Mercado Libre: así el único enlace que puede aparecer es el del video.
+    const item = video({ mlUrl: null });
     const draw = (note: Note | undefined) =>
       renderToStaticMarkup(drawCard({ video: item, gestures, note }) as unknown as ReactElement);
 
@@ -943,7 +1008,7 @@ describe('la tarjeta, al tocar cada botón', () => {
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       for (const videoUrl of ['javascript:alert(1)', 'data:text/html,hola', '/storage/video.mp4', '']) {
-        const html = renderToStaticMarkup(drawCard({ video: video({ videoUrl }), gestures, note }) as unknown as ReactElement);
+        const html = renderToStaticMarkup(drawCard({ video: video({ videoUrl, mlUrl: null }), gestures, note }) as unknown as ReactElement);
         expect(html, videoUrl).not.toMatch(/<a\b/);
       }
     } finally {
@@ -959,5 +1024,268 @@ describe('la tarjeta, al tocar cada botón', () => {
     );
     expect(html).toContain('>TikTok</p>');
     expect(html).toMatch(/<p class="[^"]*select-all[^"]*whitespace-pre-wrap[^"]*">Parlante JBL a \$49\.990\n#ofertas<\/p>/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// La revisión en vivo decide: Compartir, Guardar y Copiar texto leen lo que ya
+// está en memoria, sin esperar al servidor dentro del toque.
+
+/** Baja el video con un primer toque y deja el archivo en memoria. */
+async function ready(t: ReturnType<typeof setup>, item: ReadyVideo) {
+  t.gestures.share(item);
+  await settle();
+  expect(t.env.fetchFile).toHaveBeenCalled();
+  t.env.share.mockClear();
+  t.live.recheck.mockClear();
+  t.screen.notes.clear();
+}
+
+const OFF_TEXT = '✗ El precio cambió de $49.990 a $45.990. No lo subas: toca Actualizar.';
+
+describe('la revisión en vivo: Compartir', () => {
+  it('con "mismo precio" reciente, el segundo toque llama a Compartir en la misma vuelta, sin preguntar nada', async () => {
+    const t = setup();
+    const item = video();
+    await ready(t, item);
+    t.live.fallback = SAME(T0 - 5 * MINUTE);
+    const calls: string[] = [];
+    t.live.entry.mockImplementation((_id: string) => {
+      calls.push('entry');
+      return t.live.fallback;
+    });
+    t.env.share.mockImplementation(async () => {
+      calls.push('share');
+    });
+
+    t.gestures.share(item);
+    // Antes de volver del toque: lo que se sabe se lee, y se comparte.
+    expect(calls).toEqual(['entry', 'share']);
+    expect(t.live.recheck).not.toHaveBeenCalled();
+  });
+
+  it('a los 15 minutos justos todavía comparte; pasado eso no, y pide otra revisión sin esperarla', async () => {
+    const t = setup();
+    const item = video();
+    await ready(t, item);
+    t.live.fallback = SAME(T0 - 15 * MINUTE);
+    t.gestures.share(item);
+    expect(t.env.share).toHaveBeenCalledTimes(1);
+
+    const late = setup();
+    const other = video();
+    await ready(late, other);
+    late.live.fallback = SAME(T0 - 15 * MINUTE - 1);
+    late.gestures.share(other);
+    expect(late.env.share).not.toHaveBeenCalled();
+    expect(late.screen.notes.get(other.id)).toEqual({ tone: 'error', text: CHECKING_NOTE });
+    expect(late.live.recheck.mock.calls).toEqual([[[other.id]]]);
+  });
+
+  it('si ya hay una revisión en camino, dice que espere y no pide otra', async () => {
+    const t = setup();
+    const item = video();
+    await ready(t, item);
+    t.live.fallback = { ...SAME(T0 - 20 * MINUTE), checking: true };
+    t.gestures.share(item);
+    expect(t.env.share).not.toHaveBeenCalled();
+    expect(t.screen.notes.get(item.id)?.text).toBe(CHECKING_NOTE);
+    expect(t.live.recheck).not.toHaveBeenCalled();
+  });
+
+  it('si cambió, no comparte y dice qué cambió; no pide revisar de nuevo (hay que actualizar)', async () => {
+    const t = setup();
+    const item = video();
+    await ready(t, item);
+    t.live.fallback = CHANGED();
+    t.gestures.share(item);
+    expect(t.env.share).not.toHaveBeenCalled();
+    expect(t.screen.notes.get(item.id)).toEqual({ tone: 'error', text: OFF_TEXT });
+    expect(t.live.recheck).not.toHaveBeenCalled();
+
+    // Con el precio nuevo ya en el sitio, lo dice.
+    t.live.fallback = CHANGED(T0, true);
+    t.gestures.share(item);
+    expect(t.screen.notes.get(item.id)?.text).toBe(`${OFF_TEXT} El sitio ya tiene el precio nuevo.`);
+  });
+
+  it('si ya no está a la venta en Mercado Libre, tampoco', async () => {
+    const t = setup();
+    const item = video();
+    await ready(t, item);
+    t.live.fallback = UNAVAILABLE();
+    t.gestures.share(item);
+    expect(t.env.share).not.toHaveBeenCalled();
+    expect(t.screen.notes.get(item.id)?.text).toBe(
+      '✗ Ya no está a la venta con un vendedor de reputación verde. No lo subas: toca Actualizar.'
+    );
+  });
+
+  it('un "cambió" se ve ya en el primer toque: ni siquiera baja el video', async () => {
+    const t = setup({ fallback: CHANGED() });
+    const item = video();
+    t.gestures.share(item);
+    await settle();
+    expect(t.env.fetchFile).not.toHaveBeenCalled();
+    expect(t.screen.notes.get(item.id)?.text).toBe(OFF_TEXT);
+  });
+
+  it('el primer toque baja igual con la revisión en camino o vencida, y pide otra si hace falta, para tenerla al segundo', async () => {
+    // Sin respuesta y revisando: baja, y no pide otra.
+    const checking = setup({ fallback: CHECKING });
+    const a = video();
+    checking.gestures.share(a);
+    await settle();
+    expect(checking.env.fetchFile).toHaveBeenCalledTimes(1);
+    expect(checking.live.recheck).not.toHaveBeenCalled();
+    expect(checking.screen.notes.get(a.id)?.tone).toBe('info');
+
+    // "Mismo precio" de hace 20 minutos: baja, y pide otra.
+    const stale = setup({ fallback: SAME(T0 - 20 * MINUTE) });
+    const b = video();
+    stale.gestures.share(b);
+    await settle();
+    expect(stale.env.fetchFile).toHaveBeenCalledTimes(1);
+    expect(stale.live.recheck.mock.calls).toEqual([[[b.id]]]);
+
+    // "Mismo precio" de hace 6 minutos todavía deja, pero ya conviene repetirla (más de 5): la pide.
+    const aging = setup({ fallback: SAME(T0 - 6 * MINUTE) });
+    const c = video();
+    aging.gestures.share(c);
+    await settle();
+    expect(aging.live.recheck.mock.calls).toEqual([[[c.id]]]);
+
+    // Reciente: no pide nada.
+    const fresh = setup({ fallback: SAME(T0 - 2 * MINUTE) });
+    const d = video();
+    fresh.gestures.share(d);
+    await settle();
+    expect(fresh.live.recheck).not.toHaveBeenCalled();
+  });
+
+  it('sin revisión en vivo vale la regla de siempre: lista de una hora o menos y precio de 6 horas o menos', async () => {
+    const t = setup({ fallback: UNKNOWN(T0, 'La revisión en vivo funciona solo en el sitio publicado.') });
+    const item = video({ checkedAt: new Date(T0 - 5 * HOUR).toISOString() });
+    t.gestures.share(item);
+    await settle();
+    // Una hora justa de lista y seis justas de precio: todavía deja.
+    t.advance(60 * MINUTE);
+    t.gestures.share(item);
+    expect(t.env.share).toHaveBeenCalledTimes(1);
+    expect(t.live.recheck).not.toHaveBeenCalled();
+  });
+
+  it('cuando llega la revisión, se va el "estoy revisando" que quedó en la tarjeta, y solo ese', async () => {
+    const t = setup({ fallback: CHECKING });
+    const item = video();
+    const other = video();
+    await ready(t, item);
+    t.gestures.share(item);
+    expect(t.screen.notes.get(item.id)?.text).toBe(CHECKING_NOTE);
+    // La otra tarjeta ya sabe que cambió: su aviso es otro.
+    t.live.set(other.id, CHANGED());
+    t.gestures.share(other);
+    expect(t.screen.notes.get(other.id)?.text).toBe(OFF_TEXT);
+
+    t.gestures.liveSettled([item.id, other.id]);
+    expect(t.screen.notes.has(item.id)).toBe(false);
+    // Lo que dijo otra cosa sigue a la vista.
+    expect(t.screen.notes.get(other.id)?.text).toBe(OFF_TEXT);
+  });
+});
+
+describe('la revisión en vivo: Guardar video y Copiar texto', () => {
+  it('Guardar sigue la misma regla: con un cambio no baja ni guarda nada', async () => {
+    const t = setup({ fallback: CHANGED() });
+    const item = video();
+    t.gestures.save(item);
+    await settle();
+    expect(t.env.fetchFile).not.toHaveBeenCalled();
+    expect(t.env.download).not.toHaveBeenCalled();
+    expect(t.screen.notes.get(item.id)?.text).toBe(OFF_TEXT);
+  });
+
+  it('Guardar con "mismo precio" vencido tampoco, y pide otra revisión', async () => {
+    const t = setup({ fallback: SAME(T0 - 16 * MINUTE) });
+    const item = video();
+    t.gestures.save(item);
+    await settle();
+    expect(t.env.download).not.toHaveBeenCalled();
+    expect(t.screen.notes.get(item.id)?.text).toBe(CHECKING_NOTE);
+    expect(t.live.recheck.mock.calls).toEqual([[[item.id]]]);
+  });
+
+  it('un texto lleva el precio escrito: con un cambio no se copia; el link, que no lleva precio, sí', async () => {
+    const t = setup({ fallback: UNAVAILABLE() });
+    const item = video();
+    await t.gestures.copy(item, textTargets(item)[0]);
+    expect(t.env.writeText).not.toHaveBeenCalled();
+    expect(t.screen.notes.get(item.id)?.text).toContain('No lo subas: toca Actualizar.');
+
+    await t.gestures.copy(item, linkTarget(item));
+    expect(t.env.writeText.mock.calls).toEqual([[item.link]]);
+  });
+
+  it('con "mismo precio" reciente se copia el texto', async () => {
+    const t = setup({ fallback: SAME(T0 - MINUTE) });
+    const item = video();
+    await t.gestures.copy(item, textTargets(item)[1]);
+    expect(t.env.writeText.mock.calls).toEqual([[item.texts.tiktok]]);
+  });
+});
+
+describe('la revisión en vivo: marcar siempre se deja', () => {
+  it('con un cambio marca igual, con el precio del video, y avisa que se revise lo subido', async () => {
+    const t = setup({ fallback: CHANGED() });
+    const item = video();
+    t.gestures.toggle(item, 'instagram', undefined);
+    await Promise.all(t.screen.jobs);
+    expect(t.actions.mark.mock.calls).toEqual([[item.id, 'instagram', 49_990]]);
+    expect(t.screen.posted.get(`${item.id}|instagram`)?.postId).toBe(500);
+    expect(t.screen.notes.get(item.id)).toEqual({
+      tone: 'error',
+      text: 'Lo marqué, pero ojo: El precio cambió de $49.990 a $45.990. Revisa lo que subiste en esa red.',
+    });
+  });
+
+  it('si la acción avisa que el precio del sitio ya es otro, ese aviso es el que se muestra', async () => {
+    const t = setup();
+    const item = video();
+    const warning = 'Ojo: el precio cambió a $45.990 desde que cargaste la lista. Si ya lo subiste, revisa la publicación.';
+    t.actions.mark.mockResolvedValueOnce({ ok: true, postId: 501, priceNow: 45_990, warning });
+    t.gestures.toggle(item, 'tiktok', undefined);
+    await Promise.all(t.screen.jobs);
+    expect(t.screen.posted.get(`${item.id}|tiktok`)?.postId).toBe(501);
+    expect(t.screen.notes.get(item.id)).toEqual({ tone: 'error', text: warning });
+  });
+
+  it('con el mismo precio no avisa nada', async () => {
+    const t = setup();
+    const item = video();
+    t.gestures.toggle(item, 'youtube', undefined);
+    await Promise.all(t.screen.jobs);
+    expect(t.screen.notes.has(item.id)).toBe(false);
+  });
+
+  it('markWarning lee el aviso con cuidado: llega del servidor', () => {
+    expect(markWarning({ ok: true, postId: 1, warning: '  Ojo: cambió.  ' })).toBe('Ojo: cambió.');
+    for (const result of [null, undefined, 'texto', { ok: true, postId: 1 }, { warning: 7 }, { warning: '   ' }]) {
+      expect(markWarning(result), JSON.stringify(result)).toBeNull();
+    }
+  });
+});
+
+describe('la tarjeta tocada, con la revisión en vivo', () => {
+  it('con un cambio, tocar Compartir con el archivo listo no abre la hoja', async () => {
+    const t = setup();
+    const item = video();
+    await ready(t, item);
+    // El video ya estaba bajado cuando llegó la revisión que dice que cambió.
+    t.live.fallback = CHANGED();
+    const card = drawCard({ video: item, gestures: t.gestures, fileState: 'lista', live: CHANGED() });
+    tap(byLabel(buttonsIn(card), 'Listo: toca para compartir'));
+    expect(t.env.share).not.toHaveBeenCalled();
+    // Y la tarjeta no ofrece el reproductor, desde cuyo menú se podría bajar igual.
+    expect(all(card).some((el) => el.type === 'video')).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 /**
@@ -10,6 +10,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 // Las acciones escriben en la base: acá solo se mira lo que la página dibuja.
 vi.mock('@/app/admin/videos/actions', () => ({ markVideoPosted: vi.fn(), undoVideoPosted: vi.fn() }));
+// La revisión en vivo consulta Mercado Libre (y su módulo usa cache() de React, que fuera de Next no existe).
+vi.mock('@/app/admin/live-price-actions', () => ({ checkLivePrices: vi.fn(async () => ({})) }));
 vi.mock('@/lib/supabase/server', () => ({ getSupabaseAdmin: vi.fn(() => ({})) }));
 // El tablero se entrega ya armado: el módulo de verdad lee el almacén y la base.
 vi.mock('@/lib/social/videos', () => ({
@@ -25,17 +27,22 @@ import ActividadPage from '@/app/admin/actividad/page';
 import { AdminTabs } from '@/app/admin/AdminTabs';
 import VideosPage, * as videosPageModule from '@/app/admin/videos/page';
 import {
+  VideoCard,
   VideoList,
+  arrange,
   isEverywhere,
   mergePosted,
-  pendingFirst,
   shareLabel,
   splitReason,
   type Mark,
+  type VideoCardProps,
 } from '@/app/admin/videos/VideoList';
+import { CHECKING_LINE, SKIPPED_LINE, UNKNOWN_LINE, type LiveEntry } from '@/app/admin/videos/live';
 import { fetchVideoFile } from '@/app/admin/videos/wiring';
 import { readAdminEvents, type AdminEventRow } from '@/lib/admin-audit';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
+import { LIVE_TEXT, type LiveCheck } from '@/lib/social/live-price';
+import { HISTORY_UNREAD_EXAMPLE, WARNING_GLOSSARY, explainWarning } from '@/lib/social/warning-help';
 import { VIDEO_RULES, readVideoBoard, type ReadyVideo, type VideoBoard } from '@/lib/social/videos';
 
 const NOW = new Date('2026-10-13T15:00:00Z');
@@ -84,6 +91,9 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
       youtubeDescription: `Descripción de YouTube ${seq}`,
     },
     posted: {},
+    mlUrl: `https://www.mercadolibre.cl/p/MLC${seq}`,
+    freeShipping: true,
+    full: false,
     ...over,
   };
 }
@@ -139,7 +149,7 @@ function elements(node: unknown, out: El[] = []): El[] {
 }
 
 function board(over: Partial<VideoBoard> = {}): VideoBoard {
-  return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: true, ...over };
+  return { videos: [], stale: 0, hiddenUnread: 0, lastRenderedAt: null, storageReady: true, changedAfterPosting: [], ...over };
 }
 
 async function page(): Promise<string> {
@@ -319,7 +329,7 @@ describe('VideoList: la tarjeta de un video', () => {
 });
 
 describe('VideoList: lo ya subido a las cuatro redes', () => {
-  it('va al final, atenuado, y lo dice con palabras', () => {
+  it('va al final, plegado en "Ya subidos a las cuatro redes (N)" y atenuado', () => {
     const done = video({ posted: EVERYWHERE });
     const half = video({ posted: { instagram: mark(21) } });
     const fresh = video();
@@ -329,8 +339,17 @@ describe('VideoList: lo ya subido a las cuatro redes', () => {
     expect(order.every((at) => at > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
 
+    // Plegado: una sección que se abre con el dedo, cerrada al cargar, con cuántos son.
+    const fold = /<details class="[^"]*"><summary class="([^"]*)">Ya subidos a las cuatro redes \(1\)<\/summary>/.exec(html);
+    expect(fold).not.toBeNull();
+    expect(fold?.[1]).toMatch(/\bmin-h-11\b/);
+    expect(html).not.toMatch(/<details[^>]* open/);
+    expect(html.indexOf('Ya subidos a las cuatro redes')).toBeGreaterThan(html.indexOf(`src="${fresh.videoUrl}"`));
+    expect(html.indexOf('Ya subidos a las cuatro redes')).toBeLessThan(html.indexOf(`src="${done.videoUrl}"`));
+
     const doneCard = card(html, done);
-    expect(text(doneCard)).toContain('Ya está en las cuatro redes.');
+    // Ahí no repite que está en las cuatro: lo dice la sección.
+    expect(text(doneCard)).not.toContain('Ya está en las cuatro redes');
     expect(/<div class="([^"]*)">\s*<video/.exec(doneCard)?.[1]).toContain('opacity-60');
     expect(buttons(doneCard.slice(doneCard.indexOf('Subido en:'))).map((b) => /aria-pressed="(\w+)"/.exec(b.attrs)?.[1])).toEqual([
       'true',
@@ -348,12 +367,18 @@ describe('VideoList: lo ya subido a las cuatro redes', () => {
     }
   });
 
-  it('pendingFirst no cambia el orden dentro de cada grupo', () => {
-    const [a, b, c, d] = [video({ posted: EVERYWHERE }), video(), video({ posted: EVERYWHERE }), video()];
-    const posted = { [a.id]: a.posted, [b.id]: b.posted, [c.id]: c.posted, [d.id]: d.posted };
-    expect(pendingFirst([a, b, c, d], posted).map((item) => item.id)).toEqual([b.id, d.id, a.id, c.id]);
+  it('arrange reparte en tres grupos sin cambiar el orden dentro de cada uno', () => {
+    const warned = (over: Partial<ReadyVideo> = {}) => video({ reason: 'Parlante JBL. Ojo: la oferta es chica', ...over });
+    const [a, b, c, d, e, f] = [video({ posted: EVERYWHERE }), video(), warned(), video({ posted: EVERYWHERE }), video(), warned({ posted: EVERYWHERE })];
+    const posted: Record<string, ReadyVideo['posted']> = {};
+    for (const item of [a, b, c, d, e, f]) posted[item.id] = item.posted;
+    const groups = arrange([a, b, c, d, e, f], posted);
+    expect(groups.clean.map((item) => item.id)).toEqual([b.id, e.id]);
+    expect(groups.warned.map((item) => item.id)).toEqual([c.id]);
+    // Lo que ya está en las cuatro va al final aunque traiga un "Ojo": ya no hay que subirlo.
+    expect(groups.done.map((item) => item.id)).toEqual([a.id, d.id, f.id]);
     // Un video sin anotación cuenta como pendiente.
-    expect(pendingFirst([a, b], {}).map((item) => item.id)).toEqual([a.id, b.id]);
+    expect(arrange([a, b], {}).clean.map((item) => item.id)).toEqual([a.id, b.id]);
   });
 
   it('isEverywhere pide las cuatro', () => {
@@ -441,13 +466,15 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
     expect(html).toMatch(/<a href="\/admin\/videos" class="[^"]*\bmin-h-11\b[^"]*">Actualizar<\/a>/);
   });
 
-  it('explica el método completo, en cinco pasos numerados: el texto se copia antes de Compartir', async () => {
+  it('explica el método completo, en seis pasos numerados: mirar la revisión y copiar el texto antes de Compartir', async () => {
     const html = await page();
     const list = /<ol[^>]*>([\s\S]*?)<\/ol>/.exec(html);
     expect(list?.[0]).toContain('list-decimal');
     const steps = (list?.[1] ?? '').split('</li>').slice(0, -1).map((step) => text(step).trim());
     expect(steps).toEqual([
       'Elige uno o dos videos al día. Para una cuenta que parte de cero vale más subir uno todos los días que muchos de una vez.',
+      // Antes de copiar nada: el texto y el video llevan el precio escrito.
+      'Mira la línea bajo el precio. Si dice ✓ Mismo precio que en Mercado Libre, súbelo. Si dice en rojo que cambió, no lo subas y toca Actualizar. Si no pude revisar, toca Ver en Mercado Libre y compara el precio antes de subirlo.',
       // Antes de Compartir: Compartir manda solo el archivo, y en la app ya no hay de dónde copiar.
       'Copia el texto de la red donde lo vas a subir, con su botón: queda copiado en el teléfono.',
       // Las cuatro redes de la tarjeta, Facebook incluida.
@@ -504,11 +531,14 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
     expect(html.indexOf('<video')).toBeGreaterThan(html.indexOf('Un reel no lleva link'));
   });
 
-  it('sin videos, explica que se preparan solos tres veces al día', async () => {
+  it('sin videos, dice que aparecen cuando una pasada los arma, sin horas escritas a mano', async () => {
     const read = text(await page());
     expect(read).toContain(
-      'Ahora no hay videos listos. Se preparan solos tres veces al día (cerca de las 8, las 13 y las 18 horas) y aparecen acá cuando están listos. Vuelve a mirar más tarde.'
+      'Ahora no hay videos listos. Aparecen acá cuando una pasada los arma. Vuelve a mirar después de la próxima pasada.'
     );
+    // La hora ya está arriba, calculada: el aviso no la repite ni la escribe fija.
+    expect(read).not.toContain('cerca de las 8, las 13 y las 18');
+    expect(read).not.toContain('tres veces al día');
     expect(read).not.toContain('Todavía no se ha generado');
     expect(read).not.toMatch(AVOIDED);
   });
@@ -516,9 +546,8 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
   it('si el almacén todavía no existe, dice que no se ha generado el primero', async () => {
     vi.mocked(readVideoBoard).mockResolvedValue(board({ storageReady: false }));
     const read = text(await page());
-    expect(read).toContain(
-      'Todavía no se ha generado el primer video. Se preparan solos tres veces al día (cerca de las 8, las 13 y las 18 horas) y aparecen acá cuando están listos.'
-    );
+    expect(read).toContain('Todavía no se ha generado el primer video. Aparecen acá cuando una pasada los arma.');
+    expect(read).not.toContain('Vuelve a mirar después de la próxima pasada');
     expect(read).not.toContain('Ahora no hay videos listos');
     expect(read).not.toContain('Último video generado');
   });
@@ -527,13 +556,13 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
     vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: [video()], stale: 3 }));
     const many = text(await page());
     expect(many).toContain(
-      '3 videos ya no se muestran porque el producto cambió (de precio, de oferta o salió del sitio). Si sigue entre los sugeridos, se arma uno nuevo en la próxima pasada.'
+      '3 videos ya no se muestran porque el producto cambió (de precio, de oferta o salió del sitio). Si no lo habías marcado en ninguna red y sigue entre los sugeridos, se arma uno nuevo en una próxima pasada; si ya lo marcaste en alguna, no se vuelve a armar en 14 días.'
     );
 
     vi.mocked(readVideoBoard).mockResolvedValue(board({ stale: 1 }));
     const one = text(await page());
     expect(one).toContain(
-      '1 video ya no se muestra porque el producto cambió (de precio, de oferta o salió del sitio). Si sigue entre los sugeridos, se arma uno nuevo en la próxima pasada.'
+      '1 video ya no se muestra porque el producto cambió (de precio, de oferta o salió del sitio). Si no lo habías marcado en ninguna red y sigue entre los sugeridos, se arma uno nuevo en una próxima pasada; si ya lo marcaste en alguna, no se vuelve a armar en 14 días.'
     );
     // Sin videos vigentes se ven los dos mensajes: por qué no hay y cuándo vuelven.
     expect(one).toContain('Ahora no hay videos listos');
@@ -566,7 +595,7 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
       for (const read of [many, one]) {
         // Sí hay videos: decir que no hay, o que se vuelva "más tarde", contradiría el aviso.
         expect(read).not.toContain('Ahora no hay videos listos');
-        expect(read).not.toContain('Vuelve a mirar más tarde');
+        expect(read).not.toContain('Vuelve a mirar después de la próxima pasada');
         expect(read).not.toContain('Todavía no se ha generado');
         // No es un video que cambió: no se mezcla con el aviso de los que ya no se muestran.
         expect(read).not.toContain('porque el producto cambió');
@@ -580,7 +609,7 @@ describe('/admin/videos: lo que la página le explica al dueño', () => {
       const read = text(await page());
       expect(read).not.toContain('historial de precios');
       expect(read).toContain('Ahora no hay videos listos.');
-      expect(read).toContain('Vuelve a mirar más tarde.');
+      expect(read).toContain('Vuelve a mirar después de la próxima pasada.');
     });
 
     it('un número que no es mayor que cero no se cuenta', async () => {
@@ -738,5 +767,349 @@ describe('/admin/actividad: las marcas de video en la bitácora', () => {
     expect(out[1]).toContain('deshizo la marca de una historia');
     expect(out[2]).toContain('cambió el estado en redes de un producto');
     for (const line of out) expect(line).not.toContain('video');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// La revisión en vivo en la tarjeta, dibujada a HTML estático.
+
+const T = NOW.getTime();
+const MIN = 60_000;
+
+/** Lo que dijo la revisión en vivo, llegado a la hora `at` del reloj del teléfono. */
+const answered = (check: LiveCheck, at = T, checking = false): LiveEntry => ({ result: { check, at }, checking });
+const SAME = (at = T, checking = false) => answered({ status: 'same', checkedAt: new Date(at).toISOString() }, at, checking);
+const CHANGED = (saved: boolean) =>
+  answered({
+    status: 'changed',
+    checkedAt: new Date(T).toISOString(),
+    price: 45_990,
+    listPrice: 99_990,
+    freeShipping: true,
+    full: false,
+    saved,
+    what: 'El precio cambió de $49.990 a $45.990.',
+  });
+const UNAVAILABLE = () => answered({ status: 'unavailable', checkedAt: new Date(T).toISOString(), what: LIVE_TEXT.notGreen });
+const UNKNOWN = (what: string = LIVE_TEXT.mlDown) => answered({ status: 'unknown', what });
+
+const cardGestures: VideoCardProps['gestures'] = {
+  share: vi.fn(),
+  save: vi.fn(),
+  copy: vi.fn(async () => {}),
+  toggle: vi.fn(),
+};
+
+/** Una tarjeta sola, en el estado que se pida. Por omisión: sin revisión todavía y en un teléfono que comparte. */
+function drawCard(over: Partial<VideoCardProps> = {}): string {
+  const item = over.video ?? video();
+  return renderToStaticMarkup(
+    <VideoCard
+      video={item}
+      posted={{}}
+      fileState={undefined}
+      saving={false}
+      canShare
+      copied={null}
+      busy={null}
+      note={undefined}
+      manual={undefined}
+      gestures={cardGestures}
+      live={undefined}
+      now={T}
+      {...over}
+    />
+  );
+}
+
+/** La clase del último párrafo que se abre antes de `needle`: así se sabe de qué color va. */
+function classBefore(html: string, needle: string): string {
+  const at = html.indexOf(needle);
+  expect(at, needle).toBeGreaterThanOrEqual(0);
+  const open = html.lastIndexOf('<p ', at);
+  const tag = html.slice(open, html.indexOf('>', open));
+  return /class="([^"]*)"/.exec(tag)?.[1] ?? '';
+}
+
+/** La etiqueta de apertura del enlace que lleva el texto `label`. */
+function anchorOf(html: string, label: string): string {
+  const at = html.indexOf(label);
+  expect(at, label).toBeGreaterThanOrEqual(0);
+  const open = html.lastIndexOf('<a ', at);
+  return html.slice(open, html.indexOf('>', open) + 1);
+}
+
+describe('VideoCard: la línea de la revisión en vivo, junto al precio', () => {
+  it('sin respuesta todavía: "Revisando en Mercado Libre…", en gris y con la rueda', () => {
+    const html = drawCard();
+    expect(html).toContain(CHECKING_LINE);
+    expect(classBefore(html, CHECKING_LINE)).toContain('text-muted');
+    expect(html).toMatch(/animate-spin[^>]*><path[^>]*><\/path><\/svg><span>Revisando en Mercado Libre…<\/span>/);
+    // El reproductor está: todavía no se sabe que algo cambió.
+    expect(html).toContain('<video');
+  });
+
+  it('mismo precio reciente: en verde, con hace cuánto, y avisa si está revisando de nuevo', () => {
+    const html = drawCard({ live: SAME(T - 3 * MIN) });
+    const line = '✓ Mismo precio que en Mercado Libre (hace 3 min)';
+    expect(html).toContain(line);
+    expect(classBefore(html, line)).toContain('text-accent');
+    expect(drawCard({ live: SAME(T - 3 * MIN, true) })).toContain(`${line} · revisando de nuevo…`);
+  });
+
+  it('mismo precio de más de 15 minutos: ya no va en verde sino en ámbar, y dice que se revisa al tocar Compartir', () => {
+    const html = drawCard({ live: SAME(T - 20 * MIN) });
+    const line = 'Mismo precio hace 20 min: como pasaron más de 15 minutos, lo reviso de nuevo al tocar Compartir.';
+    expect(html).toContain(line);
+    expect(html).not.toContain('✓');
+    expect(classBefore(html, line)).toContain('text-amber-400');
+    // A los 15 justos todavía es verde; y si ya está revisando de nuevo, lo dice.
+    expect(drawCard({ live: SAME(T - 15 * MIN) })).toContain('✓ Mismo precio que en Mercado Libre (hace 15 min)');
+    expect(drawCard({ live: SAME(T - 20 * MIN, true) })).toContain(CHECKING_LINE);
+  });
+
+  it('cambió y el sitio ya lo tiene: en rojo, que no lo suba, y el reproductor se reemplaza por el aviso', () => {
+    const item = video();
+    const html = drawCard({ video: item, live: CHANGED(true) });
+    const line = '✗ El precio cambió de $49.990 a $45.990. No lo subas: toca Actualizar. El sitio ya tiene el precio nuevo.';
+    expect(html).toContain(line);
+    expect(classBefore(html, line)).toContain('text-red-400');
+    // Sin reproductor: desde su menú se podría bajar el video igual.
+    expect(html).not.toContain('<video');
+    expect(html).not.toContain(`src="${item.videoUrl}"`);
+    expect(html).toContain(`role="img" aria-label="Video de ${item.name}: ya no calza con Mercado Libre"`);
+    expect(html).toContain('Ya no calza con Mercado Libre. No lo subas: toca Actualizar.');
+    // La portada queda de fondo, apagada.
+    expect(html).toMatch(new RegExp(`<img src="${item.coverUrl.replace(/[.?]/g, '\\$&')}" alt="" class="[^"]*opacity-20`));
+  });
+
+  it('cambió sin quedar guardado: no dice que el sitio lo tiene', () => {
+    const html = drawCard({ live: CHANGED(false) });
+    expect(html).toContain('✗ El precio cambió de $49.990 a $45.990. No lo subas: toca Actualizar.');
+    expect(html).not.toContain('El sitio ya tiene el precio nuevo');
+  });
+
+  it('ya no está a la venta en Mercado Libre: en rojo y sin reproductor', () => {
+    const html = drawCard({ live: UNAVAILABLE() });
+    const line = '✗ Ya no está a la venta con un vendedor de reputación verde. No lo subas: toca Actualizar.';
+    expect(html).toContain(line);
+    expect(classBefore(html, line)).toContain('text-red-400');
+    expect(html).not.toContain('<video');
+  });
+
+  it('no se pudo revisar: en ámbar, y el motivo del servidor en letra chica si agrega algo', () => {
+    const offline = drawCard({ live: UNKNOWN(LIVE_TEXT.offline) });
+    expect(offline).toContain(UNKNOWN_LINE);
+    expect(classBefore(offline, UNKNOWN_LINE)).toContain('text-amber-400');
+    expect(offline).toContain(`<span class="text-muted"> ${LIVE_TEXT.offline}</span>`);
+    // El reproductor sigue: no se sabe que algo cambió.
+    expect(offline).toContain('<video');
+
+    const down = drawCard({ live: UNKNOWN(LIVE_TEXT.mlDown) });
+    expect(down).toContain(UNKNOWN_LINE);
+    expect(down).not.toContain(LIVE_TEXT.mlDown);
+  });
+
+  it('ya en las cuatro redes desde hace más de un día: no se revisa, y lo dice en ámbar', () => {
+    const html = drawCard({ live: { result: null, checking: false, skipped: true } });
+    expect(html).toContain(SKIPPED_LINE);
+    expect(classBefore(html, SKIPPED_LINE)).toContain('text-amber-400');
+  });
+
+  it('con el precio cambiado no ofrece abrir el video directo, aunque la descarga haya fallado', () => {
+    const note = { tone: 'error' as const, text: 'No se pudo bajar el video.', openVideo: true };
+    expect(drawCard({ note })).toContain('Abrir el video');
+    expect(drawCard({ note, live: CHANGED(false) })).not.toContain('Abrir el video');
+    expect(drawCard({ note, live: UNAVAILABLE() })).not.toContain('Abrir el video');
+  });
+});
+
+describe('VideoCard: el botón "Ver en Mercado Libre"', () => {
+  it('es un enlace común a la ficha limpia: pestaña nueva, sin referer y del alto de un dedo', () => {
+    const item = video();
+    const tag = anchorOf(drawCard({ video: item }), 'Ver en Mercado Libre');
+    expect(tag).toContain(`href="${item.mlUrl}"`);
+    expect(tag).toContain('target="_blank"');
+    expect(tag).toContain('rel="noopener noreferrer"');
+    expect(tag).toMatch(/\bmin-h-11\b/);
+    // Nunca el link de afiliado: abrirlo para mirar contaría como clic.
+    expect(tag).not.toMatch(/matt_|meli\.la|\/api\/e/);
+    expect(tag).not.toContain(item.link.replace(/&/g, '&amp;'));
+  });
+
+  it('una dirección con parámetros se limpia, y una que no es de Mercado Libre no se enlaza', () => {
+    const dirty = drawCard({ video: video({ mlUrl: 'https://www.mercadolibre.cl/p/MLC88?matt_word=comparatech' }) });
+    expect(anchorOf(dirty, 'Ver en Mercado Libre')).toContain('href="https://www.mercadolibre.cl/p/MLC88"');
+    for (const mlUrl of ['https://evil.example.com/p/MLC1', 'javascript:alert(1)', 'http://www.mercadolibre.cl/p/MLC1', null]) {
+      expect(drawCard({ video: video({ mlUrl }) }), String(mlUrl)).not.toContain('Ver en Mercado Libre');
+    }
+  });
+
+  it('va también cuando el precio cambió: es justo cuando más sirve mirar', () => {
+    expect(drawCard({ live: CHANGED(false) })).toContain('Ver en Mercado Libre');
+  });
+});
+
+describe('VideoCard: el "Ojo" con su explicación', () => {
+  it('bajo el aviso, qué significa cada parte y qué hacer', () => {
+    const warning = 'vendedor con pocas ventas (4); el precio cambió 3 veces en dos días';
+    const html = drawCard({ video: video({ reason: `Parlante JBL, 50% de descuento. Ojo: ${warning}` }) });
+    const read = text(html);
+    expect(read).toContain(`Ojo: ${warning}.`);
+    const help = explainWarning(warning);
+    expect(help.map((h) => h.kind)).toEqual(['vendedor', 'precio']);
+    for (const h of help) expect(read).toContain(`${h.meaning} ${h.whatToDo}`);
+    expect(read).toContain('El vendedor que aparece primero lleva 4 ventas y no es tienda oficial.');
+    expect(html.indexOf(help[1].meaning)).toBeLessThan(html.indexOf('Guardar video'));
+  });
+
+  it('sin aviso no hay explicación', () => {
+    const html = drawCard();
+    for (const entry of WARNING_GLOSSARY) expect(text(html)).not.toContain(entry.whatToDo);
+  });
+
+  it('subido a las cuatro redes durante la visita: lo dice; ya en la sección de subidos, no lo repite', () => {
+    expect(text(drawCard({ posted: EVERYWHERE }))).toContain('Ya está en las cuatro redes. Al tocar Actualizar pasa abajo, a los ya subidos.');
+    expect(text(drawCard({ posted: EVERYWHERE, settled: true }))).not.toContain('Ya está en las cuatro redes');
+  });
+});
+
+describe('VideoList: los grupos', () => {
+  it('los que traen un "Ojo" van después, en "Con algo que mirar", con qué hacer', () => {
+    const clean = video();
+    const warned = video({ reason: 'Parlante JBL, 50% de descuento. Ojo: la oferta es chica' });
+    const html = render([warned, clean]);
+    expect(html.indexOf(`src="${clean.videoUrl}"`)).toBeLessThan(html.indexOf('Con algo que mirar'));
+    expect(html.indexOf('Con algo que mirar')).toBeLessThan(html.indexOf(`src="${warned.videoUrl}"`));
+    expect(text(html)).toContain(
+      'Después de armar estos videos apareció un "Ojo". Lee lo que dice y mira el precio con el botón antes de subirlos.'
+    );
+  });
+
+  it('sin avisos ni subidos a todo, no hay secciones aparte', () => {
+    const html = render([video(), video()]);
+    expect(html).not.toContain('Con algo que mirar');
+    expect(html).not.toContain('Ya subidos a las cuatro redes');
+    expect(html).not.toContain('<details');
+  });
+
+  it('al cargar, cada tarjeta dice que se está revisando', () => {
+    const html = render([video(), video()]);
+    expect(html.split(CHECKING_LINE)).toHaveLength(3);
+  });
+});
+
+describe('/admin/videos: cuándo hay videos nuevos', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** La página como la arma el servidor a la hora `at`. */
+  async function pageAt(at: string): Promise<string> {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(at));
+    return text(await page());
+  }
+
+  const LINE = (when: string) =>
+    `Los videos se arman solos 6 veces al día, unas cada 3 horas de día. Próxima pasada: ${when}, aunque GitHub suele atrasarla entre 1 y 4 horas. Para que entren productos nuevos, marca en qué redes subiste los de hoy: lo marcado deja su lugar al siguiente.`;
+
+  it('dice la próxima pasada en hora de Chile, calculada del horario de GitHub', async () => {
+    // 10:30 de Chile en verano: la próxima es la de las 13:10.
+    expect(await pageAt('2026-10-17T13:30:00Z')).toContain(LINE('programada a las 13:10'));
+  });
+
+  it('de noche, la próxima es la de mañana temprano, y lo dice', async () => {
+    // 22:30 de Chile: la de las 22:10 ya pasó.
+    expect(await pageAt('2026-10-18T01:30:00Z')).toContain(LINE('programada a las 07:10 de mañana'));
+    // 21:30 de Chile: todavía queda la de las 22:10, que en UTC ya es el día siguiente.
+    expect(await pageAt('2026-10-18T00:30:00Z')).toContain(LINE('programada a las 22:10'));
+    // Pasada la medianoche de Chile, la de las 07:10 es de hoy.
+    expect(await pageAt('2026-10-17T03:30:00Z')).toContain(LINE('programada a las 07:10'));
+  });
+
+  it('en invierno las mismas pasadas caen una hora antes en Chile', async () => {
+    expect(await pageAt('2026-06-17T09:00:00Z')).toContain(LINE('programada a las 06:10'));
+  });
+
+  it('va arriba, antes de los pasos, y no escribe horas fijas', async () => {
+    vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: [video()] }));
+    const html = await page();
+    expect(html.indexOf('Próxima pasada')).toBeGreaterThan(0);
+    expect(html.indexOf('Próxima pasada')).toBeLessThan(html.indexOf('<ol'));
+    expect(text(html)).not.toMatch(/cerca de las 8|las 13 y las 18|tres veces al día/);
+  });
+});
+
+describe('/admin/videos: lo ya subido cuyo precio cambió', () => {
+  const at = '2026-10-13T12:00:00.000Z';
+
+  it('lo avisa arriba y en rojo, uno por producto y precio marcado, con qué hacer en cada red', async () => {
+    vi.mocked(readVideoBoard).mockResolvedValue(
+      board({
+        videos: [video()],
+        changedAfterPosting: [
+          { productId: 'p1', name: 'Parlante JBL Go 4', networks: ['instagram', 'tiktok'], postedPrice: 49_990, price: 54_990, at },
+          { productId: 'p2', name: 'Audífonos Sony WH-CH520', networks: ['youtube'], postedPrice: 89_990, price: null, at },
+          { productId: 'p3', name: null, networks: ['instagram', 'tiktok', 'youtube', 'facebook'], postedPrice: 19_990, price: null, at },
+        ],
+      })
+    );
+    const html = await page();
+    const block = /<div role="alert" class="([^"]*)">([\s\S]*?)<\/div>/.exec(html);
+    expect(block?.[1]).toContain('border-red-500/40');
+    expect(block?.[1]).toContain('text-red-400');
+    const read = text(block?.[2] ?? '');
+    expect(read).toContain(
+      'Subiste Parlante JBL Go 4 en Instagram y TikTok a $49.990 y ahora está más caro, a $54.990: bórralo o archívalo en esa red.'
+    );
+    expect(read).toContain('Subiste Audífonos Sony WH-CH520 en YouTube a $89.990 y ya no está a la venta: bórralo o archívalo en esa red.');
+    expect(read).toContain(
+      'Subiste un producto que ya no está en el sitio en Instagram, TikTok, YouTube y Facebook a $19.990 y ya no está a la venta: bórralo o archívalo en esa red.'
+    );
+    expect(read).toContain(
+      'Un video subido no se puede editar: lo que promete un precio más bajo que el de ahora hay que sacarlo de esa red. Si bajó de precio no hace falta: no se avisa.'
+    );
+    expect((block?.[2] ?? '').split('<li')).toHaveLength(4);
+    // Arriba: antes de los pasos y de la lista.
+    expect(html.indexOf('role="alert"')).toBeLessThan(html.indexOf('<ol'));
+    expect(html.indexOf('role="alert"')).toBeLessThan(html.indexOf('<video'));
+  });
+
+  it('sin nada que avisar no hay bloque rojo', async () => {
+    vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: [video()] }));
+    const html = await page();
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain('Subiste ');
+  });
+
+  it('un tablero viejo sin la lista no rompe la página', async () => {
+    const old = board({ videos: [video()] }) as Partial<VideoBoard>;
+    delete old.changedAfterPosting;
+    vi.mocked(readVideoBoard).mockResolvedValue(old as VideoBoard);
+    const html = await page();
+    expect(html).not.toContain('role="alert"');
+    expect(html).toContain('<video');
+  });
+});
+
+describe('/admin/videos: "¿Qué significa cada aviso?"', () => {
+  it('va plegada al final, sin el aviso del historial que en Videos nunca aparece', async () => {
+    vi.mocked(readVideoBoard).mockResolvedValue(board({ videos: [video()] }));
+    const html = await page();
+    expect(html).toMatch(/<details class="mt-6 [^"]*"><summary[^>]*>¿Qué significa cada aviso\?<\/summary>/);
+    const read = text(html);
+    expect(read).not.toContain(`"${HISTORY_UNREAD_EXAMPLE}"`);
+    for (const entry of WARNING_GLOSSARY) {
+      if (entry.example === HISTORY_UNREAD_EXAMPLE) expect(read).not.toContain(entry.meaning);
+      else expect(read, entry.example).toContain(`"${entry.example}"`);
+    }
+    // Después de la lista.
+    expect(html.indexOf('¿Qué significa cada aviso?')).toBeGreaterThan(html.lastIndexOf('</video>'));
+  });
+
+  it('si no se pudo leer el tablero, no se muestra', async () => {
+    vi.mocked(readVideoBoard).mockRejectedValue(new Error('se cayó'));
+    expect(await page()).not.toContain('¿Qué significa cada aviso?');
   });
 });

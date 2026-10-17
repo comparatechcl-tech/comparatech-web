@@ -7,6 +7,7 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { shortProductName } from '@/lib/text';
 import { readSocialEvidence } from '@/lib/social/drops';
 import type { InterestScore } from '@/lib/social/interest';
+import { mlCheckUrl } from '@/lib/social/live-price';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
 import {
@@ -53,6 +54,13 @@ export const STORY_REPOST_DROP = 0.03;
 export interface StoryHistory {
   /** El precio más bajo con que se subió. null si ninguna historia lo anotó. */
   lowest: number | null;
+  /**
+   * Cuándo se subió la historia de ese precio más bajo (la más nueva, si hubo
+   * varias a ese precio). null si ninguna anotó precio. Va junto a `lowest`
+   * en "Ya la subiste el {fecha} a {$}": la fecha y el precio de la misma
+   * historia, no la fecha de la última con el precio de otra.
+   */
+  lowestAt: string | null;
   /** Cuándo se subió la última. */
   lastAt: string;
 }
@@ -80,13 +88,19 @@ export async function readStoryHistory(admin: SupabaseClient, since: Date): Prom
   }
 
   const history = new Map<string, StoryHistory>();
-  // Vienen de la más nueva a la más antigua: la primera de cada producto es la última subida.
+  // Vienen de la más nueva a la más antigua: la primera de cada producto es la
+  // última subida. Con dos al mismo precio más bajo, queda la fecha de la más
+  // nueva (la primera que se ve), por eso el "<" estricto.
   for (const row of (data ?? []) as StoryRow[]) {
     if (!row.product_id) continue;
     const price = row.posted_price && row.posted_price > 0 ? row.posted_price : null;
     const known = history.get(row.product_id);
-    if (!known) history.set(row.product_id, { lowest: price, lastAt: row.posted_at });
-    else if (price !== null && (known.lowest === null || price < known.lowest)) known.lowest = price;
+    if (!known) {
+      history.set(row.product_id, { lowest: price, lowestAt: price !== null ? row.posted_at : null, lastAt: row.posted_at });
+    } else if (price !== null && (known.lowest === null || price < known.lowest)) {
+      known.lowest = price;
+      known.lowestAt = row.posted_at;
+    }
   }
   return history;
 }
@@ -129,6 +143,15 @@ export interface StoryItem {
   /** El mismo destino que el botón de compra del sitio. */
   link: string;
   fileName: string;
+  /**
+   * La ficha de Mercado Libre para mirar el precio, sin parámetros de afiliado
+   * (lib/social/live-price: mlCheckUrl). Nunca `link`: abrirlo para mirar
+   * contaría como un clic de afiliado. null si el producto no tiene ficha.
+   */
+  mlUrl: string | null;
+  /** Lo que la pieza dice del envío (mismo dato que la imagen, de offer_info). */
+  freeShipping: boolean;
+  full: boolean;
 }
 
 /** Lo que buildStoryItem necesita de la selección. Una historia ya publicada no lleva puntaje. */
@@ -157,15 +180,43 @@ export function buildStoryItem(
     discount: pick.discount,
     drop: pick.drop === null ? null : Math.round(pick.drop),
     checkedAt: p.price_checked_at,
-    again: h && h.lowest !== null ? { price: h.lowest, at: h.lastAt } : null,
+    // El precio y la fecha de la misma historia: la del precio más bajo, que es contra el que se compara.
+    again: h && h.lowest !== null ? { price: h.lowest, at: h.lowestAt ?? h.lastAt } : null,
     reason: pick.score?.reason ?? '',
     warning: pick.score?.warning ?? null,
     points: pick.score?.points ?? 0,
     image,
     link: resolveOutboundUrl(p, opts.settings),
     fileName: `comparatech-${safeSlug}-historia.jpg`,
+    mlUrl: mlCheckUrl(p.ml_product_id),
+    // Igual que la imagen (snapshotOf): solo con un sí explícito.
+    freeShipping: p.offer_info?.free_shipping === true,
+    full: p.offer_info?.is_full === true,
   };
 }
+
+/**
+ * Las ofertas de la lista, más cuántas otras califican y quedaron fuera.
+ * Es un arreglo como siempre (quien solo quiere la lista no nota nada) con
+ * `waiting` pegado.
+ */
+export type StoryPicks = StoryItem[] & {
+  /**
+   * Cuántas ofertas más pasan todas las reglas y no entraron por el cupo de
+   * ocho o por los límites de variedad (dos por categoría, una por tipo, dos
+   * por marca). Una por modelo: dos colores del mismo cuentan una. Son las
+   * que aparecen al marcar las ya subidas y tocar Actualizar.
+   */
+  waiting: number;
+};
+
+/** Sin tope de cantidad ni de variedad: para contar todo lo que califica. */
+const ALL_THAT_QUALIFY = {
+  maxPosts: Number.MAX_SAFE_INTEGER,
+  perCategory: Number.MAX_SAFE_INTEGER,
+  perType: Number.MAX_SAFE_INTEGER,
+  perBrand: Number.MAX_SAFE_INTEGER,
+};
 
 /**
  * Las ofertas de este momento para subir como historia: la puerta de entrada
@@ -173,9 +224,9 @@ export function buildStoryItem(
  * confirmada, precio recién revisado), con más productos y en orden de
  * interés (lib/social/interest). Lo que ya se subió como historia en los
  * últimos 14 días no vuelve, salvo que haya bajado de precio: esas van
- * primero. Solo lee.
+ * primero. Trae también cuántas más esperan su turno (`waiting`). Solo lee.
  */
-export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buffer): Promise<StoryItem[]> {
+export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buffer): Promise<StoryPicks> {
   const freshSince = new Date(now.getTime() - STORY_RULES.maxPriceAgeMs).toISOString();
   const read = await readFreshSocialProducts(admin, freshSince);
   if (read.error) throw new Error(`No se pudo leer el catálogo: ${read.error}`);
@@ -190,11 +241,16 @@ export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buff
   // Después de saber qué se subió: el historial de precios de eso no hace falta leerlo.
   const evidence = await readSocialEvidence(admin, read.rows, now, alreadyPosted);
 
-  const items = pickByRules(read.rows, { now, recentlyPosted: alreadyPosted, evidence }, STORY_RULES)
+  const options = { now, recentlyPosted: alreadyPosted, evidence };
+  const picks = pickByRules(read.rows, options, STORY_RULES);
+  const items = picks
     .map((pick) => buildStoryItem(pick, { now, settings, key, history: history.get(pick.product.id) }))
     .filter((item): item is StoryItem => item !== null);
+  // La misma selección sin cupos: lo que queda fuera de la lista espera su turno.
+  const qualifying = pickByRules(read.rows, options, { ...STORY_RULES, ...ALL_THAT_QUALIFY }).length;
   // sort es estable: dentro de cada grupo se conserva el orden de la selección, que es el de interés.
-  return items.sort((a, b) => Number(b.again !== null) - Number(a.again !== null));
+  const sorted = items.sort((a, b) => Number(b.again !== null) - Number(a.again !== null));
+  return Object.assign(sorted, { waiting: Math.max(0, qualifying - picks.length) });
 }
 
 /** Lo que dura una historia en Instagram. Lo marcado en ese rato sigue a mano para subirlo a otras redes. */
@@ -206,6 +262,13 @@ export interface PostedStory extends StoryItem {
   postedAt: string;
   /** El precio con que se subió. La imagen que se entrega ahora lleva el precio de ahora. */
   postedPrice: number | null;
+  /**
+   * false si el producto ya no está a la venta en el sitio: la historia sigue
+   * en Instagram con un producto que no se puede comprar, y la tarjeta pide
+   * borrarla. Sin imagen ni Compartir (la pieza solo se dibuja para lo que se
+   * vende).
+   */
+  onSale: boolean;
 }
 
 interface PostedRow {
@@ -219,7 +282,8 @@ interface PostedRow {
  * Las historias marcadas en las últimas 24 horas, de la más nueva a la más
  * antigua: la misma historia se sube a mano en cada red, así que después de
  * Instagram hay que tenerla a mano para las demás. Una por producto (la
- * última marca), y solo de lo que sigue a la venta. Solo lee.
+ * última marca). Lo que ya no está a la venta viene con `onSale: false`: su
+ * historia sigue arriba y hay que borrarla. Solo lee.
  */
 export async function readPostedStories(admin: SupabaseClient, now: Date, key: Buffer): Promise<PostedStory[]> {
   const since = new Date(now.getTime() - STORY_LIFETIME_MS);
@@ -249,15 +313,17 @@ export async function readPostedStories(admin: SupabaseClient, now: Date, key: B
     readAffiliateSettings(admin),
   ]);
   if (read.error) throw new Error(`No se pudo leer los productos: ${read.error}`);
-  const onSale = new Map(read.rows.filter((p) => isOnSale(p)).map((p) => [p.id, p]));
+  // Un producto borrado de la base no vuelve: no hay nada que mostrar. Ocultado, en pausa o
+  // marcado como borrado sí: su historia sigue en Instagram y la tarjeta pide borrarla.
+  const known = new Map(read.rows.map((p) => [p.id, p]));
 
   const stories: PostedStory[] = [];
   for (const [productId, row] of latest) {
-    const product = onSale.get(productId);
+    const product = known.get(productId);
     if (!product) continue;
     const item = buildStoryItem({ product, discount: captionDiscount(product), drop: null, score: null }, { now, settings, key });
     if (!item) continue;
-    stories.push({ ...item, postId: row.id, postedAt: row.posted_at, postedPrice: row.posted_price });
+    stories.push({ ...item, postId: row.id, postedAt: row.posted_at, postedPrice: row.posted_price, onSale: isOnSale(product) });
   }
   return stories;
 }

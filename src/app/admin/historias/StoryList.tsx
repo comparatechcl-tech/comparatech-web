@@ -1,22 +1,55 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { AlertTriangle, Check, Copy, Download, Loader2, Share2, TrendingDown, Undo2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+  Share2,
+  TrendingDown,
+  Undo2,
+} from 'lucide-react';
 import { formatPrice } from '@/lib/content/captions';
 import { formatDayMonth } from '@/lib/format';
+import { LIVE_TEXT } from '@/lib/social/live-price';
 import type { PostedStory, StoryItem } from '@/lib/social/stories';
+import { explainWarning } from '@/lib/social/warning-help';
+import { checkLivePrices } from '@/app/admin/live-price-actions';
+import { WarningGuide } from '../WarningGuide';
 import { markStoryPublished, undoStoryPublished } from './actions';
+import { createStoryGestures, type Note, type StoryEnv, type StoryGestures } from './gestures';
+import { createLiveChecker } from './live-checks';
+import {
+  checkTargets,
+  coverText,
+  groupOffers,
+  liveLine,
+  minutesAgo,
+  postedAlert,
+  safeMlUrl,
+  shareGate,
+  type CardCheck,
+} from './rules';
 
 /**
  * Las historias del día, pensadas para el teléfono: compartir la imagen
  * directo a Instagram con el link ya copiado, marcar lo publicado, y tener
  * a mano lo que ya se subió para llevarlo a otras redes.
  *
+ * Cada tarjeta se revisa en vivo en Mercado Libre al cargar la lista y al
+ * volver a la pestaña (./live-checks): Compartir y Guardar imagen se dejan
+ * solo si lo que muestra la tarjeta sigue siendo lo que muestra Mercado Libre
+ * (./rules). La revisión se hace antes y no al tocar: el teléfono solo abre
+ * la hoja de compartir si la llamada ocurre dentro del toque.
+ *
  * Las imágenes se bajan de a una y se guardan en memoria. De a una, porque
  * cada pieza la dibuja el servidor en el momento; en memoria, porque el
  * teléfono solo deja compartir un archivo si ya está listo cuando se toca
- * el botón (si hubiera que bajarlo en ese instante, el permiso del toque se
- * pierde y no se abre la hoja de compartir).
+ * el botón.
  *
  * La miniatura y "Guardar imagen" usan la dirección de la pieza y no una
  * dirección blob: del archivo en memoria: la política de seguridad del sitio
@@ -24,7 +57,7 @@ import { markStoryPublished, undoStoryPublished } from './actions';
  * ya se bajó, el navegador la saca de su caché y no se dibuja dos veces.
  */
 
-type Status = 'cargando' | 'lista' | 'error';
+export type FileState = 'cargando' | 'lista' | 'error';
 
 /**
  * Lo marcado en esta sesión (dirección de la pieza → id de la marca) y la
@@ -34,16 +67,16 @@ type Status = 'cargando' | 'lista' | 'error';
  * Fuera del componente a propósito: al ir a otra pestaña del admin y volver
  * con "atrás", Next muestra la misma lista sin pedirla de nuevo y monta el
  * componente desde cero. Sin esto, lo ya marcado volvería como pendiente
- * (sin "Deshacer") y una lista vieja parecería recién cargada.
+ * (sin "Deshacer") y una lista vieja parecería recién cargada. En el
+ * servidor no se guarda nada: ahí este módulo lo comparten todas las visitas.
  */
 const marks = new Map<string, number>();
 const firstSeen = new Map<number, number>();
 
-/** Pasado este rato hay que recargar: los precios se revisan cada media hora. */
-const MAX_LIST_AGE_MS = 60 * 60_000;
-
-const COPY_ERROR = 'El teléfono no dejó copiar el link. Mantén el dedo sobre el link de abajo y elige Copiar.';
-const RELOAD_HINT = 'Revisa tu conexión; si sigue igual, toca Actualizar, arriba.';
+/** Lo que dura una historia en Instagram, si la página no dice otra cosa. */
+const DEFAULT_LIFETIME_MS = 24 * 3600_000;
+/** Cada cuánto se redibuja "hace N min" y se vuelve a mirar la edad de cada revisión. */
+const TICK_MS = 30_000;
 
 const BUTTON =
   'flex min-h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-fg transition hover:border-accent/50 disabled:opacity-50';
@@ -55,219 +88,120 @@ const timeFmt = new Intl.DateTimeFormat('es-CL', {
   hourCycle: 'h23',
 });
 
-export function StoryList({
-  items: initial,
-  posted: initialPosted,
-  maxPriceAgeMs,
-  renderedAt,
-}: {
-  items: StoryItem[];
-  /** Historias ya marcadas que siguen vigentes en Instagram, para subirlas a otras redes. */
-  posted: PostedStory[];
+/** El navegador de verdad. Nada se lee de él hasta que hay un toque: este módulo también se carga en el servidor. */
+const BROWSER: StoryEnv = {
+  // Directo, sin esperar nada antes: el teléfono abre la hoja de compartir solo dentro del toque.
+  share: (data) => navigator.share(data),
+  writeText: (text) => navigator.clipboard.writeText(text),
+  now: () => Date.now(),
+  later: (run, ms) => {
+    setTimeout(run, ms);
+  },
+};
+
+const LINE_CLASS: Record<ReturnType<typeof liveLine>['tone'], string> = {
+  checking: 'text-muted',
+  same: 'text-accent',
+  bad: 'font-semibold text-red-400',
+  unknown: 'font-medium text-amber-400',
+};
+
+/** Quita una entrada de un estado por llave, sin crear otro objeto si no estaba. Puro. */
+function without<T>(all: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in all)) return all;
+  const rest = { ...all };
+  delete rest[key];
+  return rest;
+}
+
+export interface StoryCardProps {
+  item: StoryItem | PostedStory;
+  /** Una oferta para subir o una historia ya subida (para llevarla a otras redes). */
+  kind: 'offer' | 'posted';
+  /** La llave de los avisos y del botón de copiar de esta tarjeta. */
+  cardKey: string;
+  fileState: FileState | undefined;
+  check: CardCheck | undefined;
+  /** La hora con que se dibuja: "hace N min" y la edad de la revisión. */
+  now: number;
+  /** Cuándo se vio esta lista por primera vez en este teléfono. */
+  openedAt: number;
   maxPriceAgeMs: number;
-  /** Cuándo armó la lista el servidor: identifica esta carga de la página. */
-  renderedAt: number;
-}) {
-  // Copias locales: las listas no cambian solas mientras se trabaja con ellas.
-  // Para traer ofertas y precios nuevos está "Actualizar", que recarga la página.
-  const [items] = useState(initial);
-  const [posted, setPosted] = useState(initialPosted);
-  // La edad de la lista se mide con el reloj de este teléfono, no contra la hora del servidor.
-  const [openedAt] = useState(() => {
-    const seen = firstSeen.get(renderedAt) ?? Date.now();
-    firstSeen.set(renderedAt, seen);
-    return seen;
-  });
-  /** Archivos y estado por dirección de la pieza: una oferta y su copia ya publicada comparten imagen. */
-  const files = useRef(new Map<string, File>());
-  const lastShare = useRef(0);
-  const lastMark = useRef(0);
-  const [status, setStatus] = useState<Record<string, Status>>({});
   /** null hasta saber si este aparato puede compartir archivos. */
-  const [canShare, setCanShare] = useState<boolean | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-  /** Ofertas marcadas en esta visita: id del producto → id de la marca, para poder deshacerla. */
-  const [published, setPublished] = useState<Record<string, number>>(() => {
-    const known: Record<string, number> = {};
-    for (const item of initial) {
-      const postId = marks.get(item.image);
-      if (postId) known[item.id] = postId;
-    }
-    return known;
-  });
-  const [busy, setBusy] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [, startTransition] = useTransition();
+  canShare: boolean | null;
+  copied: string | null;
+  /** La tarjeta cuya marca está viajando al servidor, de cualquier tarjeta. */
+  busy: string | null;
+  note: Note | undefined;
+  /** La oferta se marcó como publicada en esta visita: el id de su marca. */
+  publishedId?: number;
+  gestures: StoryGestures;
+}
 
-  useEffect(() => {
-    // Solo con pantalla táctil: el computador también "comparte" archivos,
-    // pero su panel no llega a Instagram.
-    const probe = new File([''], 'historia.jpg', { type: 'image/jpeg' });
-    setCanShare(
-      typeof navigator.canShare === 'function' &&
-        navigator.canShare({ files: [probe] }) &&
-        window.matchMedia('(pointer: coarse)').matches
-    );
-  }, []);
+/**
+ * Una tarjeta. Sin estado propio: dibuja lo que recibe y cada botón llama a
+ * su regla. Así un test puede armarla en cualquier estado de la revisión.
+ */
+export function StoryCard({
+  item,
+  kind,
+  cardKey,
+  fileState,
+  check,
+  now,
+  openedAt,
+  maxPriceAgeMs,
+  canShare,
+  copied,
+  busy,
+  note,
+  publishedId,
+  gestures,
+}: StoryCardProps) {
+  const posted = kind === 'posted' ? (item as PostedStory) : null;
+  // Ya subida y sin venta: la historia sigue en Instagram, pero no hay imagen que dar ni nada que revisar.
+  const gone = posted?.onSale === false;
+  const state: FileState = gone ? 'error' : (fileState ?? 'cargando');
+  const done = kind === 'offer' && publishedId !== undefined;
+  const mlUrl = safeMlUrl(item.mlUrl);
+  const line = liveLine(check, now, mlUrl !== null);
+  const gate = shareGate(check, { now, openedAt, checkedAt: item.checkedAt, maxPriceAgeMs });
+  const cover = coverText(gate);
+  const alert = posted ? postedAlert(posted, check) : null;
+  const help = kind === 'offer' && item.warning ? explainWarning(item.warning) : [];
 
-  useEffect(() => {
-    let cancelled = false;
-    const store = files.current;
+  return (
+    <li className="flex gap-4 rounded-xl border border-border bg-surface p-3 sm:p-4">
+      <div
+        className={`relative aspect-[9/16] w-28 shrink-0 self-start overflow-hidden rounded-md bg-bg sm:w-36 ${done && !cover ? 'opacity-60' : ''}`}
+      >
+        {state === 'lista' ? (
+          // eslint-disable-next-line @next/next/no-img-element -- JPG ya descargado: sale del caché del navegador.
+          <img
+            src={item.image}
+            alt={`Historia de ${item.name}`}
+            className={`h-full w-full object-cover ${cover ? 'pointer-events-none select-none opacity-30' : ''}`}
+            draggable={cover ? false : undefined}
+          />
+        ) : state === 'error' ? (
+          <p className="flex h-full items-center justify-center p-2 text-center text-xs text-muted">
+            {gone ? 'Ya no está a la venta.' : 'No se pudo generar la imagen. Toca Actualizar.'}
+          </p>
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 size={18} className="animate-spin text-muted" aria-label="Preparando la imagen" />
+          </div>
+        )}
+        {/* Encima de la imagen: mantener el dedo toca el aviso y no ofrece guardar la imagen. */}
+        {cover && state === 'lista' && (
+          <div className="absolute inset-0 flex items-center justify-center bg-bg/70 p-2 text-center text-xs font-semibold text-red-400">
+            {cover}
+          </div>
+        )}
+      </div>
 
-    (async () => {
-      // Primero las ofertas, que son lo que se viene a subir; después lo ya publicado.
-      for (const item of [...items, ...initialPosted]) {
-        if (store.has(item.image)) continue;
-        let file: File | null = null;
-        // Dos intentos: en el teléfono una descarga se corta fácil al pasar a otra app.
-        for (let attempt = 0; attempt < 2 && !file && !cancelled; attempt++) {
-          try {
-            const res = await fetch(item.image);
-            if (!res.ok) throw new Error(String(res.status));
-            file = new File([await res.blob()], item.fileName, { type: 'image/jpeg' });
-          } catch {
-            /* se intenta una vez más */
-          }
-        }
-        if (cancelled) return;
-        if (!file) {
-          setStatus((s) => ({ ...s, [item.image]: 'error' }));
-          continue;
-        }
-        store.set(item.image, file);
-        setStatus((s) => ({ ...s, [item.image]: 'lista' }));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      store.clear();
-    };
-  }, [items, initialPosted]);
-
-  const fail = (key: string, message: string) => setErrors((e) => ({ ...e, [key]: message }));
-  const clear = (key: string) => setErrors(({ [key]: _gone, ...rest }) => rest);
-
-  /** Una pestaña que quedó abierta lleva los precios de cuando se cargó. */
-  function tooOld(key: string, item: StoryItem): boolean {
-    const oldPrice = item.checkedAt ? Date.now() - new Date(item.checkedAt).getTime() > maxPriceAgeMs : false;
-    const oldList = Date.now() - openedAt > MAX_LIST_AGE_MS;
-    if (!oldPrice && !oldList) return false;
-    fail(key, 'Esta lista ya tiene más de una hora y el precio puede haber cambiado. Toca Actualizar, arriba.');
-    return true;
-  }
-
-  async function copyLink(key: string, item: StoryItem) {
-    try {
-      await navigator.clipboard.writeText(item.link);
-      setCopied(key);
-      // Solo se borra el aviso de la copia: otro aviso (precio antiguo, Compartir) sigue a la vista.
-      setErrors((e) => {
-        if (e[key] !== COPY_ERROR) return e;
-        const { [key]: _gone, ...rest } = e;
-        return rest;
-      });
-      setTimeout(() => setCopied((c) => (c === key ? null : c)), 2500);
-    } catch {
-      fail(key, COPY_ERROR);
-    }
-  }
-
-  function share(key: string, item: StoryItem) {
-    const file = files.current.get(item.image);
-    if (!file || tooOld(key, item)) return;
-    // Un doble toque no vuelve a pedir Compartir: el navegador rechaza el segundo y quedaría un error falso.
-    if (Date.now() - lastShare.current < 1500) return;
-    lastShare.current = Date.now();
-    // Las dos cosas dentro del mismo toque: el link se pega después en el sticker (o en el texto, en WhatsApp).
-    void copyLink(key, item);
-    navigator.share({ files: [file] }).catch((err: unknown) => {
-      // Cerrar la hoja de compartir no es un error.
-      if (err instanceof Error && err.name === 'AbortError') return;
-      fail(
-        key,
-        'No se pudo abrir Compartir. Mantén el dedo sobre la imagen, elige "Guardar en Fotos" y súbela desde la app.'
-      );
-    });
-  }
-
-  function markPublished(item: StoryItem) {
-    setBusy(item.id);
-    clear(item.id);
-    startTransition(async () => {
-      try {
-        // Con el precio de la tarjeta, que es el que lleva la imagen compartida.
-        const result = await markStoryPublished(item.id, item.price);
-        if (!result.ok) {
-          fail(item.id, result.error);
-          return;
-        }
-        marks.set(item.image, result.postId);
-        lastMark.current = Date.now();
-        setPublished((p) => ({ ...p, [item.id]: result.postId }));
-      } catch {
-        fail(item.id, `No se pudo guardar. ${RELOAD_HINT}`);
-      } finally {
-        setBusy(null);
-      }
-    });
-  }
-
-  /** Deshace una marca. `after` corre solo si se deshizo. */
-  function undo(key: string, postId: number, after: () => void) {
-    setBusy(key);
-    clear(key);
-    startTransition(async () => {
-      try {
-        const result = await undoStoryPublished(postId);
-        if (!result.ok) {
-          fail(key, result.error);
-          return;
-        }
-        after();
-      } catch {
-        fail(key, `No se pudo deshacer. ${RELOAD_HINT}`);
-      } finally {
-        setBusy(null);
-      }
-    });
-  }
-
-  function undoOffer(item: StoryItem) {
-    const postId = published[item.id];
-    // "Deshacer" queda donde estaba "Ya la publiqué": un segundo toque seguido no debe deshacer.
-    if (!postId || Date.now() - lastMark.current < 1000) return;
-    undo(item.id, postId, () => {
-      marks.delete(item.image);
-      setPublished(({ [item.id]: _gone, ...rest }) => rest);
-    });
-  }
-
-  /** Miniatura, nombre y precio: lo que comparten una oferta y una historia ya publicada. */
-  function summary(item: StoryItem, dimmed: boolean) {
-    const state = status[item.image] ?? 'cargando';
-    return {
-      state,
-      thumb: (
-        <div
-          className={`relative aspect-[9/16] w-28 shrink-0 self-start overflow-hidden rounded-md bg-bg sm:w-36 ${dimmed ? 'opacity-60' : ''}`}
-        >
-          {state === 'lista' ? (
-            // eslint-disable-next-line @next/next/no-img-element -- JPG ya descargado: sale del caché del navegador.
-            <img src={item.image} alt={`Historia de ${item.name}`} className="h-full w-full object-cover" />
-          ) : state === 'error' ? (
-            <p className="flex h-full items-center justify-center p-2 text-center text-xs text-muted">
-              No se pudo generar la imagen. Toca Actualizar.
-            </p>
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Loader2 size={18} className="animate-spin text-muted" aria-label="Preparando la imagen" />
-            </div>
-          )}
-        </div>
-      ),
-      heading: (
-        <>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div>
           {/* Hay nombres que parten por el código del modelo: la marca dice de qué se trata. */}
           {item.brand && <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{item.brand}</p>}
           <p className="text-sm font-semibold leading-snug text-fg">{item.name}</p>
@@ -282,148 +216,396 @@ export function StoryList({
               <span className="ml-2 text-xs text-muted">bajó {item.drop}% según el historial</span>
             )}
           </p>
-        </>
-      ),
-    };
-  }
 
-  /** Compartir, copiar el link y guardar la imagen: iguales en las dos listas. */
-  function shareButtons(key: string, item: StoryItem, state: Status) {
-    return (
-      <>
-        {canShare && (
-          <button
-            onClick={() => share(key, item)}
-            disabled={state !== 'lista'}
-            className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-ink transition hover:bg-accent/90 disabled:opacity-50 sm:col-span-2"
-          >
-            <Share2 size={15} aria-hidden />{' '}
-            {state === 'lista' ? 'Compartir' : state === 'error' ? 'Sin imagen' : 'Preparando…'}
-          </button>
-        )}
-        <button onClick={() => void copyLink(key, item)} className={BUTTON}>
-          {copied === key ? <Check size={15} className="text-accent" aria-hidden /> : <Copy size={15} aria-hidden />}
-          {copied === key ? 'Link copiado' : 'Copiar link'}
-        </button>
-        {state === 'lista' ? (
-          <a
-            href={item.image}
-            download={item.fileName}
-            onClick={(e) => {
-              if (tooOld(key, item)) e.preventDefault();
-            }}
-            className={BUTTON}
-          >
-            <Download size={15} aria-hidden /> Guardar imagen
-          </a>
-        ) : (
-          <button disabled className={BUTTON}>
-            <Download size={15} aria-hidden /> Guardar imagen
-          </button>
-        )}
-      </>
-    );
-  }
+          {/* La revisión en vivo, junto al precio que revisa. Lo que ya no se vende no se revisa: el aviso rojo lo dice. */}
+          {!gone && (
+            <p className={`mt-1 flex items-start gap-1.5 text-xs leading-snug ${LINE_CLASS[line.tone]}`}>
+              {line.tone === 'checking' && <Loader2 size={13} className="mt-0.5 shrink-0 animate-spin" aria-hidden />}
+              <span>{line.text}</span>
+            </p>
+          )}
+          {!gone && line.detail && <p className="mt-0.5 text-[11px] leading-snug text-muted">{line.detail}</p>}
+          {/* Un enlace común a la ficha, sin el link de afiliado: mirar no cuenta como clic ni como visita. */}
+          {mlUrl && (
+            <a href={mlUrl} target="_blank" rel="noopener noreferrer" className={`${BUTTON} mt-2 w-full sm:w-auto sm:inline-flex`}>
+              <ExternalLink size={15} className="shrink-0" aria-hidden /> Ver en Mercado Libre
+            </a>
+          )}
 
-  function footer(key: string, item: StoryItem) {
-    return (
-      <>
-        {/* Completo y seleccionable: es el respaldo si el teléfono no deja copiar con el botón. */}
-        <p className="select-all break-all text-[11px] text-muted" aria-label="Link de afiliado">
-          {item.link}
-        </p>
-        <p role="status" aria-live="polite" className="text-xs text-red-400">
-          {errors[key] ?? ''}
-        </p>
-      </>
-    );
-  }
+          {kind === 'offer' && (
+            <>
+              {/* Por qué se propone y qué mirar antes de subirla. No cambian al marcar: la tarjeta conserva su alto. */}
+              {item.reason && <p className="mt-2 text-xs leading-snug text-muted">{item.reason}.</p>}
+              {item.warning && (
+                <p className="mt-1 flex items-start gap-1.5 text-xs font-medium text-amber-400">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
+                  <span>Ojo: {item.warning}.</span>
+                </p>
+              )}
+              {help.length > 0 && (
+                <ul className="mt-1 space-y-1 pl-5 text-[11px] leading-snug text-muted">
+                  {help.map((h, i) => (
+                    <li key={i}>
+                      {h.meaning} <span className="text-fg">{h.whatToDo}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {item.again && (
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-accent">
+                  <TrendingDown size={14} className="mt-0.5 shrink-0" aria-hidden />
+                  <span>
+                    Ya la subiste el {formatDayMonth(item.again.at)} a {formatPrice(item.again.price)}. Bajó{' '}
+                    {formatPrice(item.again.price - item.price)}.
+                  </span>
+                </p>
+              )}
+            </>
+          )}
 
-  function offerCard(item: StoryItem) {
-    const done = item.id in published;
-    const { state, thumb, heading } = summary(item, done);
-    return (
-      <li key={item.id} className="flex gap-4 rounded-xl border border-border bg-surface p-3 sm:p-4">
-        {thumb}
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <div>
-            {heading}
-            {/* Por qué se propone y qué mirar antes de subirla. No cambian al marcar: la tarjeta conserva su alto. */}
-            {item.reason && <p className="mt-1 text-xs leading-snug text-muted">{item.reason}.</p>}
-            {item.warning && (
-              <p className="mt-1 flex items-start gap-1.5 text-xs font-medium text-amber-400">
-                <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
-                <span>Ojo: {item.warning}.</span>
+          {posted && (
+            <>
+              <p className="mt-2 text-xs text-muted">
+                Subida a Instagram el {formatDayMonth(posted.postedAt)} a las {timeFmt.format(new Date(posted.postedAt))}
+                {posted.postedPrice !== null && posted.postedPrice > 0 ? `, a ${formatPrice(posted.postedPrice)}.` : '.'}
               </p>
-            )}
-            {item.again && (
-              <p className="mt-1 flex items-start gap-1.5 text-xs text-accent">
-                <TrendingDown size={14} className="mt-0.5 shrink-0" aria-hidden />
-                <span>
-                  Ya la subiste el {formatDayMonth(item.again.at)} a {formatPrice(item.again.price)}. Bajó{' '}
-                  {formatPrice(item.again.price - item.price)}.
-                </span>
-              </p>
-            )}
-          </div>
+              {alert && (
+                <p
+                  className={
+                    alert.tone === 'bad'
+                      ? 'mt-2 flex items-start gap-1.5 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-xs font-semibold text-red-400'
+                      : 'mt-2 flex items-start gap-1.5 rounded-md border border-accent/40 bg-accent/10 px-2 py-1.5 text-xs font-medium text-accent'
+                  }
+                >
+                  {alert.tone === 'bad' ? (
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
+                  ) : (
+                    <TrendingDown size={14} className="mt-0.5 shrink-0" aria-hidden />
+                  )}
+                  <span>{alert.text}</span>
+                </p>
+              )}
+            </>
+          )}
+        </div>
 
-          {/* La misma grilla antes y después de marcar: si la tarjeta cambiara de alto, las de abajo se correrían bajo el dedo. */}
-          <div className="grid gap-2 sm:grid-cols-2">
-            {shareButtons(item.id, item, state)}
-            {done ? (
+        {/* La misma grilla antes y después de marcar: si la tarjeta cambiara de alto, las de abajo se correrían bajo el dedo. */}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {canShare && !gone && (
+            <button
+              type="button"
+              onClick={() => gestures.share(cardKey, item)}
+              disabled={state !== 'lista'}
+              className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-ink transition hover:bg-accent/90 disabled:opacity-50 sm:col-span-2"
+            >
+              <Share2 size={15} aria-hidden />{' '}
+              {state === 'lista' ? 'Compartir' : state === 'error' ? 'Sin imagen' : 'Preparando…'}
+            </button>
+          )}
+          {!gone && (
+            <button type="button" onClick={() => void gestures.copyLink(cardKey, item)} className={BUTTON}>
+              {copied === cardKey ? <Check size={15} className="text-accent" aria-hidden /> : <Copy size={15} aria-hidden />}
+              {copied === cardKey ? 'Link copiado' : 'Copiar link'}
+            </button>
+          )}
+          {/*
+            Un enlace de descarga solo cuando se puede subir: si no, un botón
+            que dice por qué. Un enlace bloqueado igual ofrece "Descargar
+            vínculo" al mantener el dedo encima.
+          */}
+          {gone ? null : state === 'lista' && gate.ok ? (
+            <a
+              href={item.image}
+              download={item.fileName}
+              onClick={(e) => {
+                if (!gestures.save(cardKey, item)) e.preventDefault();
+              }}
+              className={BUTTON}
+            >
+              <Download size={15} aria-hidden /> Guardar imagen
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => gestures.save(cardKey, item)}
+              disabled={state !== 'lista'}
+              className={BUTTON}
+            >
+              <Download size={15} aria-hidden /> Guardar imagen
+            </button>
+          )}
+          {kind === 'offer' ? (
+            done ? (
               <button
-                onClick={() => undoOffer(item)}
+                type="button"
+                onClick={() => gestures.undoOffer(item, publishedId as number)}
                 disabled={busy !== null}
                 className={`${BUTTON} border-accent/50 text-accent sm:col-span-2`}
               >
-                <Check size={15} aria-hidden /> {busy === item.id ? 'Deshaciendo…' : 'Publicada · Deshacer'}
+                <Check size={15} aria-hidden /> {busy === cardKey ? 'Deshaciendo…' : 'Publicada · Deshacer'}
               </button>
             ) : (
-              <button onClick={() => markPublished(item)} disabled={busy !== null} className={`${BUTTON} sm:col-span-2`}>
-                {busy === item.id ? 'Guardando…' : 'Ya la publiqué'}
+              <button
+                type="button"
+                onClick={() => gestures.mark(item)}
+                disabled={busy !== null}
+                className={`${BUTTON} sm:col-span-2`}
+              >
+                {busy === cardKey ? 'Guardando…' : 'Ya la publiqué'}
               </button>
-            )}
-          </div>
-          {footer(item.id, item)}
-        </div>
-      </li>
-    );
-  }
-
-  function postedCard(item: PostedStory) {
-    const key = `publicada-${item.postId}`;
-    const { state, thumb, heading } = summary(item, false);
-    return (
-      <li key={key} className="flex gap-4 rounded-xl border border-border bg-surface p-3 sm:p-4">
-        {thumb}
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <div>
-            {heading}
-            <p className="mt-1 text-xs text-muted">
-              Subida el {formatDayMonth(item.postedAt)} a las {timeFmt.format(new Date(item.postedAt))}
-              {item.postedPrice !== null && item.postedPrice !== Math.round(item.price)
-                ? `, a ${formatPrice(item.postedPrice)}. El precio cambió: la imagen lleva el de ahora.`
-                : '.'}
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {shareButtons(key, item, state)}
+            )
+          ) : (
             <button
-              onClick={() => undo(key, item.postId, () => setPosted((list) => list.filter((p) => p.postId !== item.postId)))}
+              type="button"
+              onClick={() => gestures.undoPosted(cardKey, (item as PostedStory).postId)}
               disabled={busy !== null}
               className={`${BUTTON} sm:col-span-2`}
             >
-              <Undo2 size={15} aria-hidden /> {busy === key ? 'Deshaciendo…' : 'No la publiqué: deshacer'}
+              <Undo2 size={15} aria-hidden /> {busy === cardKey ? 'Deshaciendo…' : 'No la publiqué: deshacer'}
             </button>
-          </div>
-          {footer(key, item)}
+          )}
         </div>
-      </li>
-    );
-  }
 
-  const again = items.filter((item) => item.again);
-  const fresh = items.filter((item) => !item.again);
+        {/* Completo y seleccionable: es el respaldo si el teléfono no deja copiar con el botón. */}
+        {!gone && (
+          <p className="select-all break-all text-[11px] text-muted" aria-label="Link de afiliado">
+            {item.link}
+          </p>
+        )}
+        <p
+          role="status"
+          aria-live="polite"
+          className={`text-xs ${note?.tone === 'warn' ? 'font-medium text-amber-400' : 'text-red-400'}`}
+        >
+          {note?.text ?? ''}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * La línea de arriba: cuándo se revisó en Mercado Libre y cómo repetirlo.
+ * "Revisé" solo si alguna revisión llegó de verdad: una que no pudo revisar
+ * no cuenta. Pura.
+ */
+export function checkSummary(checks: Record<string, CardCheck>, now: number): { running: boolean; text: string } {
+  const all = Object.keys(checks).map((id) => checks[id]);
+  if (all.length === 0 || all.some((c) => c.pending)) {
+    return { running: true, text: 'Revisando los precios en Mercado Libre…' };
+  }
+  const answered = all.map((c) => c.last).filter((last): last is NonNullable<CardCheck['last']> => last !== null);
+  if (answered.length === 0) return { running: false, text: 'Todavía no reviso los precios en Mercado Libre.' };
+  const real = answered.filter((last) => last.result.status !== 'unknown');
+  if (real.length === 0) {
+    const offline = answered.some((last) => last.result.status === 'unknown' && last.result.what === LIVE_TEXT.offline);
+    return {
+      running: false,
+      text: offline
+        ? 'Aquí no reviso en vivo: eso funciona solo en el sitio publicado. Mira cada precio con su botón antes de subir.'
+        : 'No pude revisar los precios en Mercado Libre. Mira cada precio con su botón antes de subir.',
+    };
+  }
+  const missing = answered.length - real.length;
+  const rest =
+    missing === 0
+      ? ''
+      : missing === 1
+        ? ' Una no se pudo revisar: mira su precio con el botón.'
+        : ` ${missing} no se pudieron revisar: mira su precio con el botón.`;
+  return { running: false, text: `Revisé los precios en Mercado Libre ${minutesAgo(now - Math.max(...real.map((last) => last.at)))}.${rest}` };
+}
+
+export function StoryList({
+  items: initial,
+  posted: initialPosted,
+  maxPriceAgeMs,
+  renderedAt,
+  lifetimeMs = DEFAULT_LIFETIME_MS,
+}: {
+  items: StoryItem[];
+  /** Historias ya marcadas que siguen vigentes en Instagram, para subirlas a otras redes. */
+  posted: PostedStory[];
+  maxPriceAgeMs: number;
+  /** Cuándo armó la lista el servidor: identifica esta carga de la página. */
+  renderedAt: number;
+  /** Lo que dura una historia en Instagram: después ya no se revisa. */
+  lifetimeMs?: number;
+}) {
+  // Copias locales: las listas no cambian solas mientras se trabaja con ellas.
+  // Para traer ofertas y precios nuevos está "Actualizar", que recarga la página.
+  const [items] = useState(initial);
+  const [posted, setPosted] = useState(initialPosted);
+  // La edad de la lista se mide con el reloj de este teléfono, no contra la hora del servidor.
+  const [openedAt] = useState(() => {
+    const seen = firstSeen.get(renderedAt) ?? Date.now();
+    if (typeof window !== 'undefined') firstSeen.set(renderedAt, seen);
+    return seen;
+  });
+  /** Archivos por dirección de la pieza: una oferta y su copia ya publicada comparten imagen. */
+  const files = useRef(new Map<string, File>());
+  const [fileState, setFileState] = useState<Record<string, FileState>>({});
+  /** null hasta saber si este aparato puede compartir archivos. */
+  const [canShare, setCanShare] = useState<boolean | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  /** Ofertas marcadas en esta visita: id del producto → id de la marca, para poder deshacerla. */
+  const [published, setPublished] = useState<Record<string, number>>(() => {
+    const known: Record<string, number> = {};
+    for (const item of initial) {
+      const postId = marks.get(item.image);
+      if (postId) known[item.id] = postId;
+    }
+    return known;
+  });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, Note>>({});
+  const [checks, setChecks] = useState<Record<string, CardCheck>>({});
+  // Con la hora del servidor en el primer dibujo: el del servidor y el del teléfono salen iguales.
+  const [now, setNow] = useState(renderedAt);
+  const [, startTransition] = useTransition();
+
+  const [checker] = useState(() =>
+    createLiveChecker({
+      check: (batch) => checkLivePrices(batch),
+      now: () => Date.now(),
+      later: (run, ms) => {
+        setTimeout(run, ms);
+      },
+      publish: (next) => {
+        setChecks(next);
+        setNow(Date.now());
+      },
+    })
+  );
+  // Las ya subidas de ahora, no las de la carga: una que se deshizo no se sigue revisando.
+  const postedNow = useRef(initialPosted);
+  useEffect(() => {
+    postedNow.current = posted;
+  }, [posted]);
+  const targets = () => checkTargets(initial, postedNow.current, Date.now(), lifetimeMs);
+
+  // Las reglas se arman una vez por lista: guardan los candados de doble toque.
+  const [gestures] = useState(() =>
+    createStoryGestures(
+      BROWSER,
+      { mark: markStoryPublished, undo: undoStoryPublished },
+      {
+        note: (key, note) => setNotes((n) => (note ? { ...n, [key]: note } : without(n, key))),
+        copied: (key, on) => setCopied((c) => (on ? key : c === key ? null : c)),
+        busy: (key) => setBusy(key),
+        published: (item, postId) => {
+          if (postId) marks.set(item.image, postId);
+          else marks.delete(item.image);
+          setPublished((p) => (postId ? { ...p, [item.id]: postId } : without(p, item.id)));
+        },
+        unposted: (postId) => setPosted((list) => list.filter((p) => p.postId !== postId)),
+        run: (job) => startTransition(job),
+      },
+      {
+        openedAt,
+        maxPriceAgeMs,
+        checkOf: (productId) => checker.get(productId),
+        recheck: () => void checker.run(targets()),
+        fileOf: (image) => files.current.get(image),
+      }
+    )
+  );
+
+  useEffect(() => {
+    // Solo con pantalla táctil: el computador también "comparte" archivos,
+    // pero su panel no llega a Instagram.
+    const probe = new File([''], 'historia.jpg', { type: 'image/jpeg' });
+    setCanShare(
+      typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: [probe] }) &&
+        window.matchMedia('(pointer: coarse)').matches
+    );
+  }, []);
+
+  useEffect(() => {
+    // Al cargar, y al volver a la pestaña si la última revisión tiene más de 5 minutos.
+    void checker.run(targets());
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checker.visible(targets());
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+    // targets() lee listas que no cambian mientras la página está abierta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checker]);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      // Con la pestaña a la vista, se revisa sola antes de que venza el "mismo precio".
+      if (document.visibilityState === 'visible') checker.tick(targets());
+    }, TICK_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checker]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const store = files.current;
+
+    (async () => {
+      // Primero las ofertas, que son lo que se viene a subir; después lo ya publicado
+      // que sigue a la venta (de lo demás la pieza no se dibuja).
+      for (const item of [...items, ...initialPosted.filter((story) => story.onSale !== false)]) {
+        if (store.has(item.image)) continue;
+        let file: File | null = null;
+        // Dos intentos: en el teléfono una descarga se corta fácil al pasar a otra app.
+        for (let attempt = 0; attempt < 2 && !file && !cancelled; attempt++) {
+          try {
+            const res = await fetch(item.image);
+            if (!res.ok) throw new Error(String(res.status));
+            file = new File([await res.blob()], item.fileName, { type: 'image/jpeg' });
+          } catch {
+            /* se intenta una vez más */
+          }
+        }
+        if (cancelled) return;
+        if (!file) {
+          setFileState((s) => ({ ...s, [item.image]: 'error' }));
+          continue;
+        }
+        store.set(item.image, file);
+        setFileState((s) => ({ ...s, [item.image]: 'lista' }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      store.clear();
+    };
+  }, [items, initialPosted]);
+
+  const card = (item: StoryItem | PostedStory, kind: 'offer' | 'posted') => {
+    const key = kind === 'offer' ? item.id : `publicada-${(item as PostedStory).postId}`;
+    return (
+      <StoryCard
+        key={key}
+        item={item}
+        kind={kind}
+        cardKey={key}
+        fileState={fileState[item.image]}
+        check={checks[item.id]}
+        now={now}
+        openedAt={openedAt}
+        maxPriceAgeMs={maxPriceAgeMs}
+        canShare={canShare}
+        copied={copied}
+        busy={busy}
+        note={notes[key]}
+        publishedId={kind === 'offer' ? published[item.id] : undefined}
+        gestures={gestures}
+      />
+    );
+  };
+
+  const { again, fresh, warned } = groupOffers(items);
+  const summary = checkSummary(checks, now);
 
   return (
     <div className="mt-6 flex flex-col gap-6">
@@ -434,21 +616,45 @@ export function StoryList({
         </p>
       )}
 
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-surface px-4 py-2 text-sm text-muted">
+        <span className="flex items-center gap-2">
+          {summary.running && <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden />}
+          {summary.text}
+        </span>
+        {!summary.running && (
+          <button type="button" onClick={() => void checker.run(targets())} className={BUTTON}>
+            <RefreshCw size={15} aria-hidden /> Revisar otra vez
+          </button>
+        )}
+      </div>
+
       {again.length > 0 && (
         <section>
           <h2 className="font-heading text-lg font-semibold text-fg">Bajaron desde que las subiste</h2>
-          <ul className="mt-3 flex flex-col gap-4">{again.map(offerCard)}</ul>
+          <ul className="mt-3 flex flex-col gap-4">{again.map((item) => card(item, 'offer'))}</ul>
         </section>
       )}
 
       {fresh.length > 0 && (
         <section>
-          {(again.length > 0 || posted.length > 0) && (
+          {(again.length > 0 || warned.length > 0 || posted.length > 0) && (
             <h2 className="font-heading text-lg font-semibold text-fg">Ofertas de ahora</h2>
           )}
-          <ul className={`flex flex-col gap-4 ${again.length > 0 || posted.length > 0 ? 'mt-3' : ''}`}>
-            {fresh.map(offerCard)}
+          <ul className={`flex flex-col gap-4 ${again.length > 0 || warned.length > 0 || posted.length > 0 ? 'mt-3' : ''}`}>
+            {fresh.map((item) => card(item, 'offer'))}
           </ul>
+        </section>
+      )}
+
+      {warned.length > 0 && (
+        <section>
+          <h2 className="font-heading text-lg font-semibold text-fg">Con algo que mirar</h2>
+          <p className="mt-1 text-sm text-muted">
+            Estas traen un aviso &quot;Ojo&quot;. Léelo y mira el precio con <strong className="text-fg">Ver en Mercado Libre</strong>{' '}
+            antes de subirlas.
+          </p>
+          <WarningGuide />
+          <ul className="mt-3 flex flex-col gap-4">{warned.map((item) => card(item, 'offer'))}</ul>
         </section>
       )}
 
@@ -457,9 +663,10 @@ export function StoryList({
           <h2 className="font-heading text-lg font-semibold text-fg">Ya publicadas (últimas 24 horas)</h2>
           <p className="mt-1 text-sm text-muted">
             Para llevarlas a otra red: comparte la misma imagen y pega el link. En WhatsApp el link se puede tocar si
-            va en el texto.
+            va en el texto. Si una dice en rojo que ahora está más cara o que ya no está a la venta, borra esa
+            historia de Instagram.
           </p>
-          <ul className="mt-3 flex flex-col gap-4">{posted.map(postedCard)}</ul>
+          <ul className="mt-3 flex flex-col gap-4">{posted.map((item) => card(item, 'posted'))}</ul>
         </section>
       )}
     </div>

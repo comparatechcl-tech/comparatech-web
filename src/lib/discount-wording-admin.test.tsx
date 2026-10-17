@@ -72,6 +72,9 @@ function story(over: Partial<StoryItem> = {}): StoryItem {
     image: `/social/pieza/${id}/story-49990-99990-1-1-1-abc.jpg`,
     link: 'https://www.mercadolibre.cl/p/MLC1?matt_word=comparatech',
     fileName: 'comparatech-parlante-jbl-go-4-historia.jpg',
+    mlUrl: 'https://www.mercadolibre.cl/p/MLC1',
+    freeShipping: true,
+    full: false,
     ...over,
   };
 }
@@ -105,6 +108,9 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
       youtubeDescription: 'Descripción de YouTube',
     },
     posted: {},
+    mlUrl: 'https://www.mercadolibre.cl/p/MLC1',
+    freeShipping: true,
+    full: false,
     ...over,
   };
 }
