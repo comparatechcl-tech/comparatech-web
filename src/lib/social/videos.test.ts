@@ -1286,7 +1286,7 @@ describe('readVideoBoard', () => {
     expect(Object.keys(video.texts).sort()).toEqual(['facebook', 'instagram', 'tiktok', 'youtubeDescription', 'youtubeTitle']);
   });
 
-  it('la tarjeta y el título de YouTube llevan el nombre del reel; los textos para pegar, el nombre corto de siempre', async () => {
+  it('la tarjeta, el título de YouTube y los textos para pegar llevan el mismo nombre del reel, sin el código', async () => {
     const p = strong({ name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3', brand: 'Samsung' });
     catalog([p]);
     const plan = await readVideoPicks(fakeSite({ products: [p] }).admin, NOW);
@@ -1298,7 +1298,8 @@ describe('readVideoBoard', () => {
     expect(video.name).toBe('Samsung Smartwatch Galaxy Fit 3');
     expect(video.texts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $60.000 con 40% de descuento');
     for (const text of [video.texts.instagram, video.texts.tiktok, video.texts.facebook, video.texts.youtubeDescription]) {
-      expect(text.split('\n')).toContain('Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3');
+      expect(text.split('\n')).toContain('Samsung Smartwatch Galaxy Fit 3');
+      expect(text).not.toContain('Asm-r390nidalta');
     }
   });
 

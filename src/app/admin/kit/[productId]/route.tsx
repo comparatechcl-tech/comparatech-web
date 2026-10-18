@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KIT_FORMATS: OgFormat[] = ['feed', 'story', 'pin'];
 
-const BASE_COLUMNS = 'slug, name, brand, price, original_price, image_url, price_checked_at';
+const BASE_COLUMNS = 'slug, name, brand, price, original_price, image_url, price_checked_at, ml_domain_id, specs';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ productId: string }> }) {
   if (!checkBasicAuth(req.headers.get('authorization'))) {

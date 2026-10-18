@@ -4,7 +4,7 @@ import { captionDiscount } from '@/lib/content/captions';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
-import { shortProductName } from '@/lib/text';
+import { socialProductName } from '@/lib/content/social-name';
 import { readSocialEvidence } from '@/lib/social/drops';
 import type { InterestScore } from '@/lib/social/interest';
 import { mlCheckUrl } from '@/lib/social/live-price';
@@ -173,7 +173,7 @@ export function buildStoryItem(
   return {
     id: p.id,
     slug: p.slug,
-    name: shortProductName(p.name),
+    name: socialProductName(p),
     brand: p.brand,
     price: p.price,
     listPrice: pick.discount > 0 ? p.original_price : null,

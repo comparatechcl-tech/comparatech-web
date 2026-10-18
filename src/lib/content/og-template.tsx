@@ -45,6 +45,9 @@ export function isOgFormat(value: unknown): value is OgFormat {
 export interface OgProduct {
   name: string;
   brand?: string | null;
+  /** Para el nombre en redes (lib/content/social-name): tipo y modelo cuando el nombre parte con un código. */
+  ml_domain_id?: string | null;
+  specs?: Record<string, unknown> | null;
   price: number;
   original_price: number | null;
   image_url: string;

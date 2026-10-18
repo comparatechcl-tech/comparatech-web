@@ -123,8 +123,16 @@ describe('buildCaption', () => {
     for (const channel of ['instagram', 'tiktok'] as const) {
       const text = buildCaption(base, channel, opts);
       expect(text).not.toContain('https://');
-      expect(text).toContain('Link en la bio 👉 comparatech');
+      expect(text).toMatch(/^🛒 /m);
     }
+  });
+
+  it('donde el link no se puede tocar, el link corto para escribirlo (pedido del dueño, 18-10-2026)', () => {
+    const withId = { ...base, ml_product_id: 'MLC78729874' };
+    expect(buildCaption(withId, 'instagram', opts)).toContain('🛒 Link de compra en nuestra bio, o escribe comparatech.cl/p/78729874');
+    expect(buildCaption(withId, 'tiktok', opts)).toContain('🛒 Para comprarlo, escribe comparatech.cl/p/78729874 en tu navegador');
+    // Sin código de Mercado Libre, la línea sin link corto.
+    expect(buildCaption(base, 'instagram', opts)).toContain('🛒 Link de compra en nuestra bio');
   });
 
   it('usa el nombre corto y avisa el envío gratis solo si es real', () => {
@@ -154,9 +162,9 @@ describe('buildVideoTexts', () => {
     expect(texts.tiktok).toBe(buildCaption(base, 'tiktok', opts));
   });
 
-  it('Facebook dice lo mismo que Instagram, mandando al perfil y sin ninguna dirección web', () => {
+  it('Facebook dice lo mismo que Instagram, mandando al perfil, sin link para tocar', () => {
     expect(texts.facebook).not.toMatch(WEB_ADDRESS);
-    expect(texts.facebook).toContain('Link en el perfil');
+    expect(texts.facebook).toContain('🛒 Link de compra en nuestro perfil');
     expect(texts.facebook).not.toContain('bio');
     // Ni el link de compra ni el de la ficha, que es lo que lleva el texto de Facebook del feed.
     const feed = buildCaption(base, 'facebook', opts);
@@ -168,22 +176,30 @@ describe('buildVideoTexts', () => {
     const fb = texts.facebook.split('\n');
     expect(fb).toHaveLength(ig.length);
     const different = fb.filter((line, i) => line !== ig[i]);
-    expect(different).toEqual(['Link en el perfil 👉 ComparaTech']);
+    expect(different).toEqual(['🛒 Link de compra en nuestro perfil']);
   });
 
-  it('ningún texto de un reel lleva una dirección web: no se podría tocar', () => {
-    for (const text of all) expect(text).not.toMatch(WEB_ADDRESS);
-    // Tampoco con un producto sin descuento ni con otro gancho.
-    const plain = buildVideoTexts({ ...base, original_price: null, id: 'otro-producto' }, opts.now);
-    for (const text of Object.values(plain)) expect(text).not.toMatch(WEB_ADDRESS);
+  it('ningún texto de un reel lleva un link para tocar; con el sitio, llevan el link corto para escribirlo', () => {
+    for (const text of all) expect(text).not.toMatch(/https?:|www\./i);
+    const withShort = buildVideoTexts({ ...base, ml_product_id: 'MLC78729874' }, opts.now, 'https://www.comparatech.cl');
+    for (const text of [withShort.instagram, withShort.tiktok, withShort.facebook, withShort.youtubeDescription]) {
+      expect(text).toContain('comparatech.cl/p/78729874');
+      expect(text).not.toMatch(/https?:|www\./i);
+    }
+    expect(withShort.facebook).toContain('🛒 Link de compra: comparatech.cl/p/78729874, o en nuestro perfil');
+    expect(withShort.youtubeTitle).not.toContain('comparatech.cl');
   });
 
-  it('la descripción de YouTube es la de TikTok, diciendo que el link está en el perfil del canal', () => {
-    expect(texts.youtubeDescription).toContain('Link en el perfil del canal');
+  it('la descripción de YouTube es la de TikTok, diciendo dónde está el link de compra', () => {
+    expect(texts.youtubeDescription).toContain('🛒 Link de compra en el perfil del canal');
     expect(texts.youtubeDescription).not.toContain('bio');
     const tk = texts.tiktok.split('\n');
     const yt = texts.youtubeDescription.split('\n');
-    expect(yt.filter((line, i) => line !== tk[i])).toEqual(['Link en el perfil del canal 👉 ComparaTech']);
+    expect(yt.filter((line, i) => line !== tk[i])).toEqual(['🛒 Link de compra en el perfil del canal']);
+    const withShort = buildVideoTexts({ ...base, ml_product_id: 'MLC78729874' }, opts.now, 'https://www.comparatech.cl');
+    expect(withShort.youtubeDescription).toContain(
+      '🛒 Link de compra: comparatech.cl/p/78729874 (escríbelo en tu navegador), o en el perfil del canal',
+    );
   });
 
   it('todos los textos largos conservan la hora del precio, sin "Publicidad" ni la comisión', () => {
@@ -260,12 +276,13 @@ describe('buildVideoTexts', () => {
     expect(youtubeTitle({ name: 'Parlante JBL Go 4', price: 19_990, original_price: null })).toBe('Parlante JBL Go 4 a $19.990');
   });
 
-  it('el título lleva el nombre como en el reel, sin el código de fábrica; los demás textos, el nombre corto de siempre', () => {
+  it('el título y los textos llevan el nombre de redes, sin el código de fábrica (pedido del dueño, 18-10-2026)', () => {
     const watch = { ...base, name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3 - Color Negro' };
     const watchTexts = buildVideoTexts(watch, opts.now);
     expect(watchTexts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $27.990 con 60% de descuento');
     for (const text of [watchTexts.instagram, watchTexts.tiktok, watchTexts.facebook, watchTexts.youtubeDescription]) {
-      expect(text.split('\n')).toContain('Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3');
+      expect(text.split('\n')).toContain('Samsung Smartwatch Galaxy Fit 3');
+      expect(text).not.toContain('Asm-r390nidalta');
     }
     // El código que dice con qué calza un repuesto se queda también en el título.
     expect(youtubeTitle({ name: 'Cargador Para Notebook Lenovo Adlx65ndc3a 20v 3.25a', price: 19_990, original_price: null })).toBe(

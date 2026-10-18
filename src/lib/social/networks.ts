@@ -5,7 +5,7 @@ import { buildCaption, formatPrice, mlPhotoJpg } from '@/lib/content/captions';
 import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 import { resolveOutboundUrl } from '@/lib/outbound';
 import type { AffiliateSettings } from '@/lib/settings';
-import { shortProductName } from '@/lib/text';
+import { socialProductName } from '@/lib/content/social-name';
 import { MIN_INTEREST_POINTS, floorPoints, meetsInterestFloor, type InterestScore } from '@/lib/social/interest';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
 import {
@@ -199,7 +199,7 @@ export type StoryNetwork = 'instagram' | 'facebook';
 function tiktokTitle(p: SocialProduct): string {
   const price = formatPrice(p.price);
   const room = TIKTOK_TITLE_MAX - price.length - 3;
-  return `${shortProductName(p.name, room)} a ${price}`.slice(0, TIKTOK_TITLE_MAX);
+  return `${socialProductName(p, { max: room })} a ${price}`.slice(0, TIKTOK_TITLE_MAX);
 }
 
 /**
@@ -265,7 +265,7 @@ function metricoolSettings(
   textos: Record<Network, string>,
   image: string
 ): Record<Network, Record<string, unknown>> {
-  const alt = `${shortProductName(p.name)} a ${formatPrice(p.price)}`;
+  const alt = `${socialProductName(p)} a ${formatPrice(p.price)}`;
   return {
     instagram: {
       ...metricoolBase('instagram', textos.instagram, image, alt),
@@ -335,7 +335,7 @@ export function buildPlanItem(
     id: p.id,
     slug: p.slug,
     nombre: p.name,
-    nombre_corto: shortProductName(p.name),
+    nombre_corto: socialProductName(p),
     marca: p.brand,
     categoria: p.category,
     precio: p.price,
@@ -356,7 +356,7 @@ export function buildPlanItem(
     foto: mlPhotoJpg(p.image_url),
     textos,
     metricool: metricoolSettings(p, textos, pieza),
-    metricool_historia: metricoolStorySettings(historia, `${shortProductName(p.name)} a ${formatPrice(p.price)}`),
+    metricool_historia: metricoolStorySettings(historia, `${socialProductName(p)} a ${formatPrice(p.price)}`),
   };
 }
 

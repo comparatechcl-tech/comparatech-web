@@ -219,6 +219,22 @@ export const getProductBySlugAnyStatus = cache(async (slug: string): Promise<Pro
   return withOutbound([data as Product], settings)[0];
 });
 
+/**
+ * La dirección de la ficha de un producto visible, por su código del
+ * catálogo de Mercado Libre (MLC…), esté o no a la venta. Para los links
+ * cortos (/p/78729874, ver lib/content/short-link). null si no hay.
+ */
+export async function getSlugByMlProductId(mlProductId: string): Promise<string | null> {
+  const supabase = requireSupabase();
+  const { data, error } = await selectWithFallback((columns, excludeDeleted) => {
+    let query = supabase.from('products').select(columns).eq('ml_product_id', mlProductId).eq('is_hidden', false);
+    if (excludeDeleted) query = query.is('deleted_at', null);
+    return query.limit(1).maybeSingle();
+  });
+  if (error) throw new Error(`No se pudo leer el producto: ${error.message}`);
+  return (data as { slug?: string } | null)?.slug ?? null;
+}
+
 /** Un producto publicado (activo y visible), o null. */
 export async function getProductBySlug(slug: string): Promise<Product | null> {
   const product = await getProductBySlugAnyStatus(slug);

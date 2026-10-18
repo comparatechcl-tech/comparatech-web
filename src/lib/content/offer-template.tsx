@@ -22,7 +22,7 @@
  *
  * Necesita Inter en 400, 600 y 800 (lib/content/og-fonts).
  */
-import { shortProductName } from '@/lib/text';
+import { socialProductName } from '@/lib/content/social-name';
 import { captionDiscount, chileDateTime, formatPrice } from '@/lib/content/captions';
 import type { OgProduct } from '@/lib/content/og-template';
 
@@ -189,8 +189,9 @@ export function OfferTemplate({
   const hasChips = freeShipping || full;
 
   // Si hubo que cortar el nombre, se dice con puntos suspensivos: "… Astro Bot y Gran" a secas parece un error.
-  const short = shortProductName(product.name, 64);
-  const name = short.length < shortProductName(product.name, 200).length ? `${short}…` : short;
+  // El nombre de redes (tipo y modelo si parte con un código), sin la marca, que ya va arriba.
+  const short = socialProductName(product, { max: 64, withBrand: !brand });
+  const name = short.length < socialProductName(product, { max: 200, withBrand: !brand }).length ? `${short}…` : short;
   const title = fitName(name);
   const nameStyle = { fontSize: title.size, fontWeight: 600, lineHeight: `${title.line}px`, letterSpacing: NAME_SPACING };
   const titleH = (brand ? KICKER_H : 0) + (title.rows ? title.rows.length : 2) * title.line;

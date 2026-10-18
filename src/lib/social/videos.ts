@@ -6,7 +6,8 @@ import { buildVideoTexts, captionDiscount, mlPhotoJpg, type VideoTexts } from '@
 import { resolveOutboundUrl } from '@/lib/outbound';
 import { readAffiliateSettings } from '@/lib/settings';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
-import { reelProductName } from '@/lib/text';
+import { socialProductName } from '@/lib/content/social-name';
+import { SITE_URL } from '@/lib/site';
 import { addInterestSignals, countUnreadHistory, readInterestEvidence, readSocialEvidence } from '@/lib/social/drops';
 import { interestScore, type InterestEvidence } from '@/lib/social/interest';
 import { mlCheckUrl, postedPriceShift } from '@/lib/social/live-price';
@@ -171,7 +172,7 @@ export function parseVideoObjectName(name: string): VideoObject | null {
  * se revisa después no pueden separarse.
  */
 export interface VideoClaims {
-  /** El nombre que el video lleva escrito (reelProductName): sin códigos de fábrica. */
+  /** El nombre que el video lleva escrito (lib/content/social-name): sin códigos de fábrica, con tipo y marca si parte con uno. */
   nombre_corto: string;
   marca: string | null;
   /** Precio de lista, solo si es mayor que el precio. */
@@ -189,15 +190,15 @@ export interface VideoClaims {
  * el historial, en % (evidenceDrop), o null. Puro.
  */
 export function videoClaims(
-  product: Pick<SocialProduct, 'name' | 'brand' | 'price' | 'original_price' | 'offer_info'>,
+  product: Pick<SocialProduct, 'name' | 'brand' | 'price' | 'original_price' | 'offer_info' | 'ml_domain_id' | 'specs'>,
   drop: number | null
 ): VideoClaims {
   const discount = captionDiscount(product);
   return {
     // El nombre que va escrito en el video: sin los códigos de fábrica, que en
-    // pantalla no le dicen nada a nadie (reelProductName). Los textos que se
-    // pegan en cada red siguen con el nombre corto de siempre.
-    nombre_corto: reelProductName(product.name),
+    // pantalla no le dicen nada a nadie, y con tipo y marca si el nombre parte
+    // con un código o una medida (lib/content/social-name), igual que los textos.
+    nombre_corto: socialProductName(product),
     marca: product.brand || null,
     precio_lista: discount > 0 ? product.original_price : null,
     descuento: discount,
@@ -573,7 +574,7 @@ function changedAfterPostingOf(recent: RecentMark[], products: Map<string, Socia
     if (shift !== 'higher' && shift !== 'gone') continue;
     changed.push({
       productId: mark.productId,
-      name: product ? reelProductName(product.name) : null,
+      name: product ? socialProductName(product) : null,
       // En el orden de siempre: Instagram, TikTok, YouTube, Facebook.
       networks: VIDEO_NETWORKS.filter((network) => mark.networks.includes(network)),
       postedPrice: mark.postedPrice,
@@ -951,7 +952,7 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
       points: score.points,
       reason: score.warning ? `${score.reason}${VIDEO_WARNING_MARK}${score.warning}` : score.reason,
       link: resolveOutboundUrl(p, settings),
-      texts: buildVideoTexts(p, now),
+      texts: buildVideoTexts(p, now, SITE_URL),
       posted: marks.get(p.id) ?? {},
       mlUrl: mlCheckUrl(p.ml_product_id),
       freeShipping: claims.envio_gratis,

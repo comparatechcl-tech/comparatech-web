@@ -204,6 +204,9 @@ export const SOCIAL_BASE_COLUMNS = [
   'seller_sales_count',
   'is_active',
   'is_hidden',
+  // Para el nombre en redes (lib/content/social-name).
+  'ml_domain_id',
+  'specs',
 ].join(',');
 
 const COLUMNS_0016 = 'offer_info,ml_root_category';

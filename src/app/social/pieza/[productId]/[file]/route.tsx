@@ -37,6 +37,8 @@ interface PieceRow {
   brand: string | null;
   image_url: string;
   is_active: boolean;
+  ml_domain_id: string | null;
+  specs: Record<string, unknown> | null;
 }
 
 type Drawn = { jpeg: Buffer } | { error: string; status: number };
@@ -63,7 +65,7 @@ async function draw(s: PieceSnapshot): Promise<Drawn> {
   if (!supabase) return { error: 'No disponible', status: 503 };
   const { data, error } = await supabase
     .from('products')
-    .select('name, brand, image_url, is_active')
+    .select('name, brand, image_url, is_active, ml_domain_id, specs')
     .eq('id', s.productId)
     .maybeSingle();
   if (error) return { error: 'No disponible', status: 502 };
@@ -78,6 +80,8 @@ async function draw(s: PieceSnapshot): Promise<Drawn> {
   const product: OgProduct = {
     name: row.name,
     brand: row.brand,
+    ml_domain_id: row.ml_domain_id,
+    specs: row.specs,
     price: s.price,
     original_price: s.listPrice > 0 ? s.listPrice : null,
     image_url: row.image_url,

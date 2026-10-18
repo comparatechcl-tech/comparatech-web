@@ -10,7 +10,9 @@
  * Telegram y los tests, con la misma salida para la misma entrada.
  */
 
-import { normalizeName, reelProductName, shortProductName } from '@/lib/text';
+import { normalizeName } from '@/lib/text';
+import { socialProductName } from '@/lib/content/social-name';
+import { shortLinkText } from '@/lib/content/short-link';
 import { FORBIDDEN_WORDS } from '@/lib/social/interest-tables';
 
 export type CaptionChannel = 'instagram' | 'tiktok' | 'whatsapp' | 'telegram' | 'facebook';
@@ -27,6 +29,12 @@ export interface CaptionProduct {
   seller_reputation?: string | null;
   seller_sales_count?: number | null;
   offer_info?: { free_shipping?: boolean | null; is_full?: boolean | null } | null;
+  /** Para el link corto (lib/content/short-link): comparatech.cl/p/ y los dígitos. */
+  ml_product_id?: string | null;
+  /** Para el nombre en redes (lib/content/social-name): tipo, marca y modelo cuando el nombre parte con un código. */
+  brand?: string | null;
+  ml_domain_id?: string | null;
+  specs?: Record<string, unknown> | null;
 }
 
 export interface CaptionOptions {
@@ -45,8 +53,33 @@ export interface CaptionOptions {
 /** Comienzo de las dos líneas con link. Telegram las busca para sacarlas si el texto no cabe. */
 export const BUY_LINK_PREFIX = '👉 Ver en Mercado Libre:';
 export const SITE_LINK_PREFIX = '🔎 Compara en ComparaTech:';
-/** La línea que manda a la bio donde el texto no admite links. Los textos de un reel la cambian por la de su red. */
-const BIO_LINE = 'Link en la bio 👉 comparatech';
+/**
+ * Comienzo de la línea de compra donde el texto no admite links (Instagram,
+ * TikTok y los reels): dice dónde está el link y el link corto para
+ * escribirlo (lib/content/short-link). Los textos de un reel la cambian por
+ * la de su red.
+ */
+const BUY_LINE_PREFIX = '🛒 ';
+
+/** Dónde está el link de compra en cada red donde no se puede tocar en el texto. */
+type BuyLineWhere = 'instagram' | 'tiktok' | 'facebook-reel' | 'youtube';
+
+function buyLine(product: CaptionProduct, siteUrl: string, where: BuyLineWhere): string {
+  const short = siteUrl ? shortLinkText(siteUrl, product.ml_product_id) : null;
+  switch (where) {
+    case 'instagram':
+      return short ? `🛒 Link de compra en nuestra bio, o escribe ${short}` : '🛒 Link de compra en nuestra bio';
+    case 'tiktok':
+      // TikTok todavía no deja link en el perfil (pide 1.000 seguidores o cuenta de empresa verificada).
+      return short ? `🛒 Para comprarlo, escribe ${short} en tu navegador` : '🛒 Para comprarlo, busca comparatech.cl';
+    case 'facebook-reel':
+      return short ? `🛒 Link de compra: ${short}, o en nuestro perfil` : '🛒 Link de compra en nuestro perfil';
+    case 'youtube':
+      return short
+        ? `🛒 Link de compra: ${short} (escríbelo en tu navegador), o en el perfil del canal`
+        : '🛒 Link de compra en el perfil del canal';
+  }
+}
 
 const CHILE_TZ = 'America/Santiago';
 
@@ -227,15 +260,15 @@ export function productPageUrl(siteUrl: string, slug: string, channel: CaptionCh
 }
 
 export function buildCaption(product: CaptionProduct, channel: CaptionChannel, opts: CaptionOptions): string {
-  const lines: string[] = [pickHook(product, opts.now), shortProductName(product.name), priceLine(product)];
+  const lines: string[] = [pickHook(product, opts.now), socialProductName(product), priceLine(product)];
   if (product.offer_info?.free_shipping === true) lines.push('🚚 Envío gratis');
   lines.push(priceCheckedLine(product.price_checked_at));
   lines.push('');
 
-  // Instagram y TikTok no dejan links clicables en el texto: se manda a la
-  // bio, donde está /hoy.
+  // Instagram y TikTok no dejan links clicables en el texto: el link corto, para
+  // escribirlo, y en Instagram la bio, donde está /hoy.
   if (channel === 'instagram' || channel === 'tiktok') {
-    lines.push(BIO_LINE);
+    lines.push(buyLine(product, opts.siteUrl, channel));
   } else {
     lines.push(`${BUY_LINK_PREFIX} ${opts.link}`);
     lines.push(`${SITE_LINK_PREFIX} ${productPageUrl(opts.siteUrl, product.slug, channel)}`);
@@ -264,8 +297,6 @@ export interface VideoTexts {
 /** YouTube admite 100 caracteres de título; con 90 no lo corta en la lista de Shorts. */
 export const YOUTUBE_TITLE_MAX = 90;
 
-const PROFILE_LINE = 'Link en el perfil 👉 ComparaTech';
-const CHANNEL_LINE = 'Link en el perfil del canal 👉 ComparaTech';
 
 /**
  * El nombre sin las palabras que el sitio no usa. Los nombres vienen de
@@ -300,40 +331,45 @@ function withoutForbiddenWords(name: string): string {
  * ("… a $27.990 con 60% de descuento"). El nombre es lo único que se acorta:
  * el precio y el descuento van siempre enteros.
  */
-export function youtubeTitle(product: Pick<CaptionProduct, 'name' | 'price' | 'original_price'>): string {
+export function youtubeTitle(
+  product: Pick<CaptionProduct, 'name' | 'price' | 'original_price' | 'brand' | 'ml_domain_id' | 'specs'>,
+): string {
   const discount = captionDiscount(product);
   const tail = ` a ${formatPrice(product.price)}${discount > 0 ? ` con ${discountPhrase(discount)}` : ''}`;
-  // El título es el del video: el nombre va como en el reel, sin códigos de fábrica.
-  const name = reelProductName(withoutForbiddenWords(product.name) || 'Producto', YOUTUBE_TITLE_MAX - tail.length);
+  // El título es el del video: el nombre va como en el reel (sin códigos de fábrica, con tipo y marca si parte con uno).
+  const name = socialProductName(
+    { ...product, name: withoutForbiddenWords(product.name) || 'Producto' },
+    { max: YOUTUBE_TITLE_MAX - tail.length },
+  );
   return `${name}${tail}`.slice(0, YOUTUBE_TITLE_MAX);
 }
 
 function withLinkLine(text: string, line: string): string {
   return text
     .split('\n')
-    .map((current) => (current === BIO_LINE ? line : current))
+    .map((current) => (current.startsWith(BUY_LINE_PREFIX) ? line : current))
     .join('\n');
 }
 
 /**
  * Los textos de un reel para cada red.
  *
- * Ninguno lleva una dirección web: en la descripción de un reel no se puede
- * tocar, y en Facebook además la página puede tener un tope de publicaciones
- * con link. Todos mandan al perfil, que es donde está el link, y conservan la
- * hora en que se revisó el precio.
+ * Ninguno lleva un link para tocar: en la descripción de un reel no se puede,
+ * y en Facebook además la página puede tener un tope de publicaciones con
+ * link. Todos llevan el link corto para escribirlo (`siteUrl`) y dicen dónde
+ * está el link en el perfil, y conservan la hora en que se revisó el precio.
  */
-export function buildVideoTexts(product: CaptionProduct, now: Date): VideoTexts {
+export function buildVideoTexts(product: CaptionProduct, now: Date, siteUrl = ''): VideoTexts {
   // Con estos dos canales buildCaption no escribe ni el link de compra ni el de la ficha.
-  const opts: CaptionOptions = { now, siteUrl: '', link: '' };
+  const opts: CaptionOptions = { now, siteUrl, link: '' };
   const instagram = buildCaption(product, 'instagram', opts);
   const tiktok = buildCaption(product, 'tiktok', opts);
   return {
     instagram,
     tiktok,
-    facebook: withLinkLine(instagram, PROFILE_LINE),
+    facebook: withLinkLine(instagram, buyLine(product, siteUrl, 'facebook-reel')),
     youtubeTitle: youtubeTitle(product),
-    youtubeDescription: withLinkLine(tiktok, CHANNEL_LINE),
+    youtubeDescription: withLinkLine(tiktok, buyLine(product, siteUrl, 'youtube')),
   };
 }
 

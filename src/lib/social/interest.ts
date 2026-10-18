@@ -46,6 +46,7 @@ import { estimateCommission } from '@/lib/commission';
 import { captionDiscount, discountPhrase, formatPrice } from '@/lib/content/captions';
 import { MIN_DROP_PCT } from '@/lib/deal-rank';
 import { normalizeName } from '@/lib/text';
+import { nameNeedsHelp } from '@/lib/content/social-name';
 import {
   BEFORE_TARGET_BRAND,
   CATEGORY_FALLBACK,
@@ -88,6 +89,9 @@ export interface InterestProduct {
   ml_root_category?: string | null;
   ml_category_id?: string | null;
   ml_family_id?: string | null;
+  /** Para saber si el nombre se arregla solo en redes (lib/content/social-name). */
+  ml_domain_id?: string | null;
+  specs?: Record<string, unknown> | null;
   offer_info?: {
     free_shipping?: boolean | null;
     is_full?: boolean | null;
@@ -475,15 +479,6 @@ function inchesOf(rawName: string): number | null {
   return inches >= 19 && inches <= 100 ? inches : null;
 }
 
-/**
- * ¿El nombre parte con un código de modelo ("FA607NUQ-RL060W AMD Ryzen…")?
- * En una historia ese nombre no le dice nada a nadie.
- */
-function startsWithCode(rawName: string): boolean {
-  const first = rawName.trim().split(/\s+/)[0] || '';
-  return first.length >= 6 && /[a-z]/i.test(first) && /\d{2,}/.test(first);
-}
-
 /** Garantía de fábrica, o de 12 meses o más. */
 function hasGoodWarranty(warranty: unknown): boolean {
   const text = normalize(warranty);
@@ -821,7 +816,9 @@ export function interestScore(product: InterestProduct, evidence: InterestEviden
       dealPoints <= 0 ? 'sin oferta que mostrar' : discount >= 30 ? 'descuento del vendedor con poco respaldo' : 'la oferta es chica'
     );
   }
-  if (startsWithCode(rawName)) {
+  // Un nombre que parte con un código ("FA607NUQ-RL060W AMD Ryzen…") no le dice nada a nadie. En redes se
+  // arregla solo con tipo, marca y modelo (lib/content/social-name): se avisa y resta solo si no se puede.
+  if (nameNeedsHelp({ name: rawName, brand: product.brand, ml_domain_id: product.ml_domain_id, specs: product.specs })) {
     penalty += W.penaltyCodeName;
     warnings.push('el nombre parte con un código');
   }
