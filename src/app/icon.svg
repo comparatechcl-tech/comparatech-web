@@ -5,10 +5,13 @@
       <stop offset="1" stop-color="#00D4FF" />
     </linearGradient>
   </defs>
+  <rect width="32" height="32" rx="7" fill="#0B1220" />
+  <g transform="translate(2.84 2.84) scale(0.86)">
   <circle cx="14" cy="14" r="10.5" fill="none" stroke="url(#g)" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="56 10" stroke-dashoffset="-7" />
   <line x1="21.4" y1="21.4" x2="27" y2="27" stroke="url(#g)" stroke-width="3.4" stroke-linecap="round" />
   <g stroke="#F5F7FA" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
     <path d="M9.3 12.3h8.4M17.7 12.3l-2.2-2.2M17.7 12.3l-2.2 2.2" />
     <path d="M18.7 16.3h-8.4M10.3 16.3l2.2-2.2M10.3 16.3l2.2 2.2" />
+  </g>
   </g>
 </svg>

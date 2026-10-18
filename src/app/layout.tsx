@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { ThemeProvider } from 'next-themes';
 import { Analytics } from '@vercel/analytics/next';
@@ -40,8 +40,15 @@ const inter = Inter({
   display: 'swap',
 });
 
+/** El color de la barra del navegador en el teléfono: el fondo oscuro del sitio. */
+export const viewport: Viewport = {
+  themeColor: '#070B14',
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+  // Sin esto Google muestra "comparatech.cl" en vez del nombre (también va en el WebSite de la portada).
+  applicationName: 'ComparaTech',
   title: {
     default: 'ComparaTech — Compara precios de tecnología en Chile',
     template: '%s | ComparaTech',
