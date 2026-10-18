@@ -14,6 +14,7 @@ const ACTIONS: { value: string; label: string }[] = [
   { value: 'guardar_link', label: 'Links guardados' },
   { value: 'reverificar', label: 'Revisiones' },
   { value: 'prueba_atribucion', label: 'Prueba de atribución' },
+  { value: 'agregar_desde_ml', label: 'Agregados desde ML' },
   { value: 'aprobar', label: 'Aprobaciones' },
   { value: 'rechazar', label: 'Rechazos' },
   { value: 'recuperar', label: 'Recuperados' },
@@ -91,6 +92,10 @@ function describe(row: AdminEventRow): string {
       const n = after ? Object.keys(after).length : 0;
       return `guardó ${plural(n, 'link', 'links')}`;
     }
+    case 'agregar_desde_ml':
+      return typeof after?.name === 'string'
+        ? `agregó desde Mercado Libre ${after.name}`
+        : 'agregó un producto desde Mercado Libre';
     case 'aprobar':
       return count === null ? 'aprobó candidatos' : `aprobó ${plural(count, 'candidato', 'candidatos')}`;
     case 'rechazar':

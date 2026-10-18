@@ -190,7 +190,14 @@ describe('searchCatalogProducts', () => {
       json(200, {
         paging: { total: 496 },
         results: [
-          { id: 'MLC1', domain_id: 'MLC-CELLPHONES', quality_type: 'COMPLETE', settings: catalog },
+          {
+            id: 'MLC1',
+            domain_id: 'MLC-CELLPHONES',
+            name: 'Samsung S26 Ultra',
+            pictures: [{ url: 'https://http2.mlstatic.com/D_s26.jpg' }],
+            quality_type: 'COMPLETE',
+            settings: catalog,
+          },
           { id: '', domain_id: 'MLC-CELLPHONES' },
           { id: 'MLC2', name: 'sin tipo ni datos de caja de compra' },
           // Las dos que nunca tienen ganador: a medio armar, o fuera del catálogo obligatorio.
@@ -204,10 +211,16 @@ describe('searchCatalogProducts', () => {
     expect(await searchCatalogProducts('samsung s26 ultra', 'MLC-CELLPHONES', 'tok', 5)).toEqual({
       status: 'ok',
       items: [
-        { id: 'MLC1', domainId: 'MLC-CELLPHONES', buyBox: true },
-        { id: 'MLC2', domainId: null, buyBox: true },
-        { id: 'MLC3', domainId: 'MLC-CELLPHONES', buyBox: false },
-        { id: 'MLC4', domainId: 'MLC-CELLPHONES', buyBox: false },
+        {
+          id: 'MLC1',
+          domainId: 'MLC-CELLPHONES',
+          name: 'Samsung S26 Ultra',
+          picture: 'https://http2.mlstatic.com/D_s26.jpg',
+          buyBox: true,
+        },
+        { id: 'MLC2', domainId: null, name: 'sin tipo ni datos de caja de compra', picture: null, buyBox: true },
+        { id: 'MLC3', domainId: 'MLC-CELLPHONES', name: null, picture: null, buyBox: false },
+        { id: 'MLC4', domainId: 'MLC-CELLPHONES', name: null, picture: null, buyBox: false },
       ],
     });
     const url = new URL(fetchMock.mock.calls[0][0]);

@@ -112,7 +112,11 @@ verificarla en el servidor. Secciones:
 - **Resumen**: salud del sitio, clics hacia Mercado Libre y cobertura por
   categoría.
 - **Candidatos**: la cola para aprobar o rechazar, con carga de links en
-  bloque.
+  bloque. Con "Agregar desde Mercado Libre" (`/admin/candidatos/agregar`) se
+  pega el link de un producto visto en ML: se revisa como en la prospección
+  (ganador, vendedor verde, categoría, comisión), se arma su link de afiliado
+  y queda en la cola o publicado. Los links cortos (meli.la) no se abren:
+  cada apertura cuenta como un clic de afiliado.
 - **Productos**: el catálogo publicado; ocultar, cambiar el link, etc.
 - **Historias** y **Videos**: lo que hay para subir hoy a las redes.
 - **Problemas**: productos que salieron del sitio y por qué.

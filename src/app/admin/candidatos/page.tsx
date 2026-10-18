@@ -156,12 +156,20 @@ export default async function CandidatosPage({
             · Página {view.page} de {view.pages}
           </p>
         </div>
-        <Link
-          href={`${BASE_PATH}/rechazados`}
-          className="inline-flex min-h-11 items-center rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-fg"
-        >
-          Ver rechazados
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`${BASE_PATH}/agregar`}
+            className="inline-flex min-h-11 items-center rounded-md border border-accent/50 px-3 py-2 text-xs font-semibold text-accent transition hover:bg-accent/10"
+          >
+            + Agregar desde Mercado Libre
+          </Link>
+          <Link
+            href={`${BASE_PATH}/rechazados`}
+            className="inline-flex min-h-11 items-center rounded-md border border-border px-3 py-2 text-xs font-medium text-muted transition hover:text-fg"
+          >
+            Ver rechazados
+          </Link>
+        </div>
       </div>
 
       {pending.error && (

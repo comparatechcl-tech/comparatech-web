@@ -314,6 +314,9 @@ export async function discoverDomains(query: string, token: string): Promise<MlL
 export interface CatalogSearchHit {
   id: string;
   domainId: string | null;
+  name: string | null;
+  /** Primera foto de la ficha, si la trae. */
+  picture: string | null;
   /**
    * La ficha tiene caja de compra: es de catálogo obligatorio
    * (listing_strategy catalog_required) y no está a medio armar (quality_type
@@ -344,7 +347,13 @@ export async function searchCatalogProducts(
   });
   const result = await requestJson(`${API}/products/search?${params}`, token);
   if (!result.ok) return { status: 'error', failure: result.failure };
-  type Raw = { id?: unknown; domain_id?: unknown; quality_type?: unknown; settings?: { listing_strategy?: unknown } | null };
+  type Raw = {
+    id?: unknown;
+    domain_id?: unknown;
+    name?: unknown;
+    quality_type?: unknown;
+    settings?: { listing_strategy?: unknown } | null;
+  };
   const results = (result.data as { results?: Raw[] } | null)?.results ?? [];
   const items = results
     .filter((r): r is Raw & { id: string } => typeof r?.id === 'string' && r.id.length > 0)
@@ -354,10 +363,25 @@ export async function searchCatalogProducts(
       return {
         id: r.id,
         domainId: typeof r.domain_id === 'string' ? r.domain_id : null,
+        name: typeof r.name === 'string' ? r.name : null,
+        picture: firstPictureUrl(r),
         buyBox: r.quality_type !== 'PRIMITIVE' && (strategy === undefined || strategy === 'catalog_required'),
       };
     });
   return { status: 'ok', items };
+}
+
+export type ProductLookup =
+  | { status: 'ok'; product: unknown }
+  /** ML dice que no existe una ficha con ese código (puede ser el de una publicación). */
+  | { status: 'not_found' }
+  | { status: 'error'; failure: MlFailure };
+
+/** La ficha de catálogo, distinguiendo "no existe" de "ML no respondió". */
+export async function lookupProduct(productId: string, token: string): Promise<ProductLookup> {
+  const result = await requestJson(`${API}/products/${productId}`, token);
+  if (!result.ok) return { status: 'error', failure: result.failure };
+  return result.data ? { status: 'ok', product: result.data } : { status: 'not_found' };
 }
 
 /**
