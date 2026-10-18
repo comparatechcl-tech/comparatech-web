@@ -21,7 +21,8 @@ import { PriceHistoryNote } from '@/components/product/PriceHistoryNote';
 import { PriceFreshness } from '@/components/product/PriceFreshness';
 import { resolveDescription } from '@/lib/product-description';
 import { shortProductName, truncateAtWord } from '@/lib/text';
-import { formatCLP, formatDiscountPct } from '@/lib/format';
+import { seoProductTitle } from '@/lib/seo-title';
+import { formatCLP, formatDayMonth, formatDiscountPct } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
 import { reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
 import { MIN_DEAL_DISCOUNT, discountOf } from '@/lib/deal-rank';
@@ -124,28 +125,31 @@ export async function generateMetadata({
 
   const short = shortProductName(product.name);
   const discount = formatDiscountPct(product.price, product.original_price);
-  // El título lleva lo que la gente busca ("precio", "ofertas", "Chile") y
-  // el nombre corto: el de ML (76-90 caracteres) se comía todo el espacio
-  // que Google muestra.
-  const title = `${short}: precio y ofertas en Chile`;
-  const lead = `${short} a ${formatCLP(product.price)}${discount ? ` con ${discount}% de descuento` : ''} en Mercado Libre.`;
+  // Entero y sin la plantilla del sitio: seoProductTitle ya decide si cabe
+  // "| ComparaTech" en lo que muestra Google.
+  const title = seoProductTitle(product);
+  // La fecha del precio y no "actualizado hoy": Google guarda la descripción
+  // por días, y un "hoy" junto al precio de la semana pasada no sería cierto.
+  const checkedAt = product.price_checked_at ? new Date(product.price_checked_at) : null;
+  const checked =
+    checkedAt && !Number.isNaN(checkedAt.getTime()) ? ` (precio del ${formatDayMonth(checkedAt.toISOString())})` : '';
+  const lead = `${short} a ${formatCLP(product.price)}${discount ? ` con ${discount}% de descuento` : ''} en Mercado Libre${checked}.`;
   // La ficha muestra un solo vendedor (el de la oferta ganadora), no una
   // comparación entre vendedores. Con un nombre largo la frase completa no
   // cabe en lo que muestra Google: ahí va la versión corta, en vez de dejar
-  // que se corte a la mitad ("… Precio…").
-  const full = `${lead} Mira sus specs y la reputación del vendedor. Precio actualizado hoy.`;
-  const active =
-    full.length <= META_DESCRIPTION_MAX ? full : `${lead} Specs y reputación del vendedor. Precio actualizado hoy.`;
+  // que se corte a la mitad ("… la reputación…").
+  const full = `${lead} Mira sus specs y la reputación del vendedor.`;
+  const active = full.length <= META_DESCRIPTION_MAX ? full : `${lead} Specs y reputación del vendedor.`;
   const description = truncateAtWord(
     product.is_active
       ? active
-      : `${short}: hoy no está a la venta en Mercado Libre. Mira alternativas en ${categoryNameOf(product)} con precio revisado hoy.`,
+      : `${short}: hoy no está a la venta en Mercado Libre. Mira alternativas en ${categoryNameOf(product)}.`,
     META_DESCRIPTION_MAX
   );
   const url = `/producto/${product.slug}`;
 
   return {
-    title,
+    title: { absolute: title },
     description,
     alternates: { canonical: url },
     // Si existe opengraph-image para la ruta, Next la usa antes que estas

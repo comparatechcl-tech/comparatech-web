@@ -100,6 +100,11 @@ export function isFactoryCode(token: string): boolean {
   return mixed >= 3;
 }
 
+/** ¿Es una cifra con su unidad ("8GB", "1300W", "2.4GHz", "4G", "10/100/1000", "43\"")? Sin contar los signos de alrededor. Pura. */
+export function isMeasure(token: string): boolean {
+  return MEASURE_RE.test(token.replace(EDGE_PUNCTUATION_RE, ''));
+}
+
 // "Cargador para <código>", "compatible con <código>": el código dice con qué
 // calza y sin él la frase queda colgando. Ahí se queda.
 const LEADS_TO_CODE_RE = /^(?:con|de|del|y|e|o|u|para|en|a|al|por|sin|tipo|compatibles?|modelo|mod|for)$/i;
@@ -173,10 +178,10 @@ function withoutFactoryCodes(name: string, whole: string): string {
  * Nombre corto para títulos, migas y la barra de compra.
  *
  * Los nombres de ML miden 76-90 caracteres y repiten el color y coletillas
- * de la tienda; en un <title> Google corta a los ~60 y se pierde justo lo
- * que importa ("precio y ofertas en Chile"). Se quita el sufijo de color y
- * se corta en el espacio anterior al máximo, sin dejar una palabra partida
- * ni un paréntesis abierto.
+ * de la tienda. Se quita el sufijo de color y se corta en el espacio
+ * anterior al máximo, sin dejar una palabra partida ni un paréntesis
+ * abierto. El <title> de la ficha tiene su propia regla, que no pierde la
+ * marca, el modelo ni la capacidad (lib/seo-title).
  */
 export function shortProductName(name: string, max = 55): string {
   return shortName(name, max, false);
