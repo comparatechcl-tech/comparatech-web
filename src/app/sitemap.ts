@@ -31,6 +31,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.9,
       ...withDate(latestOf(deals.length > 0 ? deals : products)),
     },
+    // Dirección fija para todos los años (lib/black-friday); cambia con las ofertas del día.
+    {
+      url: `${SITE_URL}/black-friday`,
+      changeFrequency: 'daily',
+      priority: 0.8,
+      ...withDate(latestOf(deals.length > 0 ? deals : products)),
+    },
     { url: `${SITE_URL}/comparador`, changeFrequency: 'weekly', priority: 0.6 },
     { url: `${SITE_URL}/nosotros`, changeFrequency: 'monthly', priority: 0.4 },
     { url: `${SITE_URL}/privacidad`, changeFrequency: 'yearly', priority: 0.2 },

@@ -31,6 +31,7 @@ describe('placementFromPath', () => {
     ['/producto/iphone-15-128gb', 'ficha'],
     ['/comparador', 'comparador'],
     ['/hoy', 'social'],
+    ['/black-friday', 'black-friday'],
     ['/nosotros', 'otro'],
     ['/privacidad', 'otro'],
   ])('%s → %s', (path, expected) => {

@@ -22,6 +22,7 @@ export const PLACEMENTS = [
   'alternativas',
   'comparador',
   'social',
+  'black-friday',
   'otro',
 ] as const;
 
@@ -84,6 +85,8 @@ export function placementFromPath(pathname: string): Placement {
     case 'hoy':
       // Landing a la que llevan los links de redes sociales.
       return 'social';
+    case 'black-friday':
+      return 'black-friday';
     default:
       return 'otro';
   }

@@ -38,6 +38,7 @@ const PLACEMENT_LABELS: Record<Placement, string> = {
   alternativas: 'Ficha · alternativas',
   comparador: 'Comparador',
   social: 'Página para redes (/hoy)',
+  'black-friday': 'Black Friday',
   otro: 'Otro',
 };
 

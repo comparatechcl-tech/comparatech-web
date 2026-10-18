@@ -70,6 +70,11 @@ export function Footer({ categories }: { categories: CategoryInfo[] }) {
             <p className="mb-2 font-medium text-fg">Sitio</p>
             <ul className="space-y-1">
               <li>
+                <Link href="/black-friday" className="transition hover:text-accent">
+                  Black Friday
+                </Link>
+              </li>
+              <li>
                 <Link href="/comparador" className="transition hover:text-accent">
                   Comparador
                 </Link>
