@@ -6,6 +6,7 @@ import { indexableTypes, productsOfType, typePath } from '@/lib/category-listing
 import { latestDate, productLastModified } from '@/lib/sitemap-dates';
 import { MODELS, modelPath, versionsOf } from '@/lib/models';
 import { LISTING_FILTERS, MIN_FILTER_PAGE, filterPath, productsOfFilter } from '@/lib/listing-filters';
+import { THERMOMETER_PATH, thermometerLastModified } from '@/lib/black-friday-thermometer';
 import { SITE_URL } from '@/lib/site';
 import type { Product } from '@/lib/types';
 
@@ -39,6 +40,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'daily',
       priority: 0.8,
       ...withDate(latestOf(deals.length > 0 ? deals : products)),
+    },
+    // El termómetro: su fecha es la del último dato que muestra (lib/black-friday-thermometer).
+    {
+      url: `${SITE_URL}${THERMOMETER_PATH}`,
+      changeFrequency: 'daily',
+      priority: 0.7,
+      ...withDate(thermometerLastModified(Date.now())),
     },
     { url: `${SITE_URL}/comparador`, changeFrequency: 'weekly', priority: 0.6 },
     { url: `${SITE_URL}/nosotros`, changeFrequency: 'monthly', priority: 0.4 },

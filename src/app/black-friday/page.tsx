@@ -5,6 +5,7 @@ import { getDealsWithStats } from '@/lib/queries/deals';
 import { getCatalogProducts } from '@/lib/queries/products';
 import { getSiteCategories } from '@/lib/queries/site-categories';
 import { BLACK_FRIDAY, blackFridayPhase, blackFridayPicks, daysUntilBlackFriday, dealsByCategory } from '@/lib/black-friday';
+import { THERMOMETER_PATH, thermometerPhase } from '@/lib/black-friday-thermometer';
 import { itemListJsonLd } from '@/lib/category-listing';
 import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 import { SITE_URL } from '@/lib/site';
@@ -43,6 +44,7 @@ export default async function BlackFridayPage() {
   const categories = dealsByCategory(deals, siteCategories);
   const phase = blackFridayPhase(now);
   const days = daysUntilBlackFriday(now);
+  const thermometer = thermometerPhase(now);
 
   const lead =
     phase === 'antes'
@@ -71,6 +73,16 @@ export default async function BlackFridayPage() {
       </span>
       <h1 className="mt-3 font-heading text-2xl font-bold sm:text-3xl">Black Friday {year} en Mercado Libre</h1>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{lead}</p>
+      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
+        <Link href={THERMOMETER_PATH} className="font-medium text-accent hover:underline">
+          Termómetro del Black Friday {year}
+        </Link>
+        {thermometer === 'antes'
+          ? ': cómo vamos a medir qué bajó de verdad.'
+          : thermometer === 'preliminar'
+            ? ': el dato preliminar de qué está bajando de verdad.'
+            : ': el balance de qué bajó de verdad.'}
+      </p>
 
       <section aria-labelledby="bajaron" className="mt-10">
         <h2 id="bajaron" className="flex items-center gap-2 font-heading text-lg font-semibold">

@@ -150,9 +150,11 @@ function median(values: number[]): number {
 
 /**
  * El precio más bajo en que se acumula `needed` de tiempo, sumando de los
- * tramos más baratos a los más caros. Si no se junta, el más caro.
+ * tramos más baratos a los más caros. Si no se junta, el más caro. Con la
+ * mitad del tiempo total es el precio que más rigió (mediana ponderada); lo
+ * usa también el termómetro del Black Friday (lib/black-friday-thermometer).
  */
-function priceHeldFor(stretches: { price: number; ms: number }[], needed: number): number {
+export function priceHeldFor(stretches: { price: number; ms: number }[], needed: number): number {
   const sorted = [...stretches].sort((a, b) => a.price - b.price);
   let held = 0;
   for (const stretch of sorted) {
