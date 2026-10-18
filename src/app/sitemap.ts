@@ -5,6 +5,7 @@ import { getPopulatedCategories } from '@/lib/categories';
 import { indexableTypes, productsOfType, typePath } from '@/lib/category-listing';
 import { latestDate, productLastModified } from '@/lib/sitemap-dates';
 import { MODELS, modelPath, versionsOf } from '@/lib/models';
+import { LISTING_FILTERS, MIN_FILTER_PAGE, filterPath, productsOfFilter } from '@/lib/listing-filters';
 import { SITE_URL } from '@/lib/site';
 import type { Product } from '@/lib/types';
 
@@ -61,6 +62,24 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         priority: 0.7,
         ...withDate(latestOf(productsOfType(inCategory, t.slug))),
       }));
+    }),
+    // Las páginas filtradas que se indexan (lib/listing-filters), contadas
+    // sin variantes repetidas, como en la página.
+    ...LISTING_FILTERS.flatMap((f) => {
+      const ofType = productsOfType(
+        products.filter((p) => p.category === f.category),
+        f.type,
+      );
+      const matched = productsOfFilter(ofType, f);
+      if (productsOfFilter(collapseVariants(ofType), f).length < MIN_FILTER_PAGE) return [];
+      return [
+        {
+          url: `${SITE_URL}${filterPath(f)}`,
+          changeFrequency: 'daily' as const,
+          priority: 0.7,
+          ...withDate(latestOf(matched)),
+        },
+      ];
     }),
     // Las páginas de modelo (lib/models) con alguna versión a la venta, como
     // las fichas: una sin ninguna sigue publicada, pero no se ofrece.

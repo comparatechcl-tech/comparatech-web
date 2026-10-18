@@ -9,6 +9,7 @@ import {
   itemListJsonLd,
   parsePageCount,
   parseSortOrder,
+  productsOfType,
   sortProducts,
   summarizeCategory,
   typeChips,
@@ -17,6 +18,8 @@ import {
 import { SITE_URL } from '@/lib/site';
 import { IconTile, categoryIconStyle } from '@/components/brand/CategoryIcon';
 import { ListingBody, listingHref } from './ListingBody';
+import { FilterLinks } from './FilterLinks';
+import { filterChips, filterPath, filtersOfType } from '@/lib/listing-filters';
 
 type Params = Promise<{ categoria: string }>;
 type SearchParams = Promise<{
@@ -103,6 +106,14 @@ export default async function CategoriaPage({
         <h1 className="font-heading text-2xl font-bold sm:text-3xl">{info.name}</h1>
       </div>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{categoryIntro(summarizeCategory(products))}</p>
+
+      {/* El tipo que se llama como la categoría ("Celulares") no tiene página
+          propia que se indexe: sus filtros ("Celulares Samsung", "iPhone") van acá. */}
+      <FilterLinks
+        chips={filterChips(productsOfType(products, categoria), filtersOfType(categoria, categoria))}
+        hrefOf={(slug) => filterPath({ category: categoria, type: categoria, slug })}
+        label="Por marca"
+      />
 
       <ListingBody
         chips={chips}

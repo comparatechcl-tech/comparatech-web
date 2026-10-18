@@ -21,6 +21,8 @@ import { SITE_URL } from '@/lib/site';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
 import { IconTile, categoryIconStyle } from '@/components/brand/CategoryIcon';
 import { ListingBody, listingHref } from '../ListingBody';
+import { FilterLinks } from '../FilterLinks';
+import { filterChips, filterPath, filtersOfType } from '@/lib/listing-filters';
 
 /**
  * La página de un tipo de producto dentro de su categoría
@@ -121,6 +123,13 @@ export default async function TipoPage({ params, searchParams }: { params: Param
         <h1 className="font-heading text-2xl font-bold sm:text-3xl">{chip.label}</h1>
       </div>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{categoryIntro(summarizeCategory(ofType))}</p>
+
+      {/* Las páginas filtradas de este tipo (lib/listing-filters): "Smart TV 55 pulgadas", "Parlantes JBL". */}
+      <FilterLinks
+        chips={filterChips(ofType, filtersOfType(categoria, tipo))}
+        hrefOf={(slug) => filterPath({ category: categoria, type: tipo, slug })}
+        label={filtersOfType(categoria, tipo).some((f) => f.rule.kind === 'pulgadas') ? 'Por tamaño y marca' : 'Por marca'}
+      />
 
       <ListingBody
         chips={typeChips(products)}
