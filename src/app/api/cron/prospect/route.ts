@@ -71,8 +71,8 @@ import { findByHighlights, findBySearches } from '@/lib/prospect-finders';
  * Parámetros útiles para correrlo a mano:
  *   ?dry=1             analiza y reporta sin escribir nada ni mandar correo
  *   ?limit=N           cambia el tope de productos nuevos analizados por corrida
- *   ?fuente=busquedas  usa lo más buscado en vez de la fuente por omisión
- *   ?fuente=destacados usa la lista de más vendidos
+ *   ?fuente=busquedas  lo más buscado (la de todos los días)
+ *   ?fuente=destacados la lista de más vendidos (bloqueada desde el 14-10-2026)
  */
 
 export const maxDuration = 60;
@@ -93,10 +93,12 @@ const DEFAULT_MAX_NEW_PRODUCTS: Record<ProspectSourceName, number> = { destacado
 
 /**
  * De dónde salen los productos si la corrida no dice otra cosa. La lista de
- * más vendidos está bloqueada desde el 14-10-2026; lo más buscado se activa
- * cuando el dueño apruebe lo que trae en modo prueba.
+ * más vendidos está bloqueada desde el 14-10-2026 (también con token de
+ * usuario); lo más buscado quedó como fuente diaria el 17-10, cuando el dueño
+ * aprobó lo que trajo en modo prueba (~38 candidatos útiles por corrida).
+ * Si ML vuelve a abrir los destacados, se prueban con ?fuente=destacados.
  */
-const DEFAULT_SOURCE: ProspectSourceName = 'destacados';
+const DEFAULT_SOURCE: ProspectSourceName = 'busquedas';
 
 /**
  * Las búsquedas que no alcanzaron a empezar hasta aquí se dejan para otro

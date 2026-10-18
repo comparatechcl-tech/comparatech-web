@@ -394,7 +394,7 @@ describe('GET /api/cron/prospect', () => {
   it('si ML bloquea los destacados: corrida fallida con el motivo, correo con la línea arriba y aviso al healthcheck', async () => {
     stubMl(() => json(403, { blocked_by: 'PolicyAgent', status: 403, code: BLOCK_CODE }));
 
-    const res = await prospectRoute(request());
+    const res = await prospectRoute(request('?fuente=destacados'));
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body).toMatchObject({ ok: false, highlighted: 0, inserted: 0 });
@@ -429,7 +429,7 @@ describe('GET /api/cron/prospect', () => {
     mocks.rows.products = [{ ml_product_id: 'MLC777', ml_family_id: null, price: 50_000 }];
     stubMl(() => json(200, { content: [{ id: 'MLC777', type: 'PRODUCT', position: 1 }] }));
 
-    const res = await prospectRoute(request());
+    const res = await prospectRoute(request('?fuente=destacados'));
     expect(res.status).toBe(200);
     const body = await res.json();
     // Sin ?fuente=, la de siempre.
@@ -453,7 +453,7 @@ describe('GET /api/cron/prospect', () => {
         : json(200, { content: [{ id: 'MLC777', type: 'PRODUCT', position: 1 }] })
     );
 
-    const res = await prospectRoute(request());
+    const res = await prospectRoute(request('?fuente=destacados'));
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
@@ -464,7 +464,7 @@ describe('GET /api/cron/prospect', () => {
   it('una corrida de prueba (?dry=1) dice lo mismo, sin bitácora, correo ni healthcheck', async () => {
     stubMl(() => json(403, { status: 403, code: BLOCK_CODE }));
 
-    const res = await prospectRoute(request('?dry=1'));
+    const res = await prospectRoute(request('?dry=1&fuente=destacados'));
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body).toMatchObject({ ok: false, dry_run: true, digest: { ok: true, skipped: 'dry_run' } });
@@ -474,11 +474,12 @@ describe('GET /api/cron/prospect', () => {
     expect(ping).toHaveBeenCalledWith(undefined, false);
   });
 
-  describe('con ?fuente=busquedas (lo más buscado)', () => {
+  describe('lo más buscado (la fuente de cada día)', () => {
     it('guarda hasta 40 candidatos, marcados como de búsquedas y sin puesto de más vendidos', async () => {
       stubSearchMl();
 
-      const res = await prospectRoute(request('?fuente=busquedas'));
+      // Sin ?fuente=, como la llama el cron cada día: lo más buscado.
+      const res = await prospectRoute(request());
       expect(res.status).toBe(200);
       const body = await res.json();
       // 7 subcategorías × 4 búsquedas × 3 fichas, todas revisadas (el tope de esta fuente es 600).

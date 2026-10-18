@@ -9,14 +9,16 @@ Cada push a `main` se publica solo en producción.
 
 ## Cómo funciona
 
-1. **Prospección (una vez al día).** `/api/cron/prospect` recorre los
-   productos destacados de Mercado Libre en las categorías que sigue el
-   sitio, descarta lo que ya conoce o no conviene (vendedor sin reputación
-   verde, comisión baja, etc.) y deja el resto en la cola de candidatos
-   (`product_candidates`). Al terminar manda el correo diario con lo que
-   entró y lo que falta revisar. Si Mercado Libre no deja leer las listas
-   (desde el 14-10-2026 responde 403 a los destacados), la corrida queda
-   como fallida en `cron_runs` y el correo lo dice arriba.
+1. **Prospección (una vez al día).** `/api/cron/prospect` toma lo más
+   buscado en Mercado Libre en las categorías que sigue el sitio, busca esas
+   palabras en el catálogo de ML dentro del tipo de producto que corresponde,
+   descarta lo que ya conoce o no conviene (sin vendedor, vendedor sin
+   reputación verde, comisión baja, etc.) y deja hasta 40 en la cola de
+   candidatos (`product_candidates`). Al terminar manda el correo diario con
+   lo que entró y lo que falta revisar. Hasta el 13-10-2026 usaba la lista
+   de más vendidos, que ML bloqueó (403, también con token de usuario); sigue
+   disponible con `?fuente=destacados`. Si ML no deja leer la fuente, la
+   corrida queda como fallida en `cron_runs` y el correo lo dice arriba.
 2. **Aprobación en el admin.** En `/admin/candidatos` los candidatos se
    aprueban o rechazan, normalmente en bloque: nadie revisa ni prueba cada
    producto. Aprobar los publica en `products` con su link de afiliado
