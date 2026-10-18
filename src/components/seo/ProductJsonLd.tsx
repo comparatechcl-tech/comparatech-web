@@ -14,17 +14,16 @@ export function jsonLdString(data: unknown): string {
 }
 
 /**
- * Dato estructurado de la ficha.
+ * La oferta de un producto, la misma en la ficha y en la página de su modelo.
  *
  * Solo lo que es cierto hoy: si el producto está fuera de venta se declara
  * OutOfStock y sin link de compra (un link a una oferta que no existe es
- * justo lo que Google penaliza). Nunca aggregateRating ni review: no tenemos
- * reseñas propias, y copiar las de ML sería inventarlas.
+ * justo lo que Google penaliza).
  */
-export function ProductJsonLd({ product }: { product: Product }) {
+export function productOffer(product: Product) {
   const freeShipping = product.offer_info?.free_shipping === true;
 
-  const offer = {
+  return {
     '@type': 'Offer',
     priceCurrency: 'CLP',
     price: product.price,
@@ -45,6 +44,14 @@ export function ProductJsonLd({ product }: { product: Product }) {
         }
       : {}),
   };
+}
+
+/**
+ * Dato estructurado de la ficha. Nunca aggregateRating ni review: no tenemos
+ * reseñas propias, y copiar las de ML sería inventarlas.
+ */
+export function ProductJsonLd({ product }: { product: Product }) {
+  const offer = productOffer(product);
 
   const jsonLd = {
     '@context': 'https://schema.org',

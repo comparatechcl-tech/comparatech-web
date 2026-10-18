@@ -39,6 +39,7 @@ const PLACEMENT_LABELS: Record<Placement, string> = {
   comparador: 'Comparador',
   social: 'Página para redes (/hoy)',
   'black-friday': 'Black Friday',
+  modelo: 'Página de un modelo',
   otro: 'Otro',
 };
 

@@ -23,6 +23,7 @@ export const PLACEMENTS = [
   'comparador',
   'social',
   'black-friday',
+  'modelo',
   'otro',
 ] as const;
 
@@ -87,6 +88,9 @@ export function placementFromPath(pathname: string): Placement {
       return 'social';
     case 'black-friday':
       return 'black-friday';
+    case 'modelo':
+      // Las páginas de cada modelo (/modelo/iphone-17).
+      return 'modelo';
     default:
       return 'otro';
   }

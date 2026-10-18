@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { CircleAlert } from 'lucide-react';
@@ -25,9 +26,10 @@ import { shortProductName, truncateAtWord } from '@/lib/text';
 import { seoProductName, seoProductTitle } from '@/lib/seo-title';
 import { formatCLP, formatDayMonth, formatDiscountPct } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
-import { reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
+import { isPastInactiveGrace, reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
 import { MIN_DEAL_DISCOUNT, discountOf } from '@/lib/deal-rank';
 import { domainLabel, indexableTypes, typePath, typeSlug } from '@/lib/category-listing';
+import { modelOf, modelPath } from '@/lib/models';
 import type { Product } from '@/lib/types';
 
 /**
@@ -65,14 +67,6 @@ export async function generateStaticParams() {
 // la primera vez que alguien entra a su ficha (dynamicParams por defecto).
 export const revalidate = 300;
 
-/**
- * Cuánto tiempo sigue publicada la ficha de un producto sin vendedores.
- * Casi siempre vuelve solo en días (el cron lo reactiva apenas aparece un
- * vendedor); pasado este plazo es un producto descontinuado y la ficha deja
- * de tener sentido, así que pasa a 404 y Google la saca del índice.
- */
-const INACTIVE_GRACE_DAYS = 60;
-
 /** Lo que ve el comprador según por qué el producto salió de venta. */
 const INACTIVE_MESSAGES: Record<InactiveReason, string> = {
   sin_ganador: 'Hoy no hay vendedores ofreciendo este producto en Mercado Libre.',
@@ -93,17 +87,13 @@ function inactiveMessage(reason: Product['inactive_reason']): string {
   return reason && reason in INACTIVE_MESSAGES ? INACTIVE_MESSAGES[reason] : INACTIVE_FALLBACK;
 }
 
-/** ¿Lleva tanto tiempo fuera de venta que ya no vale la pena mostrarlo? */
-function isExpired(product: Product): boolean {
-  if (product.is_active || !product.inactive_since) return false;
-  const since = new Date(product.inactive_since).getTime();
-  if (Number.isNaN(since)) return false;
-  return Date.now() - since > INACTIVE_GRACE_DAYS * 86_400_000;
-}
-
+/**
+ * El producto, si su ficha se muestra: a la venta, o fuera de venta hace
+ * menos de INACTIVE_GRACE_DAYS (lib/inactive-reasons). Después, 404.
+ */
 async function loadProduct(slug: string): Promise<Product | null> {
   const product = await getProductBySlugAnyStatus(slug);
-  return product && !isExpired(product) ? product : null;
+  return product && !isPastInactiveGrace(product) ? product : null;
 }
 
 function categoryNameOf(product: Product): string {
@@ -204,15 +194,27 @@ export default async function ProductoPage({
     catalog.filter((p) => p.category === product.category),
     { slug: product.category, name: categoryName },
   ).find((t) => t.slug === productType);
+  // Si es una versión de un modelo con página (lib/models), el modelo va en
+  // las migas ("… › Celulares › iPhone 17 › …") y con un link junto a las
+  // otras versiones: es la página que junta todas.
+  const model = modelOf(product);
   const breadcrumbs = (
     <Breadcrumbs
       items={[
         { name: 'Inicio', href: '/' },
         { name: categoryName, href: `/categoria/${product.category}` },
         ...(typeCrumb ? [{ name: typeCrumb.label, href: typePath(product.category, typeCrumb.slug) }] : []),
+        ...(model ? [{ name: model.name, href: modelPath(model.slug) }] : []),
         { name: short },
       ]}
     />
+  );
+  const modelLink = model && (
+    <p className="mt-6 text-sm">
+      <Link href={modelPath(model.slug)} className="font-medium text-accent hover:underline">
+        Ver todas las versiones de {model.name} y su historial de precios
+      </Link>
+    </p>
   );
 
   // Ficha sin vendedores: sigue respondiendo 200 e indexable, sin botón de
@@ -259,6 +261,7 @@ export default async function ProductoPage({
         <ProductAlternatives alternatives={alternatives} title="Alternativas disponibles" highlight />
 
         <VariantLinks variants={variantLinks} />
+        {modelLink}
 
         <PriceHistory productId={product.id} name={short} price={product.price} soldOutSince={product.inactive_since} />
 
@@ -333,6 +336,7 @@ export default async function ProductoPage({
       </div>
 
       <VariantLinks variants={variantLinks} />
+      {modelLink}
 
       <ProductAlternatives
         alternatives={alternatives}

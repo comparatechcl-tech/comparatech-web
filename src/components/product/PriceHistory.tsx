@@ -62,7 +62,7 @@ export async function PriceHistory({
       </h2>
       <p className="text-sm leading-relaxed text-muted">{lead}</p>
 
-      <Chart summary={summary} price={price} soldOut={soldOut} />
+      <PriceChart summary={summary} price={price} soldOut={soldOut} />
       {!neverChanged && <Numbers summary={summary} price={price} soldOut={soldOut} />}
       {!soldOut && summary.changes48h >= BUSY_CHANGES_48H && (
         <p className="mt-3 text-xs text-muted">
@@ -80,7 +80,8 @@ export async function PriceHistory({
   );
 }
 
-function Chart({ summary, price, soldOut }: { summary: PriceHistorySummary; price: number; soldOut: boolean }) {
+/** El gráfico del historial. Lo usa también la página de cada modelo (ModelPriceHistory). */
+export function PriceChart({ summary, price, soldOut }: { summary: PriceHistorySummary; price: number; soldOut: boolean }) {
   const { line, area, averageY } = chartPaths(summary, WIDTH, HEIGHT);
   const flat = summary.min === summary.max;
   const label = flat

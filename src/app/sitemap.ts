@@ -4,6 +4,7 @@ import { getLastPriceChanges } from '@/lib/queries/price-history';
 import { getPopulatedCategories } from '@/lib/categories';
 import { indexableTypes, productsOfType, typePath } from '@/lib/category-listing';
 import { latestDate, productLastModified } from '@/lib/sitemap-dates';
+import { MODELS, modelPath, versionsOf } from '@/lib/models';
 import { SITE_URL } from '@/lib/site';
 import type { Product } from '@/lib/types';
 
@@ -60,6 +61,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         priority: 0.7,
         ...withDate(latestOf(productsOfType(inCategory, t.slug))),
       }));
+    }),
+    // Las páginas de modelo (lib/models) con alguna versión a la venta, como
+    // las fichas: una sin ninguna sigue publicada, pero no se ofrece.
+    ...MODELS.flatMap((m) => {
+      const onSale = versionsOf(m, products);
+      if (onSale.length === 0) return [];
+      return [
+        {
+          url: `${SITE_URL}${modelPath(m.slug)}`,
+          changeFrequency: 'daily' as const,
+          priority: 0.8,
+          ...withDate(latestOf(onSale)),
+        },
+      ];
     }),
   ];
 

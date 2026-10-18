@@ -8,6 +8,7 @@ import { resolveOutboundUrl } from '@/lib/outbound';
 import { normalizeName } from '@/lib/text';
 import { pickAlternatives } from '@/lib/search';
 import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
+import { INACTIVE_GRACE_DAYS, isPastInactiveGrace } from '@/lib/inactive-reasons';
 
 /**
  * Capa de acceso a datos de productos, siempre desde la tabla `products`.
@@ -184,6 +185,61 @@ function withOutbound(products: Product[], settings: Awaited<ReturnType<typeof g
 export async function getAllProducts(): Promise<Product[]> {
   const [products, settings] = await Promise.all([fetchActiveProducts(), getAffiliateSettings()]);
   return withOutbound(products, settings);
+}
+
+/** Productos por lectura de los que están fuera de venta: hoy son decenas. */
+const PAUSED_PAGE = 500;
+const PAUSED_MAX_PAGES = 4;
+
+/**
+ * Los productos visibles que hoy no están a la venta (sin vendedor, o con
+ * uno sin reputación verde) y cuya ficha sigue publicada: los que salieron
+ * de venta hace menos de INACTIVE_GRACE_DAYS (lib/inactive-reasons). Para
+ * las páginas de modelo, que muestran esas versiones con su último precio.
+ *
+ * Se guarda 5 minutos o hasta que la revisión de precios invalide
+ * 'catalog'. Son decenas de filas, muy lejos de los 2 MB del caché de datos
+ * de Vercel. Trae inactive_reason e inactive_since: no se pasan a
+ * componentes de cliente.
+ */
+const readPausedProducts = unstable_cache(
+  async (): Promise<Product[]> => {
+    const supabase = requireSupabase();
+    const since = new Date(Date.now() - INACTIVE_GRACE_DAYS * 86_400_000).toISOString();
+    const all: Product[] = [];
+    for (let page = 0; page < PAUSED_MAX_PAGES; page++) {
+      const from = page * PAUSED_PAGE;
+      const { data, error } = await selectWithFallback((columns, excludeDeleted) => {
+        let query = supabase
+          .from('products')
+          .select(`${columns},${STATUS_COLUMNS}`)
+          .eq('is_active', false)
+          .eq('is_hidden', false)
+          // Sin fecha de salida: de antes de que se guardara; la ficha se sigue mostrando.
+          .or(`inactive_since.is.null,inactive_since.gte.${since}`);
+        if (excludeDeleted) query = query.is('deleted_at', null);
+        return query.order('id', { ascending: true }).range(from, from + PAUSED_PAGE - 1);
+      });
+      if (error) throw new Error(`No se pudo leer los productos fuera de venta: ${error.message}`);
+      const rows = (data ?? []) as Product[];
+      all.push(...rows);
+      if (rows.length < PAUSED_PAGE) break;
+    }
+    return all;
+  },
+  ['paused-v1'],
+  { revalidate: 300, tags: ['catalog'] }
+);
+
+const fetchPausedProducts = cache(() => readPausedProducts());
+
+/** Los productos fuera de venta cuya ficha sigue publicada (ver readPausedProducts). */
+export async function getPausedProducts(): Promise<Product[]> {
+  const [products, settings] = await Promise.all([fetchPausedProducts(), getAffiliateSettings()]);
+  return withOutbound(
+    products.filter((p) => !isPastInactiveGrace(p)),
+    settings
+  );
 }
 
 /**

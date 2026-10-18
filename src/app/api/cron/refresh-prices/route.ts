@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { revalidatePath, revalidateTag } from 'next/cache';
 import { notifyIndexNow, type IndexNowResult } from '@/lib/indexnow';
+import { modelPathsForSlugs } from '@/lib/models';
 import { SITE_URL } from '@/lib/site';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
@@ -361,14 +362,19 @@ export async function GET(req: NextRequest) {
       revalidateTag('catalog');
     }
 
-    // Bing (IndexNow): las fichas cuyo precio o disponibilidad cambió. Con
-    // tiempo se avisa acá y queda en la bitácora; sin tiempo, después de
-    // responder. Que falle no cambia nada: igual están en el sitemap.
+    // Bing (IndexNow): las fichas cuyo precio o disponibilidad cambió, y las
+    // páginas de sus modelos. Con tiempo se avisa acá y queda en la
+    // bitácora; sin tiempo, después de responder. Que falle no cambia nada:
+    // igual están en el sitemap.
     const slugById = new Map(rows.map((r) => [r.id, r.slug]));
-    const changedUrls = priorityOutcomes(toWrite)
+    const changedSlugs = priorityOutcomes(toWrite)
       .map((o) => slugById.get(o.id))
-      .filter((slug): slug is string => Boolean(slug))
-      .map((slug) => `${SITE_URL}/producto/${slug}`);
+      .filter((slug): slug is string => Boolean(slug));
+    const changedUrls = [
+      ...changedSlugs.map((slug) => `${SITE_URL}/producto/${slug}`),
+      // Y las páginas de modelo que muestran esos precios (lib/models).
+      ...modelPathsForSlugs(changedSlugs).map((path) => `${SITE_URL}${path}`),
+    ];
     let indexnow: IndexNowResult | { en_segundo_plano: number } = { omitido: 'nada que avisar' };
     if (changedUrls.length > 0) {
       if (!late && !outOfTime()) {

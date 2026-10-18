@@ -32,6 +32,7 @@ describe('placementFromPath', () => {
     ['/comparador', 'comparador'],
     ['/hoy', 'social'],
     ['/black-friday', 'black-friday'],
+    ['/modelo/iphone-17', 'modelo'],
     ['/nosotros', 'otro'],
     ['/privacidad', 'otro'],
   ])('%s → %s', (path, expected) => {

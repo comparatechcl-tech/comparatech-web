@@ -45,6 +45,26 @@ export const UNKNOWN_REASON: ReasonInfo = {
   auto: true,
 };
 
+/**
+ * Cuánto tiempo sigue publicada la ficha de un producto sin vendedores.
+ * Casi siempre vuelve solo en días (el cron lo reactiva apenas aparece un
+ * vendedor); pasado este plazo es un producto descontinuado y la ficha deja
+ * de tener sentido, así que pasa a 404 y Google la saca del índice. La
+ * página de su modelo deja de mostrarlo al mismo tiempo.
+ */
+export const INACTIVE_GRACE_DAYS = 60;
+
+/** ¿Lleva tanto tiempo fuera de venta que ya no vale la pena mostrarlo? */
+export function isPastInactiveGrace(
+  product: { is_active: boolean; inactive_since?: string | null },
+  now: number = Date.now()
+): boolean {
+  if (product.is_active || !product.inactive_since) return false;
+  const since = new Date(product.inactive_since).getTime();
+  if (Number.isNaN(since)) return false;
+  return now - since > INACTIVE_GRACE_DAYS * 86_400_000;
+}
+
 export function reasonInfo(reason: string | null | undefined): ReasonInfo {
   return reason && reason in REASON_LABELS
     ? REASON_LABELS[reason as InactiveReason]
