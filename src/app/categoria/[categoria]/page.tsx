@@ -1,26 +1,22 @@
-import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getProductsByCategory } from '@/lib/queries/products';
 import { getSiteCategoriesWithCounts } from '@/lib/queries/site-categories';
 import {
   CATEGORY_PAGE,
-  SORT_OPTIONS,
   categoryIntro,
   categoryMetaDescription,
-  filterByType,
   itemListJsonLd,
   parsePageCount,
   parseSortOrder,
   sortProducts,
   summarizeCategory,
   typeChips,
-  type SortOrder,
+  typePath,
 } from '@/lib/category-listing';
 import { SITE_URL } from '@/lib/site';
-import { ProductGrid } from '@/components/product/ProductGrid';
-import { PendingLabel } from '@/components/layout/PendingLabel';
 import { IconTile, categoryIconStyle } from '@/components/brand/CategoryIcon';
+import { ListingBody, listingHref } from './ListingBody';
 
 type Params = Promise<{ categoria: string }>;
 type SearchParams = Promise<{
@@ -55,8 +51,8 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const products = await getProductsByCategory(categoria);
   return {
     title: `${info.name} — Precios y ofertas en Chile`,
-    // El canonical no lleva ?orden=, ?tipo= ni ?pagina=: son la misma lista
-    // en otro orden o más larga, no páginas distintas.
+    // El canonical no lleva ?orden= ni ?pagina=: son la misma lista en otro
+    // orden o más larga, no páginas distintas.
     alternates: { canonical: `/categoria/${categoria}` },
     description: categoryMetaDescription(info.name, summarizeCategory(products)),
   };
@@ -64,31 +60,6 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 
 function single(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
-}
-
-/**
- * URL de un chip: conserva el otro filtro y omite los valores por defecto.
- * Los chips no llevan `pagina`: al cambiar de tipo o de orden la lista
- * vuelve a su primera tanda.
- */
-function chipHref(categoria: string, orden: SortOrder, tipo: string | undefined, pagina = 1): string {
-  const qs = new URLSearchParams();
-  if (orden !== 'relevancia') qs.set('orden', orden);
-  if (tipo) qs.set('tipo', tipo);
-  if (pagina > 1) qs.set('pagina', String(pagina));
-  const query = qs.toString();
-  return `/categoria/${categoria}${query ? `?${query}` : ''}`;
-}
-
-function chipClass(active: boolean): string {
-  // whitespace-nowrap: el chip va dentro de un <li>, que es el que se achica
-  // cuando la fila no cabe. Sin esto, un nombre de varias palabras ("Lectores
-  // de código de barras") se partía en tres líneas en vez de deslizarse.
-  return `inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
-    active
-      ? 'border-accent bg-accent/10 text-accent'
-      : 'border-border bg-surface text-muted hover:border-accent/40 hover:text-fg'
-  }`;
 }
 
 export default async function CategoriaPage({
@@ -106,14 +77,18 @@ export default async function CategoriaPage({
   const orden = parseSortOrder(query.orden);
   const products = await getProductsByCategory(categoria);
   const chips = typeChips(products);
-  const tipo = chips.some((c) => c.slug === single(query.tipo)) ? single(query.tipo) : undefined;
-  const listed = sortProducts(filterByType(products, tipo), orden);
+
+  // El filtro viejo (?tipo=audifonos) es ahora la página del tipo. Los links
+  // ya publicados o guardados llevan ahí, con redirección permanente.
+  const tipo = single(query.tipo);
+  if (tipo && chips.some((c) => c.slug === tipo)) permanentRedirect(listingHref(typePath(categoria, tipo), orden));
+
+  const listed = sortProducts(products, orden);
   // Con todos los productos en una sola grilla, la página crecía con el
   // catálogo (Computación pesaba 1 MB). Se muestra de a tandas.
   const pagina = parsePageCount(query.pagina, listed.length);
   const shown = listed.slice(0, pagina * CATEGORY_PAGE);
-  const remaining = listed.length - shown.length;
-  const summary = summarizeCategory(products);
+  const path = `/categoria/${categoria}`;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
@@ -127,81 +102,18 @@ export default async function CategoriaPage({
         <IconTile {...categoryIconStyle(categoria)} size="base" />
         <h1 className="font-heading text-2xl font-bold sm:text-3xl">{info.name}</h1>
       </div>
-      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{categoryIntro(summary)}</p>
+      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{categoryIntro(summarizeCategory(products))}</p>
 
-      <div className="mt-6 flex flex-col gap-3">
-        {chips.length > 0 && (
-          <nav aria-label="Filtrar por tipo" className="-mx-4 overflow-x-auto px-4">
-            <ul className="flex gap-2">
-              <li>
-                <Link
-                  href={chipHref(categoria, orden, undefined)}
-                  aria-current={!tipo ? 'page' : undefined}
-                  className={chipClass(!tipo)}
-                >
-                  Todos
-                </Link>
-              </li>
-              {chips.map((c) => (
-                <li key={c.slug}>
-                  <Link
-                    href={chipHref(categoria, orden, c.slug)}
-                    aria-current={tipo === c.slug ? 'page' : undefined}
-                    className={chipClass(tipo === c.slug)}
-                  >
-                    {c.label}
-                    <span className="text-[10px] opacity-70">{c.count}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        )}
-
-        <nav aria-label="Ordenar productos" className="-mx-4 overflow-x-auto px-4">
-          <ul className="flex items-center gap-2">
-            <li className="shrink-0 text-xs text-muted">Ordenar por:</li>
-            {SORT_OPTIONS.map((o) => (
-              <li key={o.value}>
-                <Link
-                  href={chipHref(categoria, o.value, tipo)}
-                  aria-current={orden === o.value ? 'page' : undefined}
-                  className={chipClass(orden === o.value)}
-                >
-                  {o.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      </div>
-
-      <div className="mt-6">
-        <ProductGrid products={shown} placement="categoria" eagerImages={4} />
-      </div>
-
-      {remaining > 0 && (
-        <div className="mt-8 flex flex-col items-center gap-2">
-          {/* Un link y no un botón: funciona sin JavaScript y los buscadores
-              pueden seguirlo. `replace` y `scroll={false}` hacen que los
-              productos nuevos aparezcan debajo sin mover la página ni sumar
-              un paso al botón "atrás". */}
-          <Link
-            href={chipHref(categoria, orden, tipo, pagina + 1)}
-            replace
-            scroll={false}
-            prefetch={false}
-            className="inline-flex min-h-11 items-center rounded-full border border-accent/40 px-6 py-2.5 text-sm font-semibold text-accent transition hover:bg-accent/10"
-          >
-            <PendingLabel>
-              Ver {Math.min(CATEGORY_PAGE, remaining)} {remaining === 1 ? 'producto' : 'productos'} más
-            </PendingLabel>
-          </Link>
-          <p className="text-xs text-muted">
-            Mostrando {shown.length} de {listed.length}
-          </p>
-        </div>
-      )}
+      <ListingBody
+        chips={chips}
+        allHref={path}
+        typeHref={(slug) => typePath(categoria, slug)}
+        sortHref={(order) => listingHref(path, order)}
+        orden={orden}
+        shown={shown}
+        total={listed.length}
+        moreHref={listingHref(path, orden, pagina + 1)}
+      />
     </div>
   );
 }

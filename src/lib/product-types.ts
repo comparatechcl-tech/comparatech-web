@@ -123,9 +123,16 @@ export function domainLabel(domainId: string | null | undefined): string {
   return (domainId && DOMAIN_LABELS[domainId]) || OTHER_TYPE_LABEL;
 }
 
-/** 'Audífonos' → 'audifonos': lo que va en ?tipo=. */
+/** 'Audífonos' → 'audifonos': lo que va en la dirección del tipo (/categoria/audio/audifonos). */
 export function typeSlug(label: string): string {
   return stripDiacritics(label.toLowerCase())
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+const TYPE_SLUGS = new Set([...Object.values(DOMAIN_LABELS), OTHER_TYPE_LABEL].map(typeSlug));
+
+/** ¿Es la dirección de algún tipo que el sitio conoce (aunque hoy no tenga productos)? */
+export function isTypeSlug(slug: string): boolean {
+  return TYPE_SLUGS.has(slug);
 }

@@ -14,6 +14,13 @@ import {
   summarizeCategory,
   typeChips,
   typeSlug,
+  MIN_TYPE_PAGE,
+  indexableTypes,
+  isTypeSlug,
+  productsOfType,
+  typeIsCategory,
+  typeMetaDescription,
+  typePath,
 } from '@/lib/category-listing';
 
 // lib/queries/products usa cache() de React 19 (el que trae Next). El React
@@ -223,5 +230,47 @@ describe('textos', () => {
     expect(data.itemListElement).toHaveLength(CATEGORY_PAGE);
     expect(data.itemListElement[0]).toMatchObject({ position: 1, url: 'https://ejemplo.cl/producto/p0' });
     expect(data.itemListElement[CATEGORY_PAGE - 1].position).toBe(CATEGORY_PAGE);
+  });
+});
+
+describe('páginas por tipo', () => {
+  const many = (n: number, domain: string, prefix: string) =>
+    Array.from({ length: n }, (_, i) => product({ slug: `${prefix}${i}`, ml_domain_id: domain, price: 10000 + i * 1000 }));
+  const audio = { slug: 'audio', name: 'Audio' };
+  // 6 audífonos, 5 parlantes y 7 sin tipo conocido.
+  const products = [...many(6, 'MLC-HEADPHONES', 'h'), ...many(5, 'MLC-SPEAKERS', 's'), ...many(7, 'MLC-RARO', 'o')];
+
+  it('la dirección de un tipo cuelga de su categoría', () => {
+    expect(typePath('audio', 'audifonos')).toBe('/categoria/audio/audifonos');
+  });
+
+  it('se indexan los tipos con 6 productos o más, nunca "Otros"', () => {
+    expect(MIN_TYPE_PAGE).toBe(6);
+    expect(indexableTypes(products, audio)).toEqual([{ slug: 'audifonos', label: 'Audífonos', count: 6 }]);
+  });
+
+  it('no se indexa el tipo que se llama como su categoría, ni los de una categoría de un solo tipo', () => {
+    const celulares = { slug: 'celulares', name: 'Celulares' };
+    const phones = [...many(8, 'MLC-CELLPHONES', 'c'), ...many(6, 'MLC-TELEPHONES', 't')];
+    expect(typeIsCategory({ slug: 'celulares', label: 'Celulares' }, celulares)).toBe(true);
+    expect(indexableTypes(phones, celulares).map((t) => t.slug)).toEqual(['telefonos-fijos']);
+    expect(indexableTypes(many(9, 'MLC-HEADPHONES', 'h'), audio)).toEqual([]);
+  });
+
+  it('los productos de un tipo, sin caer a todos si no hay', () => {
+    expect(productsOfType(products, 'parlantes')).toHaveLength(5);
+    expect(productsOfType(products, 'televisores')).toEqual([]);
+  });
+
+  it('reconoce las direcciones de tipos conocidos aunque hoy no tengan productos', () => {
+    expect(isTypeSlug('televisores')).toBe(true);
+    expect(isTypeSlug('otros')).toBe(true);
+    expect(isTypeSlug('inventado')).toBe(false);
+  });
+
+  it('meta description con el nombre del tipo, conteo y rango', () => {
+    expect(typeMetaDescription('Audífonos', summarizeCategory(productsOfType(products, 'audifonos')))).toBe(
+      'Audífonos en Chile: 6 productos de Mercado Libre, desde $10.000 hasta $15.000. Precios revisados varias veces al día.',
+    );
   });
 });

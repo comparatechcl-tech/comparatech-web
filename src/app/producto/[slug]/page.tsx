@@ -26,6 +26,7 @@ import { formatCLP, formatDayMonth, formatDiscountPct } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
 import { reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
 import { MIN_DEAL_DISCOUNT, discountOf } from '@/lib/deal-rank';
+import { domainLabel, indexableTypes, typePath, typeSlug } from '@/lib/category-listing';
 import type { Product } from '@/lib/types';
 
 /**
@@ -195,11 +196,19 @@ export default async function ProductoPage({
   const short = shortProductName(product.name);
   const href = buyUrl(product);
   const variantLinks = variants.map(toVariantLink);
+  // El tipo va en la ruta si su página se indexa: así cada ficha enlaza a su
+  // listado ("Inicio › Audio › Audífonos › …") y Google ve la jerarquía.
+  const productType = typeSlug(domainLabel(product.ml_domain_id));
+  const typeCrumb = indexableTypes(
+    catalog.filter((p) => p.category === product.category),
+    { slug: product.category, name: categoryName },
+  ).find((t) => t.slug === productType);
   const breadcrumbs = (
     <Breadcrumbs
       items={[
         { name: 'Inicio', href: '/' },
         { name: categoryName, href: `/categoria/${product.category}` },
+        ...(typeCrumb ? [{ name: typeCrumb.label, href: typePath(product.category, typeCrumb.slug) }] : []),
         { name: short },
       ]}
     />

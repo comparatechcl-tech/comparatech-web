@@ -8,11 +8,12 @@
 import type { Product } from '@/lib/types';
 import { formatCLP } from '@/lib/format';
 import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
-import { domainLabel, OTHER_TYPE_LABEL, typeSlug } from '@/lib/product-types';
+import { domainLabel, isTypeSlug, OTHER_TYPE_LABEL, typeSlug } from '@/lib/product-types';
+import { normalizeName } from '@/lib/text';
 
 // Los nombres de los tipos viven en lib/product-types, que también usa el
 // comparador desde el navegador (este módulo importa código del servidor).
-export { domainLabel, OTHER_TYPE_LABEL, typeSlug };
+export { domainLabel, isTypeSlug, OTHER_TYPE_LABEL, typeSlug };
 
 // Los valores van en ?orden= y no se cambian (hay links publicados); el
 // rótulo dice lo que el orden hace de verdad: 'relevancia' es lo agregado
@@ -103,8 +104,60 @@ export function typeChips(products: Product[]): TypeChip[] {
 /** Productos del tipo pedido. Un ?tipo= que no existe no filtra nada. */
 export function filterByType(products: Product[], tipo: string | undefined): Product[] {
   if (!tipo) return products;
-  const filtered = products.filter((p) => typeSlug(domainLabel(p.ml_domain_id)) === tipo);
+  const filtered = productsOfType(products, tipo);
   return filtered.length > 0 ? filtered : products;
+}
+
+/** Productos de un tipo; ninguno si el tipo no está. */
+export function productsOfType(products: Product[], tipo: string): Product[] {
+  return products.filter((p) => typeSlug(domainLabel(p.ml_domain_id)) === tipo);
+}
+
+// ---------------------------------------------------------------------------
+// Páginas por tipo (/categoria/audio/audifonos).
+//
+// Hasta el 17-10-2026 un tipo era un filtro (?tipo=) de la página de la
+// categoría, con el mismo título, el mismo H1 y el canonical de la
+// categoría: para Google no existía una página de "audífonos", y dos tercios
+// del catálogo no tenían enlace desde un listado que se indexara. Ahora cada
+// tipo tiene su página, con el título que aprobó el dueño ("Audífonos —
+// Precios y ofertas en Chile"). Se indexan solo las que tienen contenido:
+// una página con dos productos es justo el contenido pobre que Google baja.
+
+/** Desde cuántos productos (sin variantes repetidas) se indexa la página de un tipo. */
+export const MIN_TYPE_PAGE = 6;
+
+/** La dirección de la página de un tipo. */
+export function typePath(categoria: string, tipo: string): string {
+  return `/categoria/${categoria}/${tipo}`;
+}
+
+/**
+ * ¿El tipo se llama como su categoría ("Celulares" dentro de Celulares)? Su
+ * página no se indexa: tendría el mismo título que la de la categoría y
+ * competiría con ella en las mismas búsquedas.
+ */
+export function typeIsCategory(type: { slug: string; label: string }, category: { slug: string; name: string }): boolean {
+  return type.slug === category.slug || normalizeName(type.label) === normalizeName(category.name);
+}
+
+/**
+ * Los tipos de una categoría cuya página se indexa: MIN_TYPE_PAGE productos
+ * o más, ni "Otros" ni el que se llama como la categoría. Ninguno si la
+ * categoría tiene un solo tipo (su página ya es la del tipo).
+ */
+export function indexableTypes(products: Product[], category: { slug: string; name: string }): TypeChip[] {
+  return typeChips(products).filter(
+    (t) => t.count >= MIN_TYPE_PAGE && t.label !== OTHER_TYPE_LABEL && !typeIsCategory(t, category),
+  );
+}
+
+/** Meta description de la página de un tipo: conteo y rango de precios, como la de la categoría. */
+export function typeMetaDescription(label: string, summary: CategorySummary): string {
+  const { count, minPrice, maxPrice } = summary;
+  const range =
+    minPrice === maxPrice ? `a ${formatCLP(minPrice)}` : `desde ${formatCLP(minPrice)} hasta ${formatCLP(maxPrice)}`;
+  return `${label} en Chile: ${count} ${count === 1 ? 'producto' : 'productos'} de Mercado Libre, ${range}. Precios revisados varias veces al día.`;
 }
 
 /** "A", "A y B", "A, B y C". */

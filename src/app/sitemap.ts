@@ -1,7 +1,8 @@
 import { MetadataRoute } from 'next';
-import { getAllProducts, getDeals } from '@/lib/queries/products';
+import { collapseVariants, getAllProducts, getDeals } from '@/lib/queries/products';
 import { getLastPriceChanges } from '@/lib/queries/price-history';
 import { getPopulatedCategories } from '@/lib/categories';
+import { indexableTypes, productsOfType, typePath } from '@/lib/category-listing';
 import { latestDate, productLastModified } from '@/lib/sitemap-dates';
 import { SITE_URL } from '@/lib/site';
 import type { Product } from '@/lib/types';
@@ -40,6 +41,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.8,
       ...withDate(latestOf(products.filter((p) => p.category === c.slug))),
     })),
+    // Las páginas por tipo que se indexan (lib/category-listing). Se cuentan
+    // sin variantes repetidas, igual que en la página.
+    ...getPopulatedCategories(products).flatMap((c) => {
+      const inCategory = products.filter((p) => p.category === c.slug);
+      return indexableTypes(collapseVariants(inCategory), c).map((t) => ({
+        url: `${SITE_URL}${typePath(c.slug, t.slug)}`,
+        changeFrequency: 'daily' as const,
+        priority: 0.7,
+        ...withDate(latestOf(productsOfType(inCategory, t.slug))),
+      }));
+    }),
   ];
 
   const productRoutes: MetadataRoute.Sitemap = products.map((p) => ({
