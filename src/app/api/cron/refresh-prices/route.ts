@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { revalidatePath, revalidateTag } from 'next/cache';
+import { notifyIndexNow, type IndexNowResult } from '@/lib/indexnow';
+import { SITE_URL } from '@/lib/site';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
@@ -75,7 +77,8 @@ const ENRICHMENT_CUTOFF_MS = WRITE_DEADLINE_MS - 18_000;
 
 /** Columnas de la migración 0016: si se leen, decide() compara contra lo guardado. */
 const COLUMNS_0016 = 'offer_info, ml_category_id, ml_root_category';
-const REFRESH_COLUMNS = `${PRICED_COLUMNS}, name, brand, specs, description, ml_family_id, ml_domain_id, category`;
+// slug: para avisarle a Bing (IndexNow) qué fichas cambiaron.
+const REFRESH_COLUMNS = `${PRICED_COLUMNS}, slug, name, brand, specs, description, ml_family_id, ml_domain_id, category`;
 
 /** Sobre esta proporción de errores transitorios, la corrida cuenta como fallida. */
 const MAX_TRANSIENT_RATIO = 0.5;
@@ -271,6 +274,24 @@ export async function GET(req: NextRequest) {
       revalidateTag('catalog');
     }
 
+    // Bing (IndexNow): las fichas cuyo precio o disponibilidad cambió. Con
+    // tiempo se avisa acá y queda en la bitácora; sin tiempo, después de
+    // responder. Que falle no cambia nada: igual están en el sitemap.
+    const slugById = new Map(rows.map((r) => [r.id, (r as { slug?: string }).slug]));
+    const changedUrls = priorityOutcomes(toWrite)
+      .map((o) => slugById.get(o.id))
+      .filter((slug): slug is string => Boolean(slug))
+      .map((slug) => `${SITE_URL}/producto/${slug}`);
+    let indexnow: IndexNowResult | { en_segundo_plano: number } = { omitido: 'nada que avisar' };
+    if (changedUrls.length > 0) {
+      if (!late && !outOfTime()) {
+        indexnow = await notifyIndexNow(changedUrls);
+      } else {
+        after(async () => console.log('[indexnow]', await notifyIndexNow(changedUrls)));
+        indexnow = { en_segundo_plano: changedUrls.length };
+      }
+    }
+
     // Una escritura parcial sigue contando como corrida degradada.
     const ok = !late && isHealthy(summary, writeErrors);
     return finish(
@@ -286,6 +307,7 @@ export async function GET(req: NextRequest) {
         // que insistir (pasa en los primeros segundos de cada hora en punto).
         token_intentos: tokenAttempts,
         telegram,
+        indexnow,
         sitio_actualizado: visible,
         // 429/5xx/red por endpoint de ML: muestra si ML nos está limitando.
         errores_ml: mlErrorsThisRun(),
