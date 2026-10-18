@@ -5,8 +5,8 @@ import { SITE_URL } from '@/lib/site';
 
 /**
  * Link corto de un producto: comparatech.cl/p/78729874 lleva a su ficha (ver
- * lib/content/short-link). Se escribe a mano desde TikTok, YouTube o un
- * reel, donde el link no se puede tocar.
+ * lib/content/short-link). Los textos nuevos ya no lo llevan; sigue para los
+ * que se publicaron con él el 18-10-2026.
  *
  * ?src=corto queda guardado en la visita (UtmCapture), así Métricas cuenta
  * cuántas compras empiezan con un link corto. Un código que no existe, o de

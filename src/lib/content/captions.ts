@@ -12,7 +12,6 @@
 
 import { normalizeName } from '@/lib/text';
 import { socialProductName } from '@/lib/content/social-name';
-import { shortLinkText } from '@/lib/content/short-link';
 import { FORBIDDEN_WORDS } from '@/lib/social/interest-tables';
 
 export type CaptionChannel = 'instagram' | 'tiktok' | 'whatsapp' | 'telegram' | 'facebook';
@@ -29,8 +28,6 @@ export interface CaptionProduct {
   seller_reputation?: string | null;
   seller_sales_count?: number | null;
   offer_info?: { free_shipping?: boolean | null; is_full?: boolean | null } | null;
-  /** Para el link corto (lib/content/short-link): comparatech.cl/p/ y los dígitos. */
-  ml_product_id?: string | null;
   /** Para el nombre en redes (lib/content/social-name): tipo, marca y modelo cuando el nombre parte con un código. */
   brand?: string | null;
   ml_domain_id?: string | null;
@@ -55,29 +52,48 @@ export const BUY_LINK_PREFIX = '👉 Ver en Mercado Libre:';
 export const SITE_LINK_PREFIX = '🔎 Compara en ComparaTech:';
 /**
  * Comienzo de la línea de compra donde el texto no admite links (Instagram,
- * TikTok y los reels): dice dónde está el link y el link corto para
- * escribirlo (lib/content/short-link). Los textos de un reel la cambian por
- * la de su red.
+ * TikTok y los reels): dice dónde está el link (el del perfil) y el nombre
+ * del sitio. Los textos de un reel la cambian por la de su red.
  */
 const BUY_LINE_PREFIX = '🛒 ';
 
 /** Dónde está el link de compra en cada red donde no se puede tocar en el texto. */
 type BuyLineWhere = 'instagram' | 'tiktok' | 'facebook-reel' | 'youtube';
 
-function buyLine(product: CaptionProduct, siteUrl: string, where: BuyLineWhere): string {
-  const short = siteUrl ? shortLinkText(siteUrl, product.ml_product_id) : null;
+/**
+ * El sitio como se escribe ("comparatech.cl"), sin "https://" ni "www.", o
+ * null si `siteUrl` no es la dirección de un sitio público: en el computador
+ * y en las pruebas es localhost:3000, que no se le dice a nadie.
+ */
+function siteName(siteUrl: string): string | null {
+  try {
+    const { hostname, port } = new URL(siteUrl);
+    if (port || !hostname.includes('.') || /^[\d.]+$/.test(hostname)) return null;
+    return hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * La línea de compra: el link del perfil, que lleva a /hoy, y el nombre del
+ * sitio, fácil de recordar. Sin el link corto de cada producto
+ * (comparatech.cl/p/…): el dueño lo sacó el 18-10-2026, porque un link que no
+ * se puede tocar nadie lo escribe a mano.
+ */
+function buyLine(siteUrl: string, where: BuyLineWhere): string {
+  const site = siteUrl ? siteName(siteUrl) : null;
+  const orSite = site ? `, o búscalo en ${site}` : '';
   switch (where) {
     case 'instagram':
-      return short ? `🛒 Link de compra en nuestra bio, o escribe ${short}` : '🛒 Link de compra en nuestra bio';
+      return `🛒 Link de compra en nuestra bio${orSite}`;
     case 'tiktok':
       // TikTok todavía no deja link en el perfil (pide 1.000 seguidores o cuenta de empresa verificada).
-      return short ? `🛒 Para comprarlo, escribe ${short} en tu navegador` : '🛒 Para comprarlo, busca comparatech.cl';
+      return `🛒 Para comprarlo, búscalo en ${site ?? 'comparatech.cl'}`;
     case 'facebook-reel':
-      return short ? `🛒 Link de compra: ${short}, o en nuestro perfil` : '🛒 Link de compra en nuestro perfil';
+      return `🛒 Link de compra en nuestro perfil${orSite}`;
     case 'youtube':
-      return short
-        ? `🛒 Link de compra: ${short} (escríbelo en tu navegador), o en el perfil del canal`
-        : '🛒 Link de compra en el perfil del canal';
+      return `🛒 Link de compra en el perfil del canal${orSite}`;
   }
 }
 
@@ -265,10 +281,10 @@ export function buildCaption(product: CaptionProduct, channel: CaptionChannel, o
   lines.push(priceCheckedLine(product.price_checked_at));
   lines.push('');
 
-  // Instagram y TikTok no dejan links clicables en el texto: el link corto, para
-  // escribirlo, y en Instagram la bio, donde está /hoy.
+  // Instagram y TikTok no dejan links clicables en el texto: en Instagram, la
+  // bio (lleva a /hoy); en los dos, el nombre del sitio.
   if (channel === 'instagram' || channel === 'tiktok') {
-    lines.push(buyLine(product, opts.siteUrl, channel));
+    lines.push(buyLine(opts.siteUrl, channel));
   } else {
     lines.push(`${BUY_LINK_PREFIX} ${opts.link}`);
     lines.push(`${SITE_LINK_PREFIX} ${productPageUrl(opts.siteUrl, product.slug, channel)}`);
@@ -356,8 +372,8 @@ function withLinkLine(text: string, line: string): string {
  *
  * Ninguno lleva un link para tocar: en la descripción de un reel no se puede,
  * y en Facebook además la página puede tener un tope de publicaciones con
- * link. Todos llevan el link corto para escribirlo (`siteUrl`) y dicen dónde
- * está el link en el perfil, y conservan la hora en que se revisó el precio.
+ * link. Todos dicen dónde está el link en el perfil y, con `siteUrl`, el
+ * nombre del sitio, y conservan la hora en que se revisó el precio.
  */
 export function buildVideoTexts(product: CaptionProduct, now: Date, siteUrl = ''): VideoTexts {
   // Con estos dos canales buildCaption no escribe ni el link de compra ni el de la ficha.
@@ -367,9 +383,9 @@ export function buildVideoTexts(product: CaptionProduct, now: Date, siteUrl = ''
   return {
     instagram,
     tiktok,
-    facebook: withLinkLine(instagram, buyLine(product, siteUrl, 'facebook-reel')),
+    facebook: withLinkLine(instagram, buyLine(siteUrl, 'facebook-reel')),
     youtubeTitle: youtubeTitle(product),
-    youtubeDescription: withLinkLine(tiktok, buyLine(product, siteUrl, 'youtube')),
+    youtubeDescription: withLinkLine(tiktok, buyLine(siteUrl, 'youtube')),
   };
 }
 

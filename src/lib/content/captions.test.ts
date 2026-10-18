@@ -127,12 +127,19 @@ describe('buildCaption', () => {
     }
   });
 
-  it('donde el link no se puede tocar, el link corto para escribirlo (pedido del dueño, 18-10-2026)', () => {
-    const withId = { ...base, ml_product_id: 'MLC78729874' };
-    expect(buildCaption(withId, 'instagram', opts)).toContain('🛒 Link de compra en nuestra bio, o escribe comparatech.cl/p/78729874');
-    expect(buildCaption(withId, 'tiktok', opts)).toContain('🛒 Para comprarlo, escribe comparatech.cl/p/78729874 en tu navegador');
-    // Sin código de Mercado Libre, la línea sin link corto.
-    expect(buildCaption(base, 'instagram', opts)).toContain('🛒 Link de compra en nuestra bio');
+  it('donde el link no se puede tocar, el perfil y el nombre del sitio, sin el link corto (dueño, 18-10-2026)', () => {
+    // Los productos del sitio traen su código de Mercado Libre: igual no sale el link corto.
+    const withId = { ...base, ml_product_id: 'MLC78729874' } as CaptionProduct;
+    const instagram = buildCaption(withId, 'instagram', opts);
+    const tiktok = buildCaption(withId, 'tiktok', opts);
+    expect(instagram).toContain('🛒 Link de compra en nuestra bio, o búscalo en comparatech.cl');
+    expect(tiktok).toContain('🛒 Para comprarlo, búscalo en comparatech.cl');
+    for (const text of [instagram, tiktok]) expect(text).not.toMatch(/\/p\/|78729874/);
+    // En el computador el sitio es localhost: esa dirección no se escribe.
+    const local = { ...opts, siteUrl: 'http://localhost:3000' };
+    expect(buildCaption(base, 'instagram', local)).toContain('🛒 Link de compra en nuestra bio\n');
+    expect(buildCaption(base, 'tiktok', local)).toContain('🛒 Para comprarlo, búscalo en comparatech.cl');
+    expect(buildCaption(base, 'instagram', local)).not.toContain('localhost');
   });
 
   it('usa el nombre corto y avisa el envío gratis solo si es real', () => {
@@ -158,8 +165,9 @@ describe('buildVideoTexts', () => {
   const WEB_ADDRESS = /https?:|www\.|\.(cl|com|la|app|net|org)\b/i;
 
   it('Instagram y TikTok llevan el texto de siempre', () => {
-    expect(texts.instagram).toBe(buildCaption(base, 'instagram', opts));
-    expect(texts.tiktok).toBe(buildCaption(base, 'tiktok', opts));
+    const withSite = buildVideoTexts(base, opts.now, opts.siteUrl);
+    expect(withSite.instagram).toBe(buildCaption(base, 'instagram', opts));
+    expect(withSite.tiktok).toBe(buildCaption(base, 'tiktok', opts));
   });
 
   it('Facebook dice lo mismo que Instagram, mandando al perfil, sin link para tocar', () => {
@@ -179,15 +187,15 @@ describe('buildVideoTexts', () => {
     expect(different).toEqual(['🛒 Link de compra en nuestro perfil']);
   });
 
-  it('ningún texto de un reel lleva un link para tocar; con el sitio, llevan el link corto para escribirlo', () => {
+  it('ningún texto de un reel lleva un link para tocar ni el link corto; con el sitio, dicen su nombre', () => {
     for (const text of all) expect(text).not.toMatch(/https?:|www\./i);
-    const withShort = buildVideoTexts({ ...base, ml_product_id: 'MLC78729874' }, opts.now, 'https://www.comparatech.cl');
-    for (const text of [withShort.instagram, withShort.tiktok, withShort.facebook, withShort.youtubeDescription]) {
-      expect(text).toContain('comparatech.cl/p/78729874');
-      expect(text).not.toMatch(/https?:|www\./i);
+    const withSite = buildVideoTexts({ ...base, ml_product_id: 'MLC78729874' } as CaptionProduct, opts.now, 'https://www.comparatech.cl');
+    for (const text of [withSite.instagram, withSite.tiktok, withSite.facebook, withSite.youtubeDescription]) {
+      expect(text).toContain('búscalo en comparatech.cl');
+      expect(text).not.toMatch(/https?:|www\.|\/p\/|78729874/i);
     }
-    expect(withShort.facebook).toContain('🛒 Link de compra: comparatech.cl/p/78729874, o en nuestro perfil');
-    expect(withShort.youtubeTitle).not.toContain('comparatech.cl');
+    expect(withSite.facebook).toContain('🛒 Link de compra en nuestro perfil, o búscalo en comparatech.cl');
+    expect(withSite.youtubeTitle).not.toContain('comparatech.cl');
   });
 
   it('la descripción de YouTube es la de TikTok, diciendo dónde está el link de compra', () => {
@@ -196,10 +204,8 @@ describe('buildVideoTexts', () => {
     const tk = texts.tiktok.split('\n');
     const yt = texts.youtubeDescription.split('\n');
     expect(yt.filter((line, i) => line !== tk[i])).toEqual(['🛒 Link de compra en el perfil del canal']);
-    const withShort = buildVideoTexts({ ...base, ml_product_id: 'MLC78729874' }, opts.now, 'https://www.comparatech.cl');
-    expect(withShort.youtubeDescription).toContain(
-      '🛒 Link de compra: comparatech.cl/p/78729874 (escríbelo en tu navegador), o en el perfil del canal',
-    );
+    const withSite = buildVideoTexts(base, opts.now, 'https://www.comparatech.cl');
+    expect(withSite.youtubeDescription).toContain('🛒 Link de compra en el perfil del canal, o búscalo en comparatech.cl');
   });
 
   it('todos los textos largos conservan la hora del precio, sin "Publicidad" ni la comisión', () => {
