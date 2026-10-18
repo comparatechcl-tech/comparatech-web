@@ -140,6 +140,54 @@ async function readHistoryChunk(ids: string[], since: string): Promise<Map<strin
   return null;
 }
 
+/** Días hacia atrás que mira getLastPriceChanges. */
+const LAST_CHANGE_DAYS = 90;
+/** Tope de páginas de getLastPriceChanges: con ~500 cambios al día, alcanza para meses. */
+const LAST_CHANGE_MAX_PAGES = 60;
+
+/**
+ * La última vez que cambió el precio de cada producto, para el lastmod del
+ * sitemap. El historial guarda solo los cambios, así que la fila más nueva
+ * de un producto es su último cambio. Mira los últimos 90 días: un producto
+ * sin cambios en ese plazo no aparece. Si hay más historial que el tope, lo
+ * leído es lo más nuevo, así que las fechas que trae siguen siendo ciertas.
+ *
+ * Nunca lanza: si no se pudo leer, null.
+ */
+export async function getLastPriceChanges(): Promise<Map<string, string> | null> {
+  const supabase = getSupabase();
+  if (!supabase || Date.now() < missingTableUntil) return null;
+
+  const since = new Date(Date.now() - LAST_CHANGE_DAYS * 86_400_000).toISOString();
+  const latest = new Map<string, string>();
+  try {
+    for (let page = 0; page < LAST_CHANGE_MAX_PAGES; page++) {
+      const from = page * BULK_PAGE;
+      const { data, error } = await supabase
+        .from('price_history')
+        .select('product_id, observed_at')
+        .gte('observed_at', since)
+        .order('observed_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, from + BULK_PAGE - 1);
+
+      if (error) {
+        if (isMissingSchemaError(error)) missingTableUntil = Date.now() + MISSING_TABLE_RETRY_MS;
+        else console.warn('[price-history] no se pudo leer los últimos cambios:', error.message);
+        return null;
+      }
+
+      const rows = (data ?? []) as { product_id: string; observed_at: string }[];
+      for (const row of rows) if (!latest.has(row.product_id)) latest.set(row.product_id, row.observed_at);
+      if (rows.length < BULK_PAGE) break;
+    }
+    return latest;
+  } catch (err) {
+    console.warn('[price-history] no se pudo leer los últimos cambios:', err);
+    return null;
+  }
+}
+
 /**
  * Estadísticas de varios productos (portada y página de ofertas).
  *
