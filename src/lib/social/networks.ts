@@ -8,6 +8,7 @@ import type { AffiliateSettings } from '@/lib/settings';
 import { socialProductName } from '@/lib/content/social-name';
 import { MIN_INTEREST_POINTS, floorPoints, meetsInterestFloor, type InterestScore } from '@/lib/social/interest';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
+import { CAROUSEL_MARK } from '@/lib/social/carousel-marks';
 import {
   TELEGRAM_RULES,
   isOnSale,
@@ -71,12 +72,20 @@ export const STORY_MARK = 'historia';
 export const VIDEO_MARK = 'video';
 
 /**
- * ¿La fila es una marca hecha a mano (historia o video) y no una publicación
- * del feed? Se pregunta fila por fila y no en la consulta: un "distinto de"
- * en la base dejaría fuera también las filas sin texto, que son casi todas.
+ * Marca (en `caption`) del carrusel semanal subido a mano desde el admin, una
+ * fila por producto (lib/social/carousel-marks). Tampoco le quita productos al
+ * plan de publicaciones.
+ */
+export { CAROUSEL_MARK };
+
+/**
+ * ¿La fila es una marca hecha a mano (historia, video o carrusel) y no una
+ * publicación del feed? Se pregunta fila por fila y no en la consulta: un
+ * "distinto de" en la base dejaría fuera también las filas sin texto, que son
+ * casi todas.
  */
 export function isHandMark(caption: string | null | undefined): boolean {
-  return caption === STORY_MARK || caption === VIDEO_MARK;
+  return caption === STORY_MARK || caption === VIDEO_MARK || caption === CAROUSEL_MARK;
 }
 
 /** Tope de productos por plan: más que esto no se alcanza a programar con cuidado. */
@@ -102,7 +111,8 @@ const TIKTOK_TEXT_MAX = 2000;
  *
  * Sin las historias subidas a mano: duran un día y llevan su propio link,
  * así que no le quitan productos al plan de publicaciones (ni al revés).
- * Tampoco los videos subidos a mano, que son otro formato y otra cuenta.
+ * Tampoco los videos ni los carruseles subidos a mano, que son otro formato y
+ * otra cuenta.
  */
 export async function postedOnNetworks(admin: SupabaseClient, since: Date): Promise<Set<string> | null> {
   const ids = new Set<string>();

@@ -370,6 +370,27 @@ const FAMILY_PRICE_SLACK = 1.05;
 const NO_EVIDENCE: InterestEvidence = { drop: null, min30: null, daysTracked: 0 };
 
 /**
+ * El precio más bajo de cada modelo (familia de Mercado Libre) entre lo que
+ * llega a la venta, también lo ya publicado: es contra lo que compara quien
+ * entra al sitio. Puro.
+ */
+export function familyLowestPrices(rows: SocialProduct[]): Map<string, number> {
+  const lowest = new Map<string, number>();
+  for (const p of rows) {
+    if (!isOnSale(p) || !p.ml_family_id || !(p.price > 0)) continue;
+    const known = lowest.get(p.ml_family_id);
+    if (known === undefined || p.price < known) lowest.set(p.ml_family_id, p.price);
+  }
+  return lowest;
+}
+
+/** ¿Hay otra versión del mismo modelo bastante más barata (5% o más)? Puro. */
+export function pricierThanFamily(p: SocialProduct, lowest: ReadonlyMap<string, number>): boolean {
+  const cheapest = p.ml_family_id ? lowest.get(p.ml_family_id) : undefined;
+  return cheapest !== undefined && p.price > cheapest * FAMILY_PRICE_SLACK;
+}
+
+/**
  * La baja comprobada con el historial, en %, o null si no hay (o si el número
  * no sirve). Puro.
  *
@@ -426,17 +447,11 @@ export function pickByRules<T extends SocialProduct>(
   // compara quien entra al sitio. Mercado Libre a veces agrupa en una familia
   // versiones distintas (256 y 512 GB): ahí la cara queda sin publicarse,
   // que es el lado prudente.
-  const familyLowest = new Map<string, number>();
-  for (const p of rows) {
-    if (!isOnSale(p) || !p.ml_family_id || !(p.price > 0)) continue;
-    const lowest = familyLowest.get(p.ml_family_id);
-    if (lowest === undefined || p.price < lowest) familyLowest.set(p.ml_family_id, p.price);
-  }
+  const familyLowest = familyLowestPrices(rows);
 
   for (const p of rows) {
     if (!isOnSale(p) || opts.recentlyPosted.has(p.id)) continue;
-    const cheapest = p.ml_family_id ? familyLowest.get(p.ml_family_id) : undefined;
-    if (!rules.anyScore && cheapest !== undefined && p.price > cheapest * FAMILY_PRICE_SLACK) continue;
+    if (!rules.anyScore && pricierThanFamily(p, familyLowest)) continue;
     const checked = p.price_checked_at ? new Date(p.price_checked_at).getTime() : NaN;
     if (!Number.isFinite(checked) || now - checked > rules.maxPriceAgeMs || checked > now + 60_000) continue;
 

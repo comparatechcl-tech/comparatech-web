@@ -65,7 +65,7 @@ type BuyLineWhere = 'instagram' | 'tiktok' | 'facebook-reel' | 'youtube';
  * null si `siteUrl` no es la dirección de un sitio público: en el computador
  * y en las pruebas es localhost:3000, que no se le dice a nadie.
  */
-function siteName(siteUrl: string): string | null {
+export function siteName(siteUrl: string): string | null {
   try {
     const { hostname, port } = new URL(siteUrl);
     if (port || !hostname.includes('.') || /^[\d.]+$/.test(hostname)) return null;
@@ -386,6 +386,85 @@ export function buildVideoTexts(product: CaptionProduct, now: Date, siteUrl = ''
     facebook: withLinkLine(instagram, buyLine(siteUrl, 'facebook-reel')),
     youtubeTitle: youtubeTitle(product),
     youtubeDescription: withLinkLine(tiktok, buyLine(siteUrl, 'youtube')),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Texto del carrusel semanal "Top 5 bajas de la semana" (/admin/historias/carrusel).
+
+/** Lo que el texto del carrusel necesita de cada producto, en el orden de las láminas. */
+export interface CarouselCaptionItem {
+  /** El nombre de redes (socialProductName). */
+  name: string;
+  price: number;
+  /** Cuánto bajó según el historial propio. */
+  dropAmount: number;
+  price_checked_at: string | null;
+}
+
+export interface CarouselCaptions {
+  instagram: string;
+  facebook: string;
+}
+
+/** Los puestos del carrusel, como en las láminas. */
+const RANK_EMOJI = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣'];
+
+/**
+ * Cuándo se revisaron los precios del carrusel: cada lámina lleva la hora de
+ * su producto, y el texto dice el rango. Sin ninguna hora conocida no se
+ * inventa una.
+ */
+export function carouselCheckedLine(items: Pick<CarouselCaptionItem, 'price_checked_at'>[]): string {
+  const times = items
+    .map((item) => (item.price_checked_at ? new Date(item.price_checked_at) : null))
+    .filter((d): d is Date => d !== null && Number.isFinite(d.getTime()))
+    .sort((a, b) => a.getTime() - b.getTime());
+  if (times.length === 0) return 'Precios sujetos a cambios en Mercado Libre.';
+  const first = chileDateTime(times[0]) as { date: string; time: string };
+  const last = chileDateTime(times[times.length - 1]) as { date: string; time: string };
+  const tail = '(hora de Chile); pueden cambiar.';
+  if (first.date === last.date) {
+    if (first.time === last.time) return `Precios revisados el ${first.date} a las ${first.time} ${tail}`;
+    return `Precios revisados el ${first.date} entre las ${first.time} y las ${last.time} ${tail}`;
+  }
+  return `Precios revisados entre el ${first.date} a las ${first.time} y el ${last.date} a las ${last.time} ${tail}`;
+}
+
+/**
+ * El texto del carrusel para Instagram y para Facebook. Corto: qué es, un
+ * renglón por producto con su precio de hoy y cuánto bajó (lo que dice su
+ * lámina), cuándo se revisaron los precios y dónde comprar. "Bajó" es la baja
+ * que confirma el historial propio: nunca se llama descuento.
+ *
+ * En Instagram el link no se puede tocar en el texto: va la bio (lleva a /hoy,
+ * donde salen los productos del carrusel una vez marcado como publicado) y el
+ * nombre del sitio. En una publicación de Facebook sí se toca, así que va el
+ * link a /hoy. Sin la etiqueta "Publicidad" ni la comisión (decisión del
+ * dueño, 18-10-2026).
+ */
+export function buildCarouselCaptions(
+  items: CarouselCaptionItem[],
+  opts: { rangeLabel: string; siteUrl: string }
+): CarouselCaptions {
+  const lines = [
+    `📉 Top ${items.length} bajas de la semana (${opts.rangeLabel}), según nuestro historial de precios:`,
+    '',
+    ...items.map(
+      (item, i) => `${RANK_EMOJI[i] ?? `${i + 1}.`} ${item.name}: ${formatPrice(item.price)}, bajó ${formatPrice(item.dropAmount)}`
+    ),
+    '',
+    carouselCheckedLine(items),
+    '',
+  ];
+  const tags = ['', '#tecnologia #chile #mercadolibre'];
+  const site = siteName(opts.siteUrl);
+  const facebookLink = site
+    ? `🛒 Links de compra: ${opts.siteUrl.replace(/\/+$/, '')}/hoy?src=facebook-carrusel`
+    : '🛒 Links de compra en nuestro perfil';
+  return {
+    instagram: [...lines, buyLine(opts.siteUrl, 'instagram'), ...tags].join('\n'),
+    facebook: [...lines, facebookLink, ...tags].join('\n'),
   };
 }
 

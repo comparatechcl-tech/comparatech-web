@@ -6,6 +6,7 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { getAllProducts, getDeals } from '@/lib/queries/products';
 import { readVideoMarks } from '@/lib/social/videos';
+import { lastShownAt, readCarouselMarks } from '@/lib/social/carousel-marks';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import type { Product } from '@/lib/types';
 
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
 export const revalidate = 60;
 
 const SOCIAL_WINDOW_DAYS = 7;
-/** Cuántos productos caben en "Lo que mostramos en redes", vengan del feed o de un video. */
+/** Cuántos productos caben en "Lo que mostramos en redes", vengan del feed, de un video o del carrusel. */
 const SOCIAL_MAX = 24;
 const TOP_DEALS = 12;
 
@@ -115,16 +116,35 @@ async function readVideoDates(since: Date): Promise<Map<string, number>> {
 }
 
 /**
- * Ids de lo mostrado en redes en los últimos 7 días, en el feed o en un video,
- * del más reciente al más antiguo y sin repetir: de un producto que salió por
- * los dos lados vale su fecha más nueva.
+ * Los productos del carrusel semanal marcado como publicado en
+ * /admin/historias/carrusel en los últimos 7 días: producto → hora de la
+ * marca. Su texto dice "Link de compra en nuestra bio", que es esta página.
+ * Como con los videos, si la lectura falla la sección sale sin ellos.
+ */
+async function readCarouselDates(since: Date): Promise<Map<string, number>> {
+  const dates = new Map<string, number>();
+  try {
+    const admin = getSupabaseAdmin();
+    if (!admin) return dates;
+    for (const [productId, at] of lastShownAt(await readCarouselMarks(admin, since))) dates.set(productId, at);
+  } catch (err) {
+    console.warn('[hoy] no se pudo leer los carruseles publicados:', err instanceof Error ? err.message : String(err));
+    return new Map();
+  }
+  return dates;
+}
+
+/**
+ * Ids de lo mostrado en redes en los últimos 7 días, en el feed, en un video
+ * o en el carrusel, del más reciente al más antiguo y sin repetir: de un
+ * producto que salió por varios lados vale su fecha más nueva.
  */
 async function recentSocialIds(): Promise<string[]> {
   const since = new Date(Date.now() - SOCIAL_WINDOW_DAYS * 86_400_000);
-  const [feed, videos] = await Promise.all([readFeedDates(since), readVideoDates(since)]);
+  const [feed, videos, carousels] = await Promise.all([readFeedDates(since), readVideoDates(since), readCarouselDates(since)]);
 
   const latest = new Map(feed);
-  for (const [id, at] of videos) {
+  for (const [id, at] of [...videos, ...carousels]) {
     const known = latest.get(id);
     if (known === undefined || at > known) latest.set(id, at);
   }

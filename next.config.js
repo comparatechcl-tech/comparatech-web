@@ -109,6 +109,7 @@ const nextConfig = {
   // el archivo no existe y la imagen falla.
   outputFileTracingIncludes: {
     '/social/pieza/[productId]/[file]': ['./src/lib/content/fonts/*.woff'],
+    '/social/carrusel/[ids]/[file]': ['./src/lib/content/fonts/*.woff'],
     '/admin/kit/[productId]': ['./src/lib/content/fonts/*.woff'],
   },
   images: {

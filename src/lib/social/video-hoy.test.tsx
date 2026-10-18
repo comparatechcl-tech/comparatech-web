@@ -3,10 +3,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 /**
  * /hoy es adonde lleva el link del perfil, que es lo que dicen los textos de
- * los reels: quien llega desde un video tiene que encontrar ese producto en
- * "Lo que mostramos en redes". La sección junta lo publicado en el feed
- * (products.rrss_published_at) con los videos marcados como subidos en
- * /admin/videos, y si las marcas no se pueden leer sale como antes.
+ * los reels y del carrusel semanal: quien llega desde un video o desde el
+ * carrusel tiene que encontrar ese producto en "Lo que mostramos en redes".
+ * La sección junta lo publicado en el feed (products.rrss_published_at) con
+ * los videos marcados como subidos en /admin/videos y los carruseles marcados
+ * en /admin/historias/carrusel, y si las marcas no se pueden leer sale como
+ * antes.
  */
 
 const site = vi.hoisted(() => ({
@@ -55,8 +57,12 @@ vi.mock('@/lib/supabase/client', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   getSupabaseAdmin: () => (typeof site.admin === 'function' ? (site.admin as () => unknown)() : site.admin),
 }));
-// Las marcas se entregan ya leídas: cómo se leen de la base está en videos.test.ts.
+// Las marcas se entregan ya leídas: cómo se leen de la base está en videos.test.ts y carousel.test.ts.
 vi.mock('@/lib/social/videos', () => ({ readVideoMarks: vi.fn() }));
+vi.mock('@/lib/social/carousel-marks', async (original) => ({
+  ...(await original<typeof import('@/lib/social/carousel-marks')>()),
+  readCarouselMarks: vi.fn(),
+}));
 vi.mock('@/lib/queries/products', () => ({ getAllProducts: vi.fn(), getDeals: vi.fn() }));
 // La grilla de verdad dibuja tarjetas de cliente: acá basta con saber qué productos recibe y en qué orden.
 vi.mock('@/components/product/ProductGrid', async () => {
@@ -70,6 +76,7 @@ vi.mock('@/components/product/ProductGrid', async () => {
 import HoyPage, * as hoyModule from '@/app/hoy/page';
 import { getAllProducts, getDeals } from '@/lib/queries/products';
 import { readVideoMarks, type VideoPosted } from '@/lib/social/videos';
+import { readCarouselMarks } from '@/lib/social/carousel-marks';
 import type { Product } from '@/lib/types';
 
 const DAY = 86_400_000;
@@ -100,6 +107,13 @@ function marks(rows: Record<string, Partial<Record<keyof VideoPosted, string>>>)
   }
   vi.mocked(readVideoMarks).mockResolvedValue(map);
 }
+/** Carruseles marcados como publicados: cada uno con su hora y sus productos, en orden. */
+function carousels(...batches: { at: string; ids: string[] }[]) {
+  let postId = 100;
+  vi.mocked(readCarouselMarks).mockResolvedValue(
+    batches.map((b) => ({ postedAt: b.at, posts: b.ids.map((productId) => ({ postId: postId++, productId, postedPrice: 9_990 })) }))
+  );
+}
 
 /** Lo que la página le entrega a cada grilla: la de redes (null si la sección no sale) y la de descuentos. */
 async function shown(): Promise<{ social: string[] | null; deals: string[] }> {
@@ -124,6 +138,8 @@ beforeEach(() => {
   site.admin = { servicio: true };
   vi.mocked(readVideoMarks).mockReset();
   vi.mocked(readVideoMarks).mockResolvedValue(new Map());
+  vi.mocked(readCarouselMarks).mockReset();
+  vi.mocked(readCarouselMarks).mockResolvedValue([]);
   catalog('a', 'b', 'c', 'd', 'e');
   deals();
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -214,6 +230,27 @@ describe('/hoy: lo que mostramos en redes', () => {
     deals('a');
     expect(await shown()).toEqual({ social: null, deals: ['a'] });
   });
+
+  it('suma los productos del carrusel marcado como publicado, con la hora de la marca', async () => {
+    feed({ a: ago(2 * DAY) });
+    marks({ b: { instagram: ago(3 * DAY) } });
+    carousels({ at: ago(HOUR), ids: ['c', 'd', 'e'] });
+    expect((await shown()).social).toEqual(['c', 'd', 'e', 'a', 'b']);
+  });
+
+  it('un producto que salió en el feed y después en el carrusel vale por su fecha más nueva, sin repetirse', async () => {
+    feed({ a: ago(5 * DAY), b: ago(1 * DAY) });
+    carousels({ at: ago(2 * DAY), ids: ['a'] }, { at: ago(6 * DAY), ids: ['a', 'c'] });
+    expect((await shown()).social).toEqual(['b', 'a', 'c']);
+  });
+
+  it('lee los carruseles de los mismos 7 días, con el cliente de servicio', async () => {
+    await shown();
+    expect(vi.mocked(readCarouselMarks)).toHaveBeenCalledTimes(1);
+    const [client, since] = vi.mocked(readCarouselMarks).mock.calls[0];
+    expect(client).toBe(site.admin);
+    expect(since.toISOString()).toBe(vi.mocked(readVideoMarks).mock.calls[0][1].toISOString());
+  });
 });
 
 describe('/hoy: si las marcas de video no se pueden leer, sale como antes', () => {
@@ -223,7 +260,17 @@ describe('/hoy: si las marcas de video no se pueden leer, sale como antes', () =
     marks({ c: { instagram: ago(HOUR) } });
     expect((await shown()).social).toEqual(['a', 'b']);
     expect(vi.mocked(readVideoMarks)).not.toHaveBeenCalled();
+    expect(vi.mocked(readCarouselMarks)).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('si la lectura de los carruseles falla, sale lo demás y deja el aviso en el registro', async () => {
+    feed({ a: ago(DAY) });
+    marks({ b: { instagram: ago(HOUR) } });
+    vi.mocked(readCarouselMarks).mockRejectedValue(new Error('No se pudo leer los carruseles publicados: se cayó'));
+    expect((await shown()).social).toEqual(['b', 'a']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0].join(' ')).toContain('[hoy] no se pudo leer los carruseles publicados');
   });
 
   it('si la lectura falla muestra lo del feed, no lanza y deja el aviso en el registro', async () => {

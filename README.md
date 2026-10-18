@@ -92,12 +92,18 @@ Lo que el código no puede hacer y queda a mano: Instagram y Facebook piden
 la etiqueta "Colaboración pagada" en el contenido con links de afiliado, y
 solo se puede poner desde sus aplicaciones.
 
-Además de lo programado en Metricool, el admin prepara dos cosas que el
-dueño sube a mano desde el teléfono:
+Además de lo programado en Metricool, el admin prepara lo que el dueño sube a
+mano desde el teléfono:
 
 - **Historias** (`/admin/historias`): las ofertas del momento con su imagen
   9:16 y el link de afiliado listo para el sticker de enlace de Instagram,
   que ninguna herramienta para programar publicaciones puede poner.
+- **Carrusel de la semana** (`/admin/historias/carrusel`): el "Top 5 bajas
+  de la semana" para Instagram y Facebook, solo con bajas que confirma el
+  historial de precios propio. Portada, una lámina por producto y cierre en
+  1080x1350, servidas en direcciones públicas firmadas
+  (`/social/carrusel/...`), con su texto para cada red. Marcarlo como
+  publicado suma sus productos a `/hoy`.
 - **Videos** (`/admin/videos`): los reels del día, que arma GitHub Actions
   (`.github/workflows/reels.yml`) y guarda en el bucket `reels` de Supabase
   Storage. Se marcan por red al subirlos.

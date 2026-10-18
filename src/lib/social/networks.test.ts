@@ -8,6 +8,7 @@ import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
 import { MIN_INTEREST_POINTS, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
 import { pickByRules, TELEGRAM_RULES, type PickRules, type SocialProduct } from '@/lib/social/telegram';
 import {
+  CAROUSEL_MARK,
   NETWORK_RULES,
   RECORDS_MAX,
   SCHEDULE_AHEAD_MS,
@@ -676,10 +677,30 @@ describe('registerPosts', () => {
     expect(stamp(db, A)).toEqual({ status: 'publicado', at: '2026-10-11T14:00:00.000Z', channel: 'facebook' });
   });
 
-  it('una marca hecha a mano es una historia o un video, nunca un post con texto', () => {
+  it('al retirar la única publicación, un carrusel subido a mano tampoco deja el producto como publicado', async () => {
+    const db = fakeDb({ products: [onSale(A)] });
+    await registerPosts(db.admin, [record({ externalId: 'u-1' })], NOW);
+    db.tables.social_posts.push({
+      id: 98,
+      product_id: A,
+      channel: 'instagram',
+      external_id: null,
+      caption: CAROUSEL_MARK,
+      status: 'publicado',
+      posted_at: '2026-10-11T23:30:00.000Z',
+    });
+
+    await retirePosts(db.admin, [{ channel: 'instagram', externalId: 'u-1' }], NOW);
+    expect(stamp(db, A)).toEqual({ status: 'sin_usar', at: null, channel: null });
+    expect(db.tables.social_posts.find((row) => row.id === 98)).toMatchObject({ status: 'publicado' });
+  });
+
+  it('una marca hecha a mano es una historia, un video o un carrusel, nunca un post con texto', () => {
     expect(isHandMark(STORY_MARK)).toBe(true);
     expect(isHandMark(VIDEO_MARK)).toBe(true);
+    expect(isHandMark(CAROUSEL_MARK)).toBe(true);
     expect(VIDEO_MARK).toBe('video');
+    expect(CAROUSEL_MARK).toBe('carrusel');
     expect(isHandMark(null)).toBe(false);
     expect(isHandMark(undefined)).toBe(false);
     expect(isHandMark('')).toBe(false);

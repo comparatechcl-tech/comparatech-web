@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import { ChevronRight } from 'lucide-react';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { pieceKey } from '@/lib/social/piece-url';
 import { PRICE_REFRESH_MINUTES } from '@/lib/social/content-timing';
@@ -74,6 +76,17 @@ export default async function HistoriasPage() {
           Actualizar
         </a>
       </div>
+
+      {/* El carrusel semanal vive dentro de Historias: también se sube a mano desde el teléfono. */}
+      <Link
+        href="/admin/historias/carrusel"
+        className="mt-5 flex min-h-11 items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/5 px-4 py-3 text-sm text-fg transition hover:border-accent"
+      >
+        <span>
+          <strong>Carrusel de la semana:</strong> el Top 5 de bajas para Instagram y Facebook, listo para subir.
+        </span>
+        <ChevronRight size={18} className="shrink-0 text-accent" aria-hidden />
+      </Link>
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         {/* La página no puede elegir la cuenta: Compartir abre la app con la última que se usó. */}

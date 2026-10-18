@@ -920,19 +920,28 @@ export function compareByInterest(
  * Si así no se junta la cantidad pedida (un día con pocas ofertas), una
  * segunda vuelta deja repetir tipo y marca. La categoría, la familia, los
  * excluidos y el piso no se sueltan nunca. El resultado va en orden de
- * puntos y no depende del orden de entrada.
+ * puntos (o en el de `order`, si se pasa: el carrusel de bajas ordena por
+ * cuánto bajó) y no depende del orden de entrada.
  */
 export function pickVaried<
   T extends { id: string; category: string; familyId: string | null; commission: number; score: InterestScore },
 >(
   candidates: T[],
-  limits: { max: number; perCategory: number; perType: number; perBrand: number; minPoints?: number }
+  limits: {
+    max: number;
+    perCategory: number;
+    perType: number;
+    perBrand: number;
+    minPoints?: number;
+    /** Otro orden en vez del de interés. Tiene que desempatar siempre (por id al final). */
+    order?: (a: T, b: T) => number;
+  }
 ): T[] {
   const floor = limits.minPoints ?? MIN_INTEREST_POINTS;
   const seen = new Set<string>();
   const sorted = candidates
     .filter((c) => c.score.excluded === null && Number.isFinite(c.score.points) && meetsInterestFloor(c.score, floor))
-    .sort(compareByInterest)
+    .sort(limits.order ?? compareByInterest)
     // El mismo producto dos veces en la entrada cuenta una sola.
     .filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
 
