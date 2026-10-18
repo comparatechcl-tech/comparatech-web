@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Send } from 'lucide-react';
 import { CategoryInfo } from '@/lib/types';
+import { GUIDES, guidePath } from '@/lib/guides';
 import { SocialLinks } from '@/components/brand/SocialLinks';
 import { Logo } from '@/components/brand/Logo';
 
@@ -25,7 +26,7 @@ export function Footer({ categories }: { categories: CategoryInfo[] }) {
   return (
     <footer className="border-t border-border bg-surface">
       <div className="mx-auto max-w-6xl px-4 py-10 text-sm text-muted">
-        <div className="grid gap-8 md:grid-cols-3">
+        <div className="grid gap-8 md:grid-cols-4">
           <div>
             <p className="flex items-center gap-2 font-heading text-lg font-extrabold text-fg">
               <Logo size={26} className="text-fg" />
@@ -60,6 +61,19 @@ export function Footer({ categories }: { categories: CategoryInfo[] }) {
                 <li key={c.slug}>
                   <Link href={`/categoria/${c.slug}`} className="transition hover:text-accent">
                     {c.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <p className="mb-2 font-medium text-fg">Guías</p>
+            <ul className="space-y-1">
+              {GUIDES.map((g) => (
+                <li key={g.slug}>
+                  <Link href={guidePath(g.slug)} className="transition hover:text-accent">
+                    {g.name}
                   </Link>
                 </li>
               ))}

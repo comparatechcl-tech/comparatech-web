@@ -33,6 +33,11 @@ describe('placementFromPath', () => {
     ['/hoy', 'social'],
     ['/black-friday', 'black-friday'],
     ['/modelo/iphone-17', 'modelo'],
+    ['/guias/regalos-tecnologicos', 'guia-regalos'],
+    ['/guias/regalos-tecnologicos/', 'guia-regalos'],
+    ['/guias/no-existe', 'otro'],
+    ['/guias/constructor', 'otro'],
+    ['/guias', 'otro'],
     ['/nosotros', 'otro'],
     ['/privacidad', 'otro'],
   ])('%s → %s', (path, expected) => {

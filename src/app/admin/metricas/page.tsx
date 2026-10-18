@@ -40,6 +40,7 @@ const PLACEMENT_LABELS: Record<Placement, string> = {
   social: 'Página para redes (/hoy)',
   'black-friday': 'Black Friday',
   modelo: 'Página de un modelo',
+  'guia-regalos': 'Guía · regalos tecnológicos',
   otro: 'Otro',
 };
 

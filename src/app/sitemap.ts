@@ -7,6 +7,8 @@ import { latestDate, productLastModified } from '@/lib/sitemap-dates';
 import { MODELS, modelPath, versionsOf } from '@/lib/models';
 import { LISTING_FILTERS, MIN_FILTER_PAGE, filterPath, productsOfFilter } from '@/lib/listing-filters';
 import { THERMOMETER_PATH, thermometerLastModified } from '@/lib/black-friday-thermometer';
+import { GUIDES, guidePath } from '@/lib/guides';
+import { getGuideView } from '@/lib/queries/guides';
 import { SITE_URL } from '@/lib/site';
 import type { Product } from '@/lib/types';
 
@@ -20,7 +22,12 @@ import type { Product } from '@/lib/types';
  * cambie nada le enseña a Google a no creerle al sitemap.
  */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [products, deals, lastChanges] = await Promise.all([getAllProducts(), getDeals(), getLastPriceChanges()]);
+  const [products, deals, lastChanges, guideViews] = await Promise.all([
+    getAllProducts(),
+    getDeals(),
+    getLastPriceChanges(),
+    Promise.all(GUIDES.map(async (guide) => ({ guide, view: await getGuideView(guide) }))),
+  ]);
 
   const modified = (p: Product) => productLastModified(p, lastChanges);
   const latestOf = (list: Product[]) => latestDate(list.map(modified));
@@ -103,6 +110,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         },
       ];
     }),
+    // Las guías (lib/guides) que hoy muestran algo, con la fecha del último
+    // cambio de precio de lo que muestran.
+    ...guideViews.flatMap(({ guide, view }) =>
+      view.products.length === 0
+        ? []
+        : [
+            {
+              url: `${SITE_URL}${guidePath(guide.slug)}`,
+              changeFrequency: 'daily' as const,
+              priority: 0.7,
+              ...withDate(latestOf(view.products)),
+            },
+          ],
+    ),
   ];
 
   const productRoutes: MetadataRoute.Sitemap = products.map((p) => ({

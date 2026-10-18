@@ -7,6 +7,7 @@ import { getSiteCategories } from '@/lib/queries/site-categories';
 import { BLACK_FRIDAY, blackFridayPhase, blackFridayPicks, daysUntilBlackFriday, dealsByCategory } from '@/lib/black-friday';
 import { THERMOMETER_PATH, thermometerPhase } from '@/lib/black-friday-thermometer';
 import { itemListJsonLd } from '@/lib/category-listing';
+import { GUIDES, guidePath } from '@/lib/guides';
 import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 import { SITE_URL } from '@/lib/site';
 import { ProductGrid } from '@/components/product/ProductGrid';
@@ -141,6 +142,26 @@ export default async function BlackFridayPage() {
                 Todas las ofertas
               </Link>
             </li>
+          </ul>
+        </section>
+      )}
+
+      {GUIDES.length > 0 && (
+        <section aria-labelledby="guias" className="mt-10">
+          <h2 id="guias" className="mb-3 font-heading text-lg font-semibold">
+            Guías de compra
+          </h2>
+          <ul className="flex flex-wrap gap-2">
+            {GUIDES.map((g) => (
+              <li key={g.slug}>
+                <Link
+                  href={guidePath(g.slug)}
+                  className="inline-flex items-center rounded-full border border-border bg-surface px-3.5 py-1.5 text-sm text-fg transition hover:border-accent/40 hover:text-accent"
+                >
+                  {g.heading}
+                </Link>
+              </li>
+            ))}
           </ul>
         </section>
       )}

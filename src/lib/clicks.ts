@@ -24,6 +24,7 @@ export const PLACEMENTS = [
   'social',
   'black-friday',
   'modelo',
+  'guia-regalos',
   'otro',
 ] as const;
 
@@ -91,10 +92,21 @@ export function placementFromPath(pathname: string): Placement {
     case 'modelo':
       // Las páginas de cada modelo (/modelo/iphone-17).
       return 'modelo';
+    case 'guias':
+      // Cada guía (/guias/regalos-tecnologicos) se cuenta aparte, para saber cuál mueve compras.
+      return GUIDE_PLACEMENTS.get(path.split('/')[2]?.toLowerCase() ?? '') ?? 'otro';
     default:
       return 'otro';
   }
 }
+
+/**
+ * El origen de los clics de cada guía, por su dirección (lib/guides). Está
+ * acá y no allá porque este módulo no importa nada; un test revisa que las
+ * dos listas coincidan. Un Map y no un objeto: "/guias/constructor" no es
+ * una guía.
+ */
+const GUIDE_PLACEMENTS = new Map<string, Placement>([['regalos-tecnologicos', 'guia-regalos']]);
 
 /** Qué tipo de link abrió el comprador: el acortador o la ficha directa. */
 export function linkModeFromHref(href: string): LinkMode {
