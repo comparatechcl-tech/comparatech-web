@@ -21,7 +21,7 @@ import { PriceHistoryNote } from '@/components/product/PriceHistoryNote';
 import { PriceFreshness } from '@/components/product/PriceFreshness';
 import { resolveDescription } from '@/lib/product-description';
 import { shortProductName, truncateAtWord } from '@/lib/text';
-import { seoProductTitle } from '@/lib/seo-title';
+import { seoProductName, seoProductTitle } from '@/lib/seo-title';
 import { formatCLP, formatDayMonth, formatDiscountPct } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
 import { reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
@@ -81,6 +81,8 @@ const INACTIVE_FALLBACK = 'Hoy este producto no está disponible en Mercado Libr
 
 /** Lo que Google muestra de una meta description (ver truncateAtWord). */
 const META_DESCRIPTION_MAX = 155;
+/** El nombre dentro de la descripción: deja espacio para el precio, el descuento y la fecha. */
+const DESCRIPTION_NAME_MAX = 55;
 
 const PRIMARY_CTA_ID = 'cta-principal';
 const SPECS_CTA_ID = 'cta-specs';
@@ -123,7 +125,9 @@ export async function generateMetadata({
   const product = await loadProduct(slug);
   if (!product) return {};
 
-  const short = shortProductName(product.name);
+  // El mismo corte que el título (marca, modelo y capacidad no se pierden),
+  // con el largo del nombre corto de siempre.
+  const short = seoProductName(product.name, product.brand, DESCRIPTION_NAME_MAX);
   const discount = formatDiscountPct(product.price, product.original_price);
   // Entero y sin la plantilla del sitio: seoProductTitle ya decide si cabe
   // "| ComparaTech" en lo que muestra Google.
