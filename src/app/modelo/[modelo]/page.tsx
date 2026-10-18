@@ -21,6 +21,8 @@ import { Breadcrumbs } from '@/components/product/Breadcrumbs';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { ModelPriceHistory } from '@/components/product/ModelPriceHistory';
 import { ProductGroupJsonLd } from '@/components/seo/ProductGroupJsonLd';
+import { PhotoViewer } from '@/components/product/PhotoViewer';
+import { viewerItems } from '@/lib/photo-viewer';
 
 /**
  * La página de un modelo (/modelo/iphone-17): todas sus versiones con el
@@ -80,6 +82,7 @@ export default async function ModeloPage({ params }: { params: Params }) {
   const [{ histories, stats }, catalog] = await Promise.all([getModelHistories(versions), getCatalogProducts()]);
   const drops = dropsById(onSale, stats, now);
   const prices = onSale.map((p) => p.price);
+  const viewer = viewerItems(versions[0], versions, (p) => versionLabel(model, p));
   const description = modelMetaDescription(model, prices);
 
   // Las migas, como en la ficha: la categoría y el tipo, si su página se indexa.
@@ -106,9 +109,13 @@ export default async function ModeloPage({ params }: { params: Params }) {
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{modelIntro(model, prices, paused.length)}</p>
 
       <section aria-labelledby="versiones" className="mt-8">
-        <h2 id="versiones" className="mb-4 font-heading text-lg font-semibold">
-          Versiones y precio de hoy
-        </h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 id="versiones" className="font-heading text-lg font-semibold">
+            Versiones y precio de hoy
+          </h2>
+          {/* Las fotos de todas las versiones en grande, una tras otra (lib/photo-viewer). */}
+          <PhotoViewer variant="button" items={viewer.items} title={model.name} />
+        </div>
         {onSale.length > 0 ? (
           <ProductGrid products={onSale} placement="modelo" drops={drops} eagerImages={4} />
         ) : (

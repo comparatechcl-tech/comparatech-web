@@ -29,7 +29,10 @@ import { buyUrl } from '@/lib/outbound';
 import { isPastInactiveGrace, reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
 import { MIN_DEAL_DISCOUNT, discountOf } from '@/lib/deal-rank';
 import { domainLabel, indexableTypes, typePath, typeSlug } from '@/lib/category-listing';
-import { modelOf, modelPath } from '@/lib/models';
+import { modelOf, modelPath, versionColor, versionLabel } from '@/lib/models';
+import { getModelVersions } from '@/lib/queries/models';
+import { viewerItems } from '@/lib/photo-viewer';
+import { PhotoViewer } from '@/components/product/PhotoViewer';
 import type { Product } from '@/lib/types';
 
 /**
@@ -217,6 +220,21 @@ export default async function ProductoPage({
     </p>
   );
 
+  // La foto abre el visor con las fotos de las otras versiones
+  // (lib/photo-viewer): las del modelo si tiene página, con las que hoy no
+  // tienen vendedor, o si no los otros colores de la misma familia.
+  const modelVersions = model ? await getModelVersions(model.slug) : null;
+  const viewer = viewerItems(
+    product,
+    modelVersions ? [...modelVersions.onSale, ...modelVersions.paused] : variants,
+    (p) => (model ? versionLabel(model, p) : (versionColor(p.specs) ?? shortProductName(p.name, 40))),
+  );
+  const heroImage = (
+    <PhotoViewer variant="hero" items={viewer.items} start={viewer.start} title={model?.name ?? short} currentSlug={product.slug}>
+      <ProductHeroImage src={product.image_url} alt={product.name} />
+    </PhotoViewer>
+  );
+
   // Ficha sin vendedores: sigue respondiendo 200 e indexable, sin botón de
   // compra, y con las alternativas como lo principal de la página.
   if (!product.is_active) {
@@ -226,7 +244,7 @@ export default async function ProductoPage({
         {breadcrumbs}
         <div className="grid gap-8 sm:grid-cols-2">
           <div className="relative aspect-square overflow-hidden rounded-2xl border border-border bg-white opacity-80">
-            <ProductHeroImage src={product.image_url} alt={product.name} />
+            {heroImage}
           </div>
 
           <div>
@@ -285,7 +303,7 @@ export default async function ProductoPage({
       {breadcrumbs}
       <div className="grid gap-8 sm:grid-cols-2">
         <div className="relative aspect-square overflow-hidden rounded-2xl border border-border bg-white">
-          <ProductHeroImage src={product.image_url} alt={product.name} />
+          {heroImage}
         </div>
 
         <div>
