@@ -14,7 +14,11 @@ import {
   type DealsFilter,
   type LoadedDeals,
 } from '@/lib/deals-listing';
+import { cardImageLoading } from '@/lib/card-product';
 import { ProductCard } from './ProductCard';
+
+/** Las fotos que se ven al abrir la página: la primera fila en computador (cuatro). */
+const FIRST_ROW_IMAGES = 4;
 
 /**
  * Las ofertas con filtros por categoría.
@@ -166,8 +170,8 @@ export function DealsBrowser({
             waiting ? 'opacity-50' : ''
           }`}
         >
-          {list.items.map((p) => (
-            <ProductCard key={p.id} product={p} placement={placement} />
+          {list.items.map((p, i) => (
+            <ProductCard key={p.id} product={p} placement={placement} imageLoading={cardImageLoading(i, FIRST_ROW_IMAGES)} />
           ))}
         </div>
       )}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Product } from '@/lib/types';
-import { toCardProduct } from '@/lib/card-product';
+import { cardImageLoading, toCardProduct } from '@/lib/card-product';
 import { buyUrl } from '@/lib/outbound';
 
 function product(over: Partial<Product> = {}): Product {
@@ -107,5 +107,15 @@ describe('toCardProduct', () => {
       })
     );
     expect(card.chip).toBe('Envío gratis');
+  });
+});
+
+describe('cardImageLoading', () => {
+  it('las dos primeras con prioridad, el resto de la primera fila sin esperar, las demás al acercarse', () => {
+    expect([0, 1, 2, 3, 4].map((i) => cardImageLoading(i, 4))).toEqual(['priority', 'priority', 'eager', 'eager', 'lazy']);
+  });
+
+  it('sin primera fila a la vista, todas al acercarse', () => {
+    expect([0, 1].map((i) => cardImageLoading(i, 0))).toEqual(['lazy', 'lazy']);
   });
 });

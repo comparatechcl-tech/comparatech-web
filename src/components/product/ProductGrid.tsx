@@ -1,7 +1,7 @@
 import { Product } from '@/lib/types';
 import type { Placement } from '@/lib/clicks';
 import type { ConfirmedDrop } from '@/lib/deal-rank';
-import { toCardProduct } from '@/lib/card-product';
+import { cardImageLoading, toCardProduct } from '@/lib/card-product';
 import { ProductCard } from './ProductCard';
 
 /**
@@ -11,15 +11,20 @@ import { ProductCard } from './ProductCard';
  *
  * `drops` trae las bajas de precio comprobadas, por id de producto (ver
  * lib/deal-rank). Solo las pasan las páginas que leen el historial.
+ *
+ * `eagerImages`: cuántas de las primeras fotos se piden sin esperar (ver
+ * cardImageLoading). Solo en la grilla que se ve al abrir la página.
  */
 export function ProductGrid({
   products,
   placement,
   drops,
+  eagerImages = 0,
 }: {
   products: Product[];
   placement?: Placement;
   drops?: Record<string, ConfirmedDrop>;
+  eagerImages?: number;
 }) {
   if (products.length === 0) {
     return (
@@ -31,13 +36,14 @@ export function ProductGrid({
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-      {products.map((product) => (
+      {products.map((product, i) => (
         // La tarjeta es componente de cliente: recibe solo lo que muestra,
         // no el producto entero, que viajaría completo en el HTML.
         <ProductCard
           key={product.id}
           product={toCardProduct(product, drops?.[product.id])}
           placement={placement}
+          imageLoading={cardImageLoading(i, eagerImages)}
         />
       ))}
     </div>

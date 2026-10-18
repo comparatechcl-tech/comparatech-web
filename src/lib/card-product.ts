@@ -54,6 +54,23 @@ function offerChip(offer: CardOfferInfo | null | undefined): string | null {
  * Los datos opcionales que no aplican se omiten en vez de ir vacíos: la
  * mayoría de las tarjetas no es destacada ni tiene una baja comprobada.
  */
+/**
+ * Cómo carga la foto de una tarjeta. Por defecto ("lazy"), cuando se acerca
+ * a la pantalla. Las primeras de un listado se ven sin bajar, y una foto que
+ * espera es justo lo que Google mide como carga lenta (LCP): "priority" la
+ * pide antes que todo y "eager" la pide sin esperar.
+ */
+export type CardImageLoading = 'priority' | 'eager' | 'lazy';
+
+/** Las que se piden antes que todo, como mucho: la primera fila en el teléfono (dos por fila). */
+const PRIORITY_IMAGES = 2;
+
+/** La carga de la foto de la tarjeta `index` cuando las primeras `eager` se ven al abrir la página. */
+export function cardImageLoading(index: number, eager: number): CardImageLoading {
+  if (index >= eager) return 'lazy';
+  return index < PRIORITY_IMAGES ? 'priority' : 'eager';
+}
+
 export function toCardProduct(product: Product, drop?: ConfirmedDrop | null): CardProduct {
   const badges = specBadges(product.specs);
   const chip = offerChip(product.offer_info);

@@ -177,7 +177,7 @@ export default async function CategoriaPage({
       </div>
 
       <div className="mt-6">
-        <ProductGrid products={shown} placement="categoria" />
+        <ProductGrid products={shown} placement="categoria" eagerImages={4} />
       </div>
 
       {remaining > 0 && (

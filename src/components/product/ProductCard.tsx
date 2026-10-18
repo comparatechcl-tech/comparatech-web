@@ -11,7 +11,7 @@ import { PriceTag } from './PriceTag';
 import { DealBadge, DropChip } from './DealBadge';
 import { AffiliateButton } from './AffiliateButton';
 import { dealTier, discountOf } from '@/lib/deal-rank';
-import type { CardProduct } from '@/lib/card-product';
+import type { CardImageLoading, CardProduct } from '@/lib/card-product';
 import mlImageLoader from '@/lib/ml-image-loader';
 import type { Placement } from '@/lib/clicks';
 
@@ -24,9 +24,11 @@ import type { Placement } from '@/lib/clicks';
 export function ProductCard({
   product,
   placement,
+  imageLoading = 'lazy',
 }: {
   product: CardProduct;
   placement?: Placement;
+  imageLoading?: CardImageLoading;
 }) {
   const categoryName = getCategoryInfo(product.category)?.name ?? product.category;
   const { badges, chip } = product;
@@ -36,7 +38,9 @@ export function ProductCard({
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-surface transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-glow">
-      <Link href={`/producto/${product.slug}`} className="flex flex-1 flex-col">
+      {/* Sin precarga: con 24 tarjetas en pantalla, Next bajaba la ficha de
+          cada una al aparecer, en el teléfono y en la cuota de Vercel. */}
+      <Link href={`/producto/${product.slug}`} prefetch={false} className="flex flex-1 flex-col">
         <div className="relative aspect-square w-full overflow-hidden bg-white">
           {/* El descuento a la izquierda, que es donde parte la lectura; la
               marca de destacado pasa a la derecha para no taparlo. */}
@@ -56,6 +60,7 @@ export function ProductCard({
             alt={product.name}
             fill
             sizes="(max-width: 768px) 50vw, 25vw"
+            {...(imageLoading === 'priority' ? { priority: true } : { loading: imageLoading })}
             className="object-contain transition duration-300 group-hover:scale-105"
           />
         </div>
