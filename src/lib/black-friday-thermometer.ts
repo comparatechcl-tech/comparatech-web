@@ -47,9 +47,11 @@
  */
 import { BLACK_FRIDAY } from '@/lib/black-friday';
 import { CATEGORIES } from '@/lib/categories';
-import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
-import { priceHeldFor } from '@/lib/deals';
+import { MIN_DEAL_DISCOUNT, confirmedDrop, type ConfirmedDrop } from '@/lib/deal-rank';
+import { priceHeldFor, type PricePoint, type PriceStats } from '@/lib/deals';
+import { MODELS, modelPath, versionsOf, type ModelDef } from '@/lib/models';
 import { normalizeName } from '@/lib/text';
+import type { Product } from '@/lib/types';
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -751,4 +753,83 @@ export function watchNote(product: ThermometerProduct, rows: ThermometerRow[], n
     roseBefore: rose && below < CHANGE_PCT,
     belowPct: inEvent && isDrop ? Math.round(below) : null,
   };
+}
+
+/** Un producto del catálogo, como lo mide el termómetro. */
+export function thermometerProductOf(p: Product): ThermometerProduct {
+  return {
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    category: p.category,
+    familyId: p.ml_family_id,
+    createdAt: Date.parse(p.created_at),
+    price: p.price,
+    listPrice: p.original_price,
+    active: p.is_active,
+    inactiveSince: p.inactive_since ? Date.parse(p.inactive_since) : null,
+  };
+}
+
+/** Los registros de la lectura de la ficha (lib/queries/price-history) como los usa el termómetro. */
+export function historyRowsOf(productId: string, points: PricePoint[]): ThermometerRow[] {
+  return points.map((p) => ({ productId, price: p.price, listPrice: null, t: Date.parse(p.observed_at) }));
+}
+
+/** Un modelo de la lista: su versión a la venta de menor precio hoy (la que se vigila). */
+export interface WatchCandidate {
+  model: ModelDef;
+  cheapest: Product;
+  versions: number;
+}
+
+/** Los modelos muy buscados (lib/models) con alguna versión a la venta hoy, en el orden de la lista. */
+export function watchCandidates(products: Product[]): WatchCandidate[] {
+  const out: WatchCandidate[] = [];
+  for (const model of MODELS) {
+    const onSale = versionsOf(model, products.filter((p) => p.is_active));
+    if (onSale.length > 0) out.push({ model, cheapest: onSale[0], versions: onSale.length });
+  }
+  return out;
+}
+
+export interface WatchItem {
+  name: string;
+  path: string;
+  /** Versiones a la venta hoy. */
+  versions: number;
+  /** El precio de hoy de la versión de menor precio. */
+  price: number;
+  /** Lo que confirma el historial con las reglas del termómetro; null si no alcanza. */
+  note: WatchNote | null;
+  /** La baja del precio de hoy según el resto del sitio (confirmedDrop), solo si no hay nada del termómetro que decir. */
+  drop: ConfirmedDrop | null;
+}
+
+/**
+ * "Lo que vamos a vigilar" en /black-friday: cada modelo con el precio de hoy
+ * de su versión de menor precio, su precio habitual del 1 al 20 de noviembre
+ * y, si el historial lo confirma, "subió antes del Black Friday" o, durante
+ * el evento, cuánto bajo el habitual está. Si no hay nada de eso, la baja
+ * que el sitio ya muestra en las tarjetas ("Bajó $X", lib/deal-rank).
+ */
+export function buildWatchList(
+  candidates: WatchCandidate[],
+  histories: Map<string, PricePoint[] | null>,
+  stats: Map<string, PriceStats>,
+  now: number
+): WatchItem[] {
+  return candidates.map(({ model, cheapest, versions }) => {
+    const history = histories.get(cheapest.id);
+    const note = history ? watchNote(thermometerProductOf(cheapest), historyRowsOf(cheapest.id, history), now) : null;
+    const saysSomething = note !== null && (note.roseBefore || note.belowPct !== null);
+    return {
+      name: model.name,
+      path: modelPath(model.slug),
+      versions,
+      price: cheapest.price,
+      note,
+      drop: saysSomething ? null : confirmedDrop(cheapest, stats.get(cheapest.id), now),
+    };
+  });
 }

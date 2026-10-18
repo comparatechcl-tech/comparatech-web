@@ -4,12 +4,19 @@ import { mapWithConcurrency } from '@/lib/ml-catalog';
 import { BLACK_FRIDAY } from '@/lib/black-friday';
 import {
   buildThermometer,
+  buildWatchList,
+  showWatchList,
   thermometerSlot,
+  watchCandidates,
   type ThermometerProduct,
   type ThermometerRow,
   type ThermometerSummary,
+  type WatchItem,
 } from '@/lib/black-friday-thermometer';
 import { FROZEN_BALANCE } from '@/lib/black-friday-2026-balance';
+import { getAllProducts } from '@/lib/queries/products';
+import { getPriceHistoryCached, getPriceStatsCached } from '@/lib/queries/price-history';
+import type { PricePoint, PriceStats } from '@/lib/deals';
 
 /**
  * Lo que lee el termómetro del Black Friday (lib/black-friday-thermometer):
@@ -170,6 +177,32 @@ async function computeSummary(): Promise<ThermometerSummary> {
 // a los despliegues. Un día de vigencia basta: lo que hace cambiar el dato es
 // el slot (cada día, cada hora o nunca), que es parte de la llave.
 const readSummary = unstable_cache(async (_slot: string) => computeSummary(), ['bf-termometro-v1'], { revalidate: 86_400 });
+
+/**
+ * "Lo que vamos a vigilar" en /black-friday (lib/black-friday-thermometer,
+ * buildWatchList), del lunes 23 hasta que termina el evento. Fuera de esas
+ * fechas no lee nada. Son unos 14 modelos: el historial de cada uno sale de
+ * la misma lectura que usa su ficha. Nunca lanza: sin datos, no hay lista.
+ */
+export async function getWatchList(now: number = Date.now()): Promise<WatchItem[]> {
+  if (!showWatchList(now)) return [];
+  try {
+    const candidates = watchCandidates(await getAllProducts());
+    const histories = new Map<string, PricePoint[] | null>();
+    const stats = new Map<string, PriceStats>();
+    await Promise.all(
+      candidates.map(async ({ cheapest }) => {
+        const [history, stat] = await Promise.all([getPriceHistoryCached(cheapest.id), getPriceStatsCached(cheapest.id)]);
+        histories.set(cheapest.id, history);
+        if (stat) stats.set(cheapest.id, stat);
+      })
+    );
+    return buildWatchList(candidates, histories, stats, now);
+  } catch (err) {
+    console.warn('[termometro] no se pudo armar la lista a vigilar:', err instanceof Error ? err.message : String(err));
+    return [];
+  }
+}
 
 /**
  * El resumen del termómetro a esta hora, o null si no se pudo calcular (la

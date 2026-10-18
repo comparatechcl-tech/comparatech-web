@@ -1,17 +1,26 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { CalendarDays, TrendingDown } from 'lucide-react';
+import { CalendarDays, Eye, TrendingDown, TrendingUp } from 'lucide-react';
 import { getDealsWithStats } from '@/lib/queries/deals';
 import { getCatalogProducts } from '@/lib/queries/products';
 import { getSiteCategories } from '@/lib/queries/site-categories';
+import { getWatchList } from '@/lib/queries/black-friday-thermometer';
 import { BLACK_FRIDAY, blackFridayPhase, blackFridayPicks, daysUntilBlackFriday, dealsByCategory } from '@/lib/black-friday';
-import { THERMOMETER_PATH, thermometerPhase } from '@/lib/black-friday-thermometer';
+import {
+  EVENT_WINDOWS,
+  THERMOMETER_PATH,
+  rangeLabel,
+  thermometerPhase,
+  type WatchItem,
+} from '@/lib/black-friday-thermometer';
 import { itemListJsonLd } from '@/lib/category-listing';
 import { GUIDES, guidePath } from '@/lib/guides';
 import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
+import { formatCLP } from '@/lib/format';
 import { SITE_URL } from '@/lib/site';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
+import { DropChip } from '@/components/product/DealBadge';
 
 const { year } = BLACK_FRIDAY;
 
@@ -36,10 +45,12 @@ export const revalidate = 300;
  */
 export default async function BlackFridayPage() {
   const now = Date.now();
-  const [{ deals, stats }, catalog, siteCategories] = await Promise.all([
+  const [{ deals, stats }, catalog, siteCategories, watch] = await Promise.all([
     getDealsWithStats(),
     getCatalogProducts(),
     getSiteCategories(),
+    // Del lunes 23 al lunes 30 de noviembre; fuera de esas fechas no lee nada.
+    getWatchList(now),
   ]);
   const { dropped, lowest, drops } = blackFridayPicks(deals, stats, now);
   const categories = dealsByCategory(deals, siteCategories);
@@ -84,6 +95,8 @@ export default async function BlackFridayPage() {
             ? ': el dato preliminar de qué está bajando de verdad.'
             : ': el balance de qué bajó de verdad.'}
       </p>
+
+      {watch.length > 0 && <WatchSection items={watch} inEvent={phase === 'durante'} />}
 
       <section aria-labelledby="bajaron" className="mt-10">
         <h2 id="bajaron" className="flex items-center gap-2 font-heading text-lg font-semibold">
@@ -227,5 +240,64 @@ export default async function BlackFridayPage() {
         </dl>
       </section>
     </div>
+  );
+}
+
+/**
+ * "Lo que vamos a vigilar" (del 23 al 26 de noviembre) y "Lo que estamos
+ * vigilando" (durante el evento): los modelos muy buscados (lib/models) con
+ * el precio de hoy de su versión de menor precio y el precio habitual del
+ * termómetro. Las etiquetas salen solo si el historial las confirma
+ * (lib/black-friday-thermometer, buildWatchList).
+ */
+function WatchSection({ items, inEvent }: { items: WatchItem[]; inEvent: boolean }) {
+  const reference = rangeLabel(EVENT_WINDOWS.refStart, EVENT_WINDOWS.refEnd);
+  return (
+    <section aria-labelledby="vigilar" className="mt-10">
+      <h2 id="vigilar" className="flex items-center gap-2 font-heading text-lg font-semibold">
+        <Eye size={18} className="text-accent" aria-hidden /> {inEvent ? 'Lo que estamos vigilando' : 'Lo que vamos a vigilar'}
+      </h2>
+      <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
+        Productos muy buscados, con su precio de hoy y el precio habitual que tuvieron {reference}.
+        {!inEvent && ' En el Black Friday vas a ver acá si bajan de verdad.'}
+      </p>
+      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((item) => (
+          <li key={item.path}>
+            <Link
+              href={item.path}
+              prefetch={false}
+              className="flex h-full flex-col gap-1 rounded-xl border border-border bg-surface p-4 transition hover:border-accent/40"
+            >
+              <span className="font-medium text-fg">{item.name}</span>
+              <span className="text-sm text-fg">
+                Desde {formatCLP(item.price)}{' '}
+                <span className="text-xs text-muted">
+                  hoy · {item.versions} {item.versions === 1 ? 'versión' : 'versiones'}
+                </span>
+              </span>
+              {item.note && (
+                <span className="text-xs text-muted">
+                  Precio habitual {reference}: {formatCLP(item.note.habitual)}
+                </span>
+              )}
+              {item.note?.roseBefore && (
+                <span className="inline-flex w-fit items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                  <TrendingUp size={12} strokeWidth={2.4} aria-hidden />
+                  Subió antes del Black Friday
+                </span>
+              )}
+              {item.note?.belowPct != null && (
+                <span className="inline-flex w-fit items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  <TrendingDown size={12} strokeWidth={2.4} aria-hidden />
+                  {item.note.belowPct}% bajo su precio habitual
+                </span>
+              )}
+              {item.drop && <DropChip amount={item.drop.amount} className="w-fit" />}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

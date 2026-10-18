@@ -9,7 +9,9 @@ import {
   asOfLabel,
   averageChange,
   baselineWindows,
+  buildWatchList,
   perHundred,
+  watchCandidates,
   buildThermometer,
   habitualPrice,
   highestHeld,
@@ -31,6 +33,7 @@ import {
   type ThermometerProduct,
   type ThermometerRow,
 } from './black-friday-thermometer';
+import type { Product } from '@/lib/types';
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -543,5 +546,62 @@ describe('Lo que vamos a vigilar', () => {
   it('sin referencia suficiente no dice nada', () => {
     const p = product({ createdAt: cl('2026-11-18 10:00') });
     expect(watchNote(p, [], cl('2026-11-24 10:00'))).toBeNull();
+  });
+});
+
+describe('buildWatchList', () => {
+  function catalogProduct(over: Partial<Product>): Product {
+    seq++;
+    return {
+      id: `c${seq}`,
+      slug: `c-${seq}`,
+      name: 'Parlante JBL Charge 6 Azul',
+      brand: 'JBL',
+      category: 'audio',
+      price: 150_000,
+      original_price: null,
+      ml_domain_id: 'MLC-SPEAKERS',
+      ml_family_id: 'FJBL',
+      is_active: true,
+      is_hidden: false,
+      created_at: iso(cl('2026-10-10 10:00')),
+      inactive_since: null,
+      ...over,
+    } as Product;
+  }
+
+  it('cada modelo con versiones a la venta, su versión de menor precio y lo que confirma el historial', () => {
+    const blue = catalogProduct({ price: 150_000 });
+    const red = catalogProduct({ name: 'Parlante JBL Charge 6 Rojo', price: 140_000 });
+    const kindleCase = catalogProduct({ name: 'Funda Kindle Paperwhite', ml_domain_id: 'MLC-E_READERS', price: 9_990 });
+    const candidates = watchCandidates([blue, red, kindleCase]);
+    expect(candidates.map((c) => [c.model.slug, c.cheapest.id, c.versions])).toEqual([['jbl-charge-6', red.id, 2]]);
+
+    const now = cl('2026-11-24 10:00');
+    const histories = new Map<string, { price: number; observed_at: string }[] | null>([
+      [
+        red.id,
+        [
+          { price: 120_000, observed_at: iso(cl('2026-10-12 10:00')) },
+          { price: 140_000, observed_at: iso(cl('2026-11-21 08:00')) },
+        ],
+      ],
+    ]);
+    const [item] = buildWatchList(candidates, histories, new Map(), now);
+    expect(item).toEqual({
+      name: 'JBL Charge 6',
+      path: '/modelo/jbl-charge-6',
+      versions: 2,
+      price: 140_000,
+      note: { habitual: 120_000, roseBefore: true, belowPct: null },
+      drop: null,
+    });
+  });
+
+  it('sin historial leído no dice nada del termómetro', () => {
+    const p = catalogProduct({});
+    const [item] = buildWatchList(watchCandidates([p]), new Map([[p.id, null]]), new Map(), cl('2026-11-24 10:00'));
+    expect(item.note).toBeNull();
+    expect(item.drop).toBeNull();
   });
 });
