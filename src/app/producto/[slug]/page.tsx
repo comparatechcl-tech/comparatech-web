@@ -18,6 +18,7 @@ import { ProductAlternatives } from '@/components/product/ProductAlternatives';
 import { ProductHeroImage, StickyBuyBar } from '@/components/product/StickyBuyBar';
 import { TrustChips } from '@/components/product/TrustChips';
 import { PriceHistoryNote } from '@/components/product/PriceHistoryNote';
+import { PriceHistory } from '@/components/product/PriceHistory';
 import { PriceFreshness } from '@/components/product/PriceFreshness';
 import { resolveDescription } from '@/lib/product-description';
 import { shortProductName, truncateAtWord } from '@/lib/text';
@@ -259,6 +260,8 @@ export default async function ProductoPage({
 
         <VariantLinks variants={variantLinks} />
 
+        <PriceHistory productId={product.id} name={short} price={product.price} soldOutSince={product.inactive_since} />
+
         {Object.keys(product.specs ?? {}).length > 0 && (
           <div className="mt-10">
             <h2 className="mb-3 font-heading text-lg font-semibold">Especificaciones</h2>
@@ -309,6 +312,10 @@ export default async function ProductoPage({
           <p className="mt-4 text-sm leading-relaxed text-muted">{resolveDescription(product)}</p>
         </div>
       </div>
+
+      {/* Lo que el sitio aporta sobre lo que muestra Mercado Libre: cómo se
+          movió el precio. Va antes de las specs, que son las de ML. */}
+      <PriceHistory productId={product.id} name={short} price={product.price} />
 
       <div className="mt-10">
         <h2 className="mb-3 font-heading text-lg font-semibold">Especificaciones</h2>

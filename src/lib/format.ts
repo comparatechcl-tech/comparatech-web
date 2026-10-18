@@ -95,6 +95,17 @@ export function formatDayMonth(iso: string): string {
  * Se usa para mostrar cuándo se verificó un precio contra Mercado Libre:
  * para quien compra, un precio sin fecha no dice si está vigente.
  */
+/** "17/10 21:30", en hora de Chile (la del registro del historial de precios). */
+export function formatDayMonthTime(iso: string): string {
+  const time = new Intl.DateTimeFormat('es-CL', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: 'America/Santiago',
+  }).format(new Date(iso));
+  return `${formatDayMonth(iso)} ${time}`;
+}
+
 export function formatTimeAgo(iso: string | null | undefined, now: number = Date.now()): string | null {
   if (!iso) return null;
   const then = new Date(iso).getTime();

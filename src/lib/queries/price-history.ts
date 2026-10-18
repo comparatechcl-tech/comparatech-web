@@ -84,8 +84,30 @@ export async function getPriceStats(productId: string): Promise<PriceStats | nul
   }
 }
 
-/** Una sola lectura por producto y por render, aunque la pidan varios componentes. */
-export const getPriceStatsCached = cache(getPriceStats);
+/**
+ * Los registros de los últimos 90 días, más el anterior a ellos (el precio
+ * que regía al empezar), para el gráfico de la ficha. Nunca lanza.
+ */
+export async function getPriceHistory(productId: string): Promise<PricePoint[] | null> {
+  try {
+    return await readHistory(productId);
+  } catch {
+    return null;
+  }
+}
+
+/** Una sola lectura por producto y por render: la usan la nota de la ficha y el gráfico. */
+export const getPriceHistoryCached = cache(getPriceHistory);
+
+/** Las estadísticas de la ficha, sobre la misma lectura que el gráfico. */
+export const getPriceStatsCached = cache(async (productId: string): Promise<PriceStats | null> => {
+  const history = await getPriceHistoryCached(productId);
+  try {
+    return history && history.length > 0 ? priceStats(history) : null;
+  } catch {
+    return null;
+  }
+});
 
 /** Productos por consulta: los ids viajan en la URL (37 caracteres cada uno). */
 const BULK_CHUNK = 40;
