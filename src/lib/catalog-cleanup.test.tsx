@@ -100,6 +100,44 @@ describe('analyzeCatalog', () => {
     expect(items.solo.reasons).toEqual([]);
   });
 
+  it('otra capacidad de la misma familia no es otro color: cada capacidad se queda con su más barato', () => {
+    // Mercado Libre pone las capacidades de un celular en la misma familia que los colores.
+    const items = byName(
+      analyze([
+        row({ name: 'Celular X (256 GB) - Negro', ml_family_id: 'F1', price: 1_000_000, ml_domain_id: 'MLC-CELLPHONES' }),
+        row({ name: 'Celular X (256 GB) - Azul', ml_family_id: 'F1', price: 1_050_000, ml_domain_id: 'MLC-CELLPHONES' }),
+        row({ name: 'Celular X (512 GB) - Negro', ml_family_id: 'F1', price: 1_300_000, ml_domain_id: 'MLC-CELLPHONES' }),
+        row({ name: 'Celular X 8GB RAM 2 TB Plata', ml_family_id: 'F1', price: 2_500_000, ml_domain_id: 'MLC-CELLPHONES' }),
+      ])
+    );
+    expect(items['Celular X (256 GB) - Negro'].reasons).toEqual([]);
+    expect(items['Celular X (256 GB) - Azul'].reasons).toEqual(['color_repetido']);
+    expect(items['Celular X (512 GB) - Negro'].reasons).toEqual([]);
+    expect(items['Celular X 8GB RAM 2 TB Plata'].reasons).toEqual([]);
+  });
+
+  it('la capacidad que dice el nombre es la cifra más grande en GB o TB', async () => {
+    const { storageOf } = await import('@/lib/catalog-cleanup');
+    expect(storageOf('Apple iPhone 18 Pro Max (2 TB) - Color plata')).toBe(2048);
+    expect(storageOf('Moto G86 Power 5g 8+256gb Azul')).toBe(256);
+    expect(storageOf('Teléfono Samsung Galaxy A57 5G de 128 GB, 8 GB de RAM')).toBe(128);
+    expect(storageOf('Parlante Jbl Charge 6 Negro')).toBeNull();
+  });
+
+  it('protege las versiones de un modelo con página propia: esa página las muestra todas', () => {
+    const items = byName(
+      analyze([
+        row({ name: 'Apple iPhone 17 (256 GB) - Blanco', ml_family_id: 'F7', price: 1_074_804, ml_domain_id: 'MLC-CELLPHONES', category: 'celulares' }),
+        row({ name: 'Apple iPhone 17 (256 GB) - Negro', ml_family_id: 'F7', price: 1_050_296, ml_domain_id: 'MLC-CELLPHONES', category: 'celulares' }),
+      ])
+    );
+    const blanco = items['Apple iPhone 17 (256 GB) - Blanco'];
+    expect(blanco.reasons).toEqual(['color_repetido']);
+    expect(blanco.keep).toBe('Versión de iPhone 17, que tiene su página');
+    expect(cleanupView(Object.values(items), 'sugeridos', NOW)).toEqual([]);
+    expect(cleanupView(Object.values(items), 'colores', NOW)).toEqual([]);
+  });
+
   it('protege lo fijado en portada, lo que tuvo clics este mes y lo publicado hace poco', () => {
     const featured = row({ name: 'portada', price: 5_000, is_featured: true });
     const clicked = row({ name: 'con clics', price: 5_000 });

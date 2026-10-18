@@ -8,13 +8,19 @@
  * deja de revisarse y se puede reponer desde Productos → Eliminados.
  *
  * Esto solo sugiere: decide el dueño. Nunca sugiere lo fijado en la portada,
- * lo que tuvo clics en el último mes ni lo publicado en redes hace poco.
+ * lo que tuvo clics en el último mes, lo publicado en redes hace poco ni las
+ * versiones de un modelo con página propia (lib/models): esas páginas viven
+ * de mostrar todos los colores y capacidades. El 18-10-2026 los "colores
+ * repetidos" se llevaron 15 versiones de los iPhone y Galaxy, incluidas las
+ * de 512 GB y 2 TB, porque Mercado Libre pone las capacidades en la misma
+ * familia que los colores.
  *
  * Sin imports del servidor: lo usan también los tests sin base.
  */
 
 import { estimateCommission } from '@/lib/commission';
 import { domainLabel } from '@/lib/product-types';
+import { modelOf } from '@/lib/models';
 
 export type CleanupReason = 'pausa_larga' | 'comision_baja' | 'color_repetido';
 
@@ -77,24 +83,49 @@ export interface CleanupSignals {
   now: Date;
 }
 
-/** El color que se queda de cada familia: el más barato a la venta (o el más barato, si ninguno lo está). */
+/**
+ * La capacidad que dice el nombre, en GB ("256 GB", "2 TB", "8+256gb"): la
+ * cifra más grande, porque la memoria RAM ("8 GB de RAM") siempre es menor.
+ * null si el nombre no dice ninguna.
+ */
+export function storageOf(name: string): number | null {
+  let max: number | null = null;
+  for (const m of name.matchAll(/(\d+(?:[.,]\d+)?)\s*(gb|tb)\b/gi)) {
+    const gb = parseFloat(m[1].replace(',', '.')) * (m[2].toLowerCase() === 'tb' ? 1024 : 1);
+    if (Number.isFinite(gb) && (max === null || gb > max)) max = gb;
+  }
+  return max;
+}
+
+/**
+ * Los colores de un mismo producto: misma familia de Mercado Libre y misma
+ * capacidad. La familia junta también las capacidades (un iPhone de 256 GB y
+ * uno de 2 TB), y esas son productos distintos, no colores. null si no tiene familia.
+ */
+function colorGroup(row: CleanupRow): string | null {
+  return row.ml_family_id ? `${row.ml_family_id}|${storageOf(row.name) ?? ''}` : null;
+}
+
+/** El color que se queda de cada grupo: el más barato a la venta (o el más barato, si ninguno lo está). */
 function familyKeepers(rows: CleanupRow[]): Set<string> {
   const best = new Map<string, CleanupRow>();
   const better = (a: CleanupRow, b: CleanupRow) =>
     a.is_active !== b.is_active ? a.is_active : a.price !== b.price ? a.price < b.price : a.created_at < b.created_at;
   for (const row of rows) {
-    if (!row.ml_family_id) continue;
-    const current = best.get(row.ml_family_id);
-    if (!current || better(row, current)) best.set(row.ml_family_id, row);
+    const group = colorGroup(row);
+    if (!group) continue;
+    const current = best.get(group);
+    if (!current || better(row, current)) best.set(group, row);
   }
   return new Set([...best.values()].map((r) => r.id));
 }
 
 export function analyzeCatalog(rows: CleanupRow[], signals: CleanupSignals): CleanupItem[] {
   const now = signals.now.getTime();
-  const familySize = new Map<string, number>();
+  const groupSize = new Map<string, number>();
   for (const row of rows) {
-    if (row.ml_family_id) familySize.set(row.ml_family_id, (familySize.get(row.ml_family_id) ?? 0) + 1);
+    const group = colorGroup(row);
+    if (group) groupSize.set(group, (groupSize.get(group) ?? 0) + 1);
   }
   const keepers = familyKeepers(rows);
 
@@ -107,17 +138,21 @@ export function analyzeCatalog(rows: CleanupRow[], signals: CleanupSignals): Cle
     const reasons: CleanupReason[] = [];
     if (pausedDays !== null && pausedDays > LONG_PAUSE_DAYS) reasons.push('pausa_larga');
     if (commission < LOW_COMMISSION_CLP) reasons.push('comision_baja');
-    if (row.ml_family_id && (familySize.get(row.ml_family_id) ?? 0) > 1 && !keepers.has(row.id)) {
+    const group = colorGroup(row);
+    if (group && (groupSize.get(group) ?? 0) > 1 && !keepers.has(row.id)) {
       reasons.push('color_repetido');
     }
 
+    const model = modelOf(row);
     const keep = row.is_featured
       ? 'Fijado en la portada'
       : clicks > 0
         ? `${clicks} ${clicks === 1 ? 'clic' : 'clics'} este mes`
         : signals.recentlyPosted.has(row.id)
           ? 'Publicado en redes hace poco'
-          : null;
+          : model
+            ? `Versión de ${model.name}, que tiene su página`
+            : null;
 
     return {
       id: row.id,
