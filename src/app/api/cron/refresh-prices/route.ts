@@ -45,11 +45,13 @@ import {
  * 200 aunque ML hubiera fallado en la mitad de los productos, y un precio
  * viejo pasaba días sin que nadie se enterara.
  *
- * Cuando el catálogo no cabe en una corrida (unos 1.300 productos en 40 s),
- * lo que no se alcanzó queda para la siguiente sin contar como falla: primero
- * van las ofertas y lo que tuvo clics o salió en redes, después lo revisado
- * hace más tiempo (ver lib/refresh-queue). El atraso se mide con el precio
- * visible más viejo, en el resumen de cada corrida y en /api/health.
+ * Si una corrida no alcanza a consultar todo (ML lento o un catálogo mucho
+ * más grande: hoy consulta 1.214 productos en unos 6,5 s), lo que faltó
+ * queda para la siguiente sin contar como falla: primero van las ofertas y lo
+ * que tuvo clics o salió en redes, después lo revisado hace más tiempo (ver
+ * lib/refresh-queue). El atraso se mide con el precio visible más viejo, en
+ * el resumen de cada corrida y en /api/health. El resumen trae también lo
+ * que tardó cada etapa (tiempos_ms).
  */
 
 export const maxDuration = 60;

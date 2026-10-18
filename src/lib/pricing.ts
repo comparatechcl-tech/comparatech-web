@@ -185,6 +185,20 @@ function sameOfferInfo(a: OfferInfo, b: OfferInfo | null | undefined): boolean {
 }
 
 /**
+ * ¿Vale la pena guardar el contador de ventas del vendedor por sí solo? Sube
+ * a cada rato (+2 en dos minutos en 151 productos, medido el 18-10-2026) y
+ * solo se muestra redondeado ("12.345 ventas") o se compara con umbrales.
+ * Escribirlo cada vez obligaba a actualizar de a uno cientos de productos por
+ * corrida: 23 de los 37 s de la revisión. Se guarda solo si no había dato o
+ * si ya se movió 5% o más; si el producto se escribe igual por otra razón
+ * (otro vendedor, otro precio…), va en esa misma escritura (ver decide).
+ */
+export function salesCountWorthWriting(stored: number | null | undefined, fresh: number): boolean {
+  if (typeof stored !== 'number' || stored <= 0) return fresh !== stored;
+  return Math.abs(fresh - stored) >= stored * 0.05;
+}
+
+/**
  * Decide qué cambia en un producto a partir de lo que respondió ML. Es pura
  * (no consulta nada) para poder probar cada caso sin red.
  *
@@ -209,6 +223,14 @@ export function decide(
   let reason: InactiveReason | null = null;
   let observation: PriceObservation | undefined;
   let previous: PriceStart | undefined;
+  /** Las ventas del vendedor, si cambiaron: se guardan al final (ver salesCountWorthWriting). */
+  let freshSales: number | null = null;
+  const settleSales = () => {
+    const writesAnyway = Object.keys(patch).some((key) => key !== 'price_checked_at');
+    if (freshSales !== null && (writesAnyway || salesCountWorthWriting(product.seller_sales_count, freshSales))) {
+      patch.seller_sales_count = freshSales;
+    }
+  };
 
   if (winners.status === 'no_winner') {
     reason = 'sin_ganador';
@@ -224,7 +246,7 @@ export function decide(
     if (listPrice !== product.original_price) patch.original_price = listPrice;
     if (winner.seller_id !== product.seller_id) patch.seller_id = winner.seller_id;
     if (winner.item_id !== product.winner_item_id) patch.winner_item_id = winner.item_id;
-    if (seller.salesCount !== product.seller_sales_count) patch.seller_sales_count = seller.salesCount;
+    if (seller.salesCount !== product.seller_sales_count) freshSales = seller.salesCount;
 
     const offerInfo = offerInfoFrom(winners.offers, winners.total);
     if (!sameOfferInfo(offerInfo, product.offer_info)) patch.offer_info = offerInfo;
@@ -281,6 +303,7 @@ export function decide(
     if (product.is_active) patch.is_active = false;
     if (product.inactive_reason !== reason) patch.inactive_reason = reason;
     if (product.is_active || !product.inactive_since) patch.inactive_since = now;
+    settleSales();
     return {
       ...base,
       result: reason,
@@ -295,6 +318,7 @@ export function decide(
   if (!product.is_active) patch.is_active = true;
   if (product.inactive_reason) patch.inactive_reason = null;
   if (product.inactive_since) patch.inactive_since = null;
+  settleSales();
 
   return {
     ...base,

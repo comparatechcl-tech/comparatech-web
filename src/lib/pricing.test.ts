@@ -26,6 +26,7 @@ import {
   priceProducts,
   pricingConcurrency,
   priorityOutcomes,
+  salesCountWorthWriting,
   summarizePricing,
   type PricedProduct,
   type PricingOutcome,
@@ -609,6 +610,46 @@ describe('priceProducts: raíces de categoría', () => {
       directLinks: true,
     });
     expect(ml.getRootCategory).not.toHaveBeenCalled();
+  });
+});
+
+describe('decide: las ventas del vendedor', () => {
+  // Sin cambios de oferta ni de categoría: lo único que cambia es el contador.
+  const settled = () => product({ offer_info: offerInfoFrom([offer()], 1) });
+  const withSales = (salesCount: number) => new Map([[7, { ...GREEN, salesCount }]]);
+
+  it('dos ventas más no obligan a escribir el producto: queda solo la hora de revisión', () => {
+    const out = decide(settled(), ok([offer()]), withSales(1202), NOW, true);
+    expect(out.patch).toEqual({ price_checked_at: NOW });
+  });
+
+  it('si el producto se escribe igual, el número nuevo va en la misma escritura', () => {
+    const out = decide(settled(), ok([offer({ price: 45_000 })]), withSales(1202), NOW, true);
+    expect(out.patch).toMatchObject({ price: 45_000, seller_sales_count: 1202 });
+  });
+
+  it('con otro vendedor también se guarda', () => {
+    const other = new Map([[8, { ...GREEN, id: 8, salesCount: 90 }]]);
+    const out = decide(settled(), ok([offer({ seller_id: 8, item_id: 'MLC901' })]), other, NOW, true);
+    expect(out.patch).toMatchObject({ seller_id: 8, seller_sales_count: 90 });
+  });
+
+  it('con 5% o más de diferencia, o sin dato guardado, se guarda solo', () => {
+    expect(decide(settled(), ok([offer()]), withSales(1260), NOW, true).patch).toMatchObject({
+      seller_sales_count: 1260,
+    });
+    const unknown = product({ offer_info: offerInfoFrom([offer()], 1), seller_sales_count: 0 });
+    expect(decide(unknown, ok([offer()]), withSales(3), NOW, true).patch).toMatchObject({ seller_sales_count: 3 });
+  });
+
+  it('salesCountWorthWriting', () => {
+    expect(salesCountWorthWriting(1200, 1202)).toBe(false);
+    expect(salesCountWorthWriting(1200, 1259)).toBe(false);
+    expect(salesCountWorthWriting(1200, 1260)).toBe(true);
+    expect(salesCountWorthWriting(1200, 1100)).toBe(true);
+    expect(salesCountWorthWriting(0, 3)).toBe(true);
+    expect(salesCountWorthWriting(0, 0)).toBe(false);
+    expect(salesCountWorthWriting(null, 10)).toBe(true);
   });
 });
 

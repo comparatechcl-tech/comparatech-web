@@ -3,12 +3,13 @@ import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 /**
  * En qué orden revisa precios el cron (ver api/cron/refresh-prices).
  *
- * Una corrida alcanza a consultar en Mercado Libre unos 1.300 productos en
- * su presupuesto de 40 s (medido el 18-10-2026: 1.214 en 31 s de promedio).
- * Mientras el catálogo quepa, el orden da lo mismo: se revisa todo cada
- * media hora. Cuando no cabe, lo que no se alcanzó conserva su hora de
- * revisión vieja y pasa al frente de la corrida siguiente, así que nada se
- * queda atrás para siempre. Este orden decide qué va primero:
+ * Una corrida consulta a Mercado Libre los 1.214 productos en unos 6,5 s
+ * (medido en Vercel el 18-10-2026), muy dentro de su presupuesto de 40 s: hoy
+ * se revisa todo cada media hora y el orden da lo mismo. Importa si no cabe:
+ * con ML lento (en Black Friday, por ejemplo) o un catálogo mucho más
+ * grande. Lo que no se alcanzó conserva su hora de revisión vieja y pasa al
+ * frente de la corrida siguiente, así que nada se queda atrás para siempre.
+ * Este orden decide qué va primero:
  *
  *  1. Lo que más se ve: las ofertas del sitio y lo que tuvo clics o salió en
  *     redes hace poco. Un descuento publicado con un precio viejo es lo que
@@ -22,9 +23,9 @@ import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 
 /**
  * Tope de prioritarios por corrida. El 18-10 eran 473 (456 ofertas, 18 con
- * clics y 17 en redes, con repetidos). Con el tope, al resto le quedan al
- * menos unos 700 lugares por corrida aunque las ofertas se multipliquen en
- * Black Friday; las prioritarias que no entran se ordenan con el resto, por
+ * clics y 17 en redes, con repetidos). Con el tope, aunque las ofertas se
+ * multipliquen en Black Friday, el resto no se queda esperando detrás de
+ * ellas: las prioritarias que no entran se ordenan con lo demás, por
  * antigüedad.
  */
 export const MAX_PRIORITY = 600;
