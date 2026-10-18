@@ -59,8 +59,8 @@ function escapeHtml(text: string): string {
 
 /**
  * Pie de foto en HTML, dentro del máximo de Telegram. Si no cabe, se saca
- * primero el link a la ficha (el botón ya lleva a la compra); el aviso de
- * la comisión no se corta nunca.
+ * primero el link a la ficha (el botón ya lleva a la compra); el precio y
+ * su hora no se cortan nunca.
  */
 export function telegramCaption(product: CaptionProduct, link: string, now: Date): string {
   const text = buildCaption(product, 'telegram', { now, siteUrl: SITE_URL, link });
@@ -69,7 +69,7 @@ export function telegramCaption(product: CaptionProduct, link: string, now: Date
 
   // Se sacan líneas enteras, por su comienzo exacto (hay un gancho que
   // también empieza con 🔎). Cortar por el final dejaría el link a medias
-  // y se llevaría la frase de la comisión, que va al final.
+  // y se llevaría los hashtags.
   const without = (...prefixes: string[]) =>
     escapeHtml(
       text

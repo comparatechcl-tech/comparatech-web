@@ -36,10 +36,9 @@ export default function TerminosPage() {
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Links de afiliado</h2>
         <p>
-          ComparaTech es afiliado del Programa de Afiliados y Creadores de Mercado Libre. Los botones &quot;Ver en
-          Mercado Libre&quot; son links de afiliado: si compras después de tocarlos, podemos recibir una comisión,
-          sin costo adicional para ti. La comisión no cambia el precio que pagas. Para decidir qué productos publicar se
-          consideran, entre otras cosas, la reputación del vendedor y la comisión que paga Mercado Libre.
+          ComparaTech participa en el Programa de Afiliados y Creadores de Mercado Libre: los botones &quot;Ver en
+          Mercado Libre&quot; son links de afiliado y pueden generar una comisión para el sitio, sin costo adicional
+          para ti.
         </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Contenido</h2>

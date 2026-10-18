@@ -114,11 +114,8 @@ export function Footer({ categories }: { categories: CategoryInfo[] }) {
         </div>
 
         <p className="mt-8 border-t border-border pt-6 text-xs leading-relaxed text-muted">
-          ComparaTech es afiliado del Programa de Afiliados y Creadores de
-          Mercado Libre y puede recibir una comisión por compras calificadas
-          realizadas a través de los links de este sitio, sin costo adicional
-          para ti. Los precios y la disponibilidad son responsabilidad del
-          vendedor en Mercado Libre y pueden cambiar en cualquier momento.
+          Los precios y la disponibilidad son responsabilidad del vendedor en
+          Mercado Libre y pueden cambiar en cualquier momento.
         </p>
         <div className="mt-4 flex flex-col gap-1 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
           <p>© {new Date().getFullYear()} ComparaTech. Todos los derechos reservados.</p>

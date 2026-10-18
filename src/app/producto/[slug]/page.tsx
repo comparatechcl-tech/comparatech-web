@@ -305,10 +305,7 @@ export default async function ProductoPage({
               className="w-full sm:w-auto"
             />
           </div>
-          <p className="mt-3 text-xs text-muted">
-            Al hacer clic serás dirigido a Mercado Libre para completar tu
-            compra. Como afiliados, podemos ganar una comisión.
-          </p>
+          <p className="mt-3 text-xs text-muted">Al hacer clic irás a Mercado Libre para completar tu compra.</p>
           <p className="mt-4 text-sm leading-relaxed text-muted">{resolveDescription(product)}</p>
         </div>
       </div>

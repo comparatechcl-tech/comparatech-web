@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Política de privacidad',
@@ -53,13 +52,8 @@ export default function PrivacidadPage() {
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Para qué</h2>
         <p>
-          Para saber qué productos y secciones se usan más y comprobar que los links de afiliado funcionen.
-          ComparaTech se financia con las comisiones del Programa de Afiliados de Mercado Libre (ver{' '}
-          <Link href="/terminos" className="text-accent hover:underline">
-            términos
-          </Link>
-          ), y estos totales son la forma de saber si el sitio está funcionando. No vendemos ni arrendamos datos a
-          nadie, y no los usamos para mostrarte publicidad.
+          Para saber qué productos y secciones se usan más y comprobar que los links a Mercado Libre funcionen. No
+          vendemos ni arrendamos datos a nadie, y no los usamos para mostrarte publicidad.
         </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Terceros</h2>
@@ -74,8 +68,7 @@ export default function PrivacidadPage() {
           </li>
           <li>
             <strong className="text-fg">Mercado Libre</strong>: al seguir un link, entras a su sitio y desde ese
-            momento rigen su política de privacidad y sus cookies. Mercado Libre sabe que llegaste desde ComparaTech,
-            porque así nos asigna la comisión.
+            momento rigen su política de privacidad y sus cookies. Mercado Libre sabe que llegaste desde ComparaTech.
           </li>
         </ul>
 

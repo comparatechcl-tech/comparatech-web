@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { hasForbiddenWord } from '@/lib/social/interest';
 import {
-  DISCLOSURE,
   YOUTUBE_TITLE_MAX,
   buildCaption,
   buildVideoTexts,
@@ -88,26 +87,19 @@ describe('buildCaption', () => {
     }
   });
 
-  it('la frase de la comisión sigue en todos los textos', () => {
+  it('ningún texto menciona la comisión (decisión del dueño, 18-10-2026)', () => {
     for (const channel of CHANNELS) {
-      expect(buildCaption(base, channel, opts)).toContain(DISCLOSURE);
+      expect(buildCaption(base, channel, opts)).not.toMatch(/comisi[oó]n/i);
     }
-    expect(DISCLOSURE).toMatch(/comisión/);
   });
 
-  it('la frase de la comisión va aparte y antes de los hashtags, nunca mezclada con ellos', () => {
+  it('los hashtags van al final, en su propia línea y separados del resto', () => {
     for (const channel of CHANNELS) {
       const lines = buildCaption(base, channel, opts).split('\n');
-      const at = lines.indexOf(DISCLOSURE);
-      expect(at).toBeGreaterThan(0);
-      expect(lines[at - 1]).toBe('');
       const tagLine = lines.findIndex((l) => l.startsWith('#'));
-      if (tagLine >= 0) {
-        expect(tagLine).toBeGreaterThan(at);
-        expect(lines[lines.length - 1]).toBe(lines[tagLine]);
-      } else {
-        expect(lines[lines.length - 1]).toBe(DISCLOSURE);
-      }
+      if (tagLine < 0) continue;
+      expect(tagLine).toBe(lines.length - 1);
+      expect(lines[tagLine - 1]).toBe('');
     }
   });
 
@@ -194,13 +186,12 @@ describe('buildVideoTexts', () => {
     expect(yt.filter((line, i) => line !== tk[i])).toEqual(['Link en el perfil del canal 👉 ComparaTech']);
   });
 
-  it('todos los textos largos conservan la frase de la comisión y la hora del precio', () => {
+  it('todos los textos largos conservan la hora del precio, sin "Publicidad" ni la comisión', () => {
     for (const text of [texts.instagram, texts.tiktok, texts.facebook, texts.youtubeDescription]) {
-      expect(text).toContain(DISCLOSURE);
       expect(text).toContain('Precio revisado el 04/10 a las 14:30 (hora de Chile); puede cambiar.');
       expect(text).not.toMatch(/publicidad/i);
-      // La comisión va antes de los hashtags, no perdida entre ellos.
-      expect(text.indexOf(DISCLOSURE)).toBeLessThan(text.indexOf('#ofertas'));
+      expect(text).not.toMatch(/comisi[oó]n/i);
+      expect(text.indexOf('Precio revisado')).toBeLessThan(text.indexOf('#ofertas'));
     }
   });
 
@@ -339,30 +330,30 @@ describe('Telegram', async () => {
     ...over,
   });
 
-  it('el pie de foto escapa HTML, cabe en 1024 y conserva el aviso', () => {
+  it('el pie de foto escapa HTML, cabe en 1024 y no menciona la comisión', () => {
     const caption = telegramCaption(row({ name: 'Parlante <b>Pro</b> & Más' }), 'https://meli.la/abc', now);
     expect(caption).toContain('&lt;b&gt;Pro&lt;/b&gt; &amp; Más');
     expect(caption.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_MAX);
-    expect(caption).toContain(DISCLOSURE);
+    expect(caption).not.toMatch(/comisi[oó]n/i);
   });
 
-  it('si el pie no cabe, saca los links enteros y conserva el aviso, el precio y la comisión', () => {
+  it('si el pie no cabe, saca los links enteros y conserva el precio y su hora', () => {
     // Un link pegado a mano con parámetros de seguimiento puede medir más que el pie entero.
     const longLink = `https://articulo.mercadolibre.cl/MLC-1?${'x'.repeat(1300)}`;
     const caption = telegramCaption(row({}), longLink, now);
     expect(caption.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_MAX);
     expect(caption).toContain('Precio revisado el');
-    expect(caption).toContain(DISCLOSURE);
     // Ni un link a medias (perdería los parámetros de afiliado) ni el de la ficha.
     expect(caption).not.toContain('https://');
 
     // Si basta con sacar el link a la ficha, el de compra se queda completo.
-    const mediumLink = `https://articulo.mercadolibre.cl/MLC-1?${'x'.repeat(620)}`;
+    // Tan largo que con los dos links no cabe, y sin el de la ficha sí.
+    const mediumLink = `https://articulo.mercadolibre.cl/MLC-1?${'x'.repeat(710)}`;
     const medium = telegramCaption(row({}), mediumLink, now);
     expect(medium.length).toBeLessThanOrEqual(TELEGRAM_CAPTION_MAX);
     expect(medium).toContain(mediumLink);
     expect(medium).not.toContain('Compara en ComparaTech');
-    expect(medium).toContain(DISCLOSURE);
+    expect(medium).toContain('Precio revisado el');
   });
 
   it('sacar el link a la ficha no se lleva el gancho que empieza con el mismo emoji', () => {

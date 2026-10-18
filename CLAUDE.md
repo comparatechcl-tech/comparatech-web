@@ -35,7 +35,7 @@ Este archivo es público, como todo el repositorio: no lleva secretos ni datos d
 - No se afirma que alguien revise cada producto. Lo cierto: los productos salen de listas de Mercado Libre por un proceso automático, solo de vendedores con reputación verde; los precios se actualizan solos varias veces al día y pueden cambiar; la comisión influye en qué aparece.
 - Descuentos: "N% de descuento" y "sin descuento $X". Nunca "precio de lista", "antes $X", "rebajado" ni "precio normal". "Bajó $X" solo si el historial de precios propio lo confirma.
 - Prohibido: "mejor precio", "el más barato", "recomendado" (se dice "Destacado"), "imperdible", "solo hoy", "verificado" (se dice "precio revisado").
-- Sin etiqueta "Publicidad" en las piezas ni en los textos (decisión del dueño). La frase de la comisión sí va en los textos de las publicaciones.
+- Sin etiqueta "Publicidad" y sin hablar de la comisión, ni en el sitio ni en las publicaciones, historias, videos o descripciones (decisión del dueño, 18-10-2026). La comisión se menciona solo en `/terminos`, en una frase. Textos cortos y con poco detalle. En TikTok sigue el interruptor de contenido comercial de la plataforma (no es texto).
 - El titular de la portada y los títulos SEO de las categorías los decide el dueño: pregunta antes de cambiarlos.
 
 ## Comandos

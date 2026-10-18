@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/settings', () => ({ readAffiliateSettings: vi.fn() }));
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { DISCLOSURE } from '@/lib/content/captions';
 import { checkPiecePath, pieceKey } from '@/lib/social/piece-url';
 import { MIN_INTEREST_POINTS, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
 import { pickByRules, TELEGRAM_RULES, type PickRules, type SocialProduct } from '@/lib/social/telegram';
@@ -220,10 +219,10 @@ describe('buildPlanItem', () => {
     expect(check).toMatchObject({ ok: true, snapshot: { price: 80_000, listPrice: 100_000, freeShipping: true } });
   });
 
-  it('cada red lleva su texto: sin la etiqueta "Publicidad", con la comisión y la hora del precio', () => {
+  it('cada red lleva su texto: sin la etiqueta "Publicidad" ni la comisión, con la hora del precio', () => {
     for (const text of Object.values(item.textos)) {
       expect(text).not.toMatch(/publicidad/i);
-      expect(text).toContain(DISCLOSURE);
+      expect(text).not.toMatch(/comisi[oó]n/i);
       expect(text).toContain('$80.000');
       expect(text).toMatch(/Precio revisado el \d{2}\/\d{2} a las \d{2}:\d{2}/);
     }
@@ -254,7 +253,7 @@ describe('buildPlanItem', () => {
     const text = item.textos.tiktok;
     expect(text).not.toContain('\n');
     expect(text.length).toBeLessThanOrEqual(2000);
-    expect(text.indexOf(DISCLOSURE)).toBeLessThan(text.indexOf('#'));
+    expect(text.indexOf('Precio revisado')).toBeLessThan(text.indexOf('#'));
     expect(text.trimEnd().endsWith('#audio')).toBe(true);
     expect(singleParagraph('a\n\n b \nc')).toBe('a · b · c');
     expect(singleParagraph('x'.repeat(50), 10)).toHaveLength(10);

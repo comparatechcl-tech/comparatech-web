@@ -153,11 +153,6 @@ export default async function HoyPage() {
           Lo que mostramos en redes y los mayores descuentos del día. Los precios se revisan contra Mercado Libre
           varias veces al día y pueden cambiar.
         </p>
-        {/* Arriba y legible: a esta página llega quien viene de un post, y el aviso no puede quedar al pie en letra chica. */}
-        <p className="mt-2 max-w-2xl text-sm text-fg">
-          Los links a Mercado Libre son de afiliado: si compras, ComparaTech recibe una comisión sin costo extra
-          para ti.
-        </p>
         {telegram && (
           <a
             href={telegram}

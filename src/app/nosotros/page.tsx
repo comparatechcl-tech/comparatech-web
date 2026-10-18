@@ -20,7 +20,7 @@ const STEPS = [
 export const metadata: Metadata = {
   title: 'Nosotros',
   alternates: { canonical: '/nosotros' },
-  description: 'Cómo funciona ComparaTech: de dónde salen los productos y los precios, y cómo gana dinero el sitio.',
+  description: 'Qué es ComparaTech y de dónde salen los productos y los precios que mostramos.',
 };
 
 export default function NosotrosPage() {
@@ -74,15 +74,6 @@ export default function NosotrosPage() {
       </div>
 
       <div className="mt-10 space-y-4 text-sm leading-relaxed text-muted">
-        <h2 className="font-heading text-lg font-semibold text-fg">
-          Cómo ganamos dinero
-        </h2>
-        <p>
-          Participamos en el Programa de Afiliados y Creadores de Mercado
-          Libre. Si compras a través de uno de nuestros links, podemos recibir
-          una comisión, sin costo extra para ti. Esa comisión influye en qué
-          productos aparecen en el sitio.
-        </p>
         <p>
           ¿Una duda o un precio que no coincide?{' '}
           <Link href="/contacto" className="text-accent hover:underline">

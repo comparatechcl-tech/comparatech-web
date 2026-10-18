@@ -17,8 +17,8 @@ import { OfferTemplate } from '@/lib/content/offer-template';
  *   solo si son ciertos.
  * - Siempre la hora del precio.
  *
- * La pieza no lleva la etiqueta "Publicidad": el dueño pidió sacarla (10/2026).
- * El aviso de la comisión va en el texto del post (lib/content/captions).
+ * La pieza no lleva la etiqueta "Publicidad" ni la comisión: el dueño pidió
+ * sacarlas (10/2026). La comisión se menciona solo en /terminos.
  *
  * La historia y la publicación del feed tienen su propio diseño
  * (lib/content/offer-template) y usan Inter, que va en el repositorio: quien

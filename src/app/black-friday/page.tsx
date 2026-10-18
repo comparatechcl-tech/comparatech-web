@@ -188,7 +188,7 @@ export default async function BlackFridayPage() {
             <dt className="font-medium text-fg">¿ComparaTech vende los productos?</dt>
             <dd className="mt-1 text-muted">
               No. Mostramos el precio que tienen en Mercado Libre y cómo se ha movido; la compra se hace en Mercado
-              Libre. Si compras con nuestro link, ComparaTech recibe una comisión sin costo extra para ti.
+              Libre.
             </dd>
           </div>
         </dl>

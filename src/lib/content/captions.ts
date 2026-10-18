@@ -3,8 +3,8 @@
  *
  * Antes cada post se escribía a mano y por eso no se publicaba nada: con un
  * texto listo en un clic, publicar cuesta un par de minutos. Todos los
- * textos dicen que el link paga comisión y que el precio es el de una hora
- * concreta (en Mercado Libre cambia varias veces al día).
+ * textos dicen que el precio es el de una hora concreta (en Mercado Libre
+ * cambia varias veces al día).
  *
  * Puro y sin I/O a propósito: lo usan el admin (cliente), el cron de
  * Telegram y los tests, con la misma salida para la misma entrada.
@@ -36,16 +36,11 @@ export interface CaptionOptions {
   link: string;
 }
 
-/**
- * El aviso de la comisión. Va en todos los textos, antes de los hashtags.
- *
- * Los textos y las piezas no llevan la etiqueta "Publicidad": el dueño pidió
- * sacarla de todo (10/2026). Esta frase es lo único que queda para decir que
- * los links pagan comisión, que es lo que le piden a un afiliado tanto
- * Mercado Libre como el SERNAC. No se quita ni se esconde entre los hashtags
- * sin que él lo decida sabiendo eso.
- */
-export const DISCLOSURE = 'Si compras con nuestro link, ComparaTech recibe una comisión sin costo extra para ti.';
+// Sin etiqueta "Publicidad" (el dueño la sacó el 11-10-2026) ni frase de la
+// comisión (la sacó el 18-10-2026, sabiendo que el SERNAC recomienda
+// identificar el contenido comercial): los textos no la llevan. En TikTok
+// sigue el interruptor de contenido comercial de la propia plataforma, que no
+// es texto. La comisión se menciona solo en /terminos.
 
 /** Comienzo de las dos líneas con link. Telegram las busca para sacarlas si el texto no cabe. */
 export const BUY_LINK_PREFIX = '👉 Ver en Mercado Libre:';
@@ -246,10 +241,6 @@ export function buildCaption(product: CaptionProduct, channel: CaptionChannel, o
     lines.push(`${SITE_LINK_PREFIX} ${productPageUrl(opts.siteUrl, product.slug, channel)}`);
   }
 
-  // Antes de los hashtags, para que no se pierda entre ellos.
-  lines.push('');
-  lines.push(DISCLOSURE);
-
   const tags = hashtags(product, channel);
   if (tags) {
     lines.push('');
@@ -330,7 +321,7 @@ function withLinkLine(text: string, line: string): string {
  * Ninguno lleva una dirección web: en la descripción de un reel no se puede
  * tocar, y en Facebook además la página puede tener un tope de publicaciones
  * con link. Todos mandan al perfil, que es donde está el link, y conservan la
- * frase de la comisión y la hora en que se revisó el precio.
+ * hora en que se revisó el precio.
  */
 export function buildVideoTexts(product: CaptionProduct, now: Date): VideoTexts {
   // Con estos dos canales buildCaption no escribe ni el link de compra ni el de la ficha.
