@@ -22,6 +22,8 @@ const ACTIONS: { value: string; label: string }[] = [
   { value: 'ocultar_producto', label: 'Ocultados' },
   { value: 'mostrar_producto', label: 'Vueltos a mostrar' },
   { value: 'eliminar_producto', label: 'Eliminados' },
+  { value: 'limpiar_catalogo', label: 'Limpiezas del catálogo' },
+  { value: 'reponer_productos', label: 'Repuestos' },
   { value: 'marcar_rrss', label: 'Redes sociales' },
   { value: 'reporte_afiliados', label: 'Reportes de ML' },
 ];
@@ -112,6 +114,10 @@ function describe(row: AdminEventRow): string {
       return `volvió a mostrar un producto${row.target ? ` · ${row.target}` : ''}`;
     case 'eliminar_producto':
       return `eliminó un producto${row.target ? ` · ${row.target}` : ''}`;
+    case 'limpiar_catalogo':
+      return count === null ? 'sacó productos del sitio' : `sacó ${plural(count, 'producto', 'productos')} del sitio`;
+    case 'reponer_productos':
+      return count === null ? 'repuso productos en el sitio' : `repuso ${plural(count, 'producto', 'productos')} en el sitio`;
     case 'marcar_rrss':
       // Las historias subidas a mano (/admin/historias) se anotan con la misma acción.
       if (after?.historia === 'publicada') return `marcó una historia como publicada${row.target ? ` · ${row.target}` : ''}`;

@@ -121,7 +121,11 @@ verificarla en el servidor. Secciones:
   (ganador, vendedor verde, categoría, comisión), se arma su link de afiliado
   y queda en la cola o publicado. Los links cortos (meli.la) no se abren:
   cada apertura cuenta como un clic de afiliado.
-- **Productos**: el catálogo publicado; ocultar, cambiar el link, etc.
+- **Productos**: el catálogo publicado; ocultar, cambiar el link, etc. En
+  "Limpiar catálogo" (`/admin/productos/limpiar`) se sacan de a varios los
+  que sobran (en pausa hace días, poca comisión, colores repetidos o lo
+  recién aprobado en bloque): dejan de revisarse cada 30 minutos y se
+  reponen desde Productos → Eliminados.
 - **Historias** y **Videos**: lo que hay para subir hoy a las redes.
 - **Problemas**: productos que salieron del sitio y por qué.
 - **Métricas**: clics hacia Mercado Libre y los datos de la Central de
