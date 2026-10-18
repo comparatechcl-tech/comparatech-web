@@ -264,6 +264,34 @@ export function latestIso(values: (string | null | undefined)[]): string | null 
   return best;
 }
 
+/** El instante más antiguo de una lista de fechas ISO, o null. */
+export function earliestIso(values: (string | null | undefined)[]): string | null {
+  let best: string | null = null;
+  let bestMs = Infinity;
+  for (const v of values) {
+    if (!v) continue;
+    const ms = new Date(v).getTime();
+    if (Number.isNaN(ms)) continue;
+    if (ms < bestMs) {
+      bestMs = ms;
+      best = v;
+    }
+  }
+  return best;
+}
+
+/**
+ * Minutos desde la revisión más vieja entre los productos a la venta. La
+ * última revisión puede estar al día y aun así quedar productos visibles con
+ * el precio de hace horas (ver lib/refresh-queue).
+ */
+export function oldestVisiblePriceMinutes(
+  rows: Pick<ProductStatRow, 'is_active' | 'price_checked_at'>[],
+  now: Date
+): number | null {
+  return minutesSince(earliestIso(rows.filter((r) => r.is_active).map((r) => r.price_checked_at)), now);
+}
+
 export function minutesSince(iso: string | null | undefined, now: Date): number | null {
   if (!iso) return null;
   const ms = new Date(iso).getTime();
@@ -570,6 +598,8 @@ export interface AdminSummary {
   linksSinVerificar: Stat<number>;
   coberturaPorCategoria: Stat<CategoryCoverage[]>;
   ultimoPrecioMin: Stat<number | null>;
+  /** El precio más viejo entre lo que está a la venta (ver oldestVisiblePriceMinutes). */
+  precioMasViejoMin: Stat<number | null>;
   ultimaProspeccion: Stat<ProspectInfo | null>;
   correoAyer: Stat<DigestInfo>;
   clics: Stat<ClickCounts>;
@@ -616,6 +646,7 @@ export async function readAdminSummary(
     linksSinVerificar: derive(products, (rows) => countUncheckedLinks(rows, directLinks)),
     coberturaPorCategoria,
     ultimoPrecioMin: derive(products, (rows) => minutesSince(latestIso(rows.map((r) => r.price_checked_at)), now)),
+    precioMasViejoMin: derive(products, (rows) => oldestVisiblePriceMinutes(rows, now)),
     ultimaProspeccion,
     correoAyer,
     clics,

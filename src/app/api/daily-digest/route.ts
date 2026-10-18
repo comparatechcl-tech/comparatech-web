@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
     paused: input.pausedCount,
     days_since_last_approval: input.daysSinceLastApproval,
     last_price_check_minutes: input.lastPriceCheckMinutes,
+    oldest_price_minutes: input.oldestPriceMinutes ?? null,
     errors: input.errors,
   });
 }

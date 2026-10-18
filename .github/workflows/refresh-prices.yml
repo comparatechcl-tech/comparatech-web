@@ -61,7 +61,9 @@ jobs:
           cat out.json 2>/dev/null || true
           echo
           # El endpoint responde 500 con ok:false si hubo escrituras fallidas
-          # o si más de la mitad de los productos quedó sin revisar.
+          # o si más de la mitad de lo que alcanzó a consultar dio error. Lo
+          # que no alcanza por tiempo queda para la corrida siguiente y no es
+          # falla; si otra corrida estaba en curso responde 200 con "omitida".
           if [ "$code" != "200" ]; then
             echo "::error::El refresco de precios respondió HTTP $code"
             exit 1

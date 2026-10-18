@@ -27,7 +27,9 @@ Cada push a `main` se publica solo en producción.
 3. **Refresco de precios (cada 30 minutos).** `/api/cron/refresh-prices`
    pregunta a ML el precio del ganador de la caja de compra (el que ve el
    comprador al llegar a la ficha), marca sin stock lo que ya no se vende y
-   vuelve a generar las páginas que cambiaron.
+   vuelve a generar las páginas que cambiaron. Si el catálogo no cabe en una
+   corrida, primero van las ofertas y lo que tuvo clics o salió en redes, y
+   lo demás rota desde el precio más viejo (`src/lib/refresh-queue.ts`).
 
 ### Quién llama a los crons
 
@@ -144,7 +146,7 @@ La lista completa, con la explicación de cada una, está en
 | `NEXT_PUBLIC_SITE_URL` | Dominio público (sitemap, Open Graph). Vacía = el dominio de Vercel. |
 
 Opcionales: `HEALTHCHECK_REFRESH_URL`, `HEALTHCHECK_PROSPECT_URL`,
-`HEALTHCHECK_BACKUP_URL`, `HEALTH_MAX_PRICE_AGE_MIN`, `MIN_COMMISSION_CLP`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHANNEL_ID`,
+`HEALTHCHECK_BACKUP_URL`, `HEALTH_MAX_PRICE_AGE_MIN`, `HEALTH_MAX_OLDEST_PRICE_AGE_MIN`, `MIN_COMMISSION_CLP`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHANNEL_ID`,
 `NEXT_PUBLIC_TELEGRAM_URL`.
 
 Las variables se cargan en Vercel → Settings → Environment Variables. Un

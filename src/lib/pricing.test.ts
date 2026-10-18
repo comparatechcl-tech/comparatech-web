@@ -26,6 +26,7 @@ import {
   priceProducts,
   pricingConcurrency,
   priorityOutcomes,
+  summarizePricing,
   type PricedProduct,
   type PricingOutcome,
 } from '@/lib/pricing';
@@ -608,6 +609,38 @@ describe('priceProducts: raíces de categoría', () => {
       directLinks: true,
     });
     expect(ml.getRootCategory).not.toHaveBeenCalled();
+  });
+});
+
+describe('priceProducts y summarizePricing: lo que no alcanza por tiempo', () => {
+  it('marca sin tiempo lo que no se consultó, sin tocarlo ni contarlo como error', async () => {
+    ml.getWinners.mockReset().mockResolvedValue(ok([offer()]));
+    ml.getSellers.mockReset().mockResolvedValue(sellers(GREEN));
+    ml.getRootCategory.mockReset().mockResolvedValue(null);
+    let calls = 0;
+    const outcomes = await priceProducts(
+      [product({ id: 'a' }), product({ id: 'b' }), product({ id: 'c' })],
+      'token',
+      // En serie: el tiempo se acaba después de consultar el primero.
+      { directLinks: true, concurrency: 1, outOfTime: () => calls++ >= 1 }
+    );
+    expect(ml.getWinners).toHaveBeenCalledTimes(1);
+    expect(outcomes.map((o) => [o.id, o.result, o.sinTiempo ?? false])).toEqual([
+      ['a', 'activo', false],
+      ['b', 'error_transitorio', true],
+      ['c', 'error_transitorio', true],
+    ]);
+    expect(outcomes[1].patch).toEqual({});
+
+    const summary = summarizePricing(outcomes);
+    expect(summary).toMatchObject({ revisados: 1, sin_tiempo: 2, activos: 1, errores_transitorios: 0 });
+  });
+
+  it('un tropiezo de ML sí cuenta como error transitorio', async () => {
+    ml.getWinners.mockReset().mockResolvedValue({ status: 'error', detail: 'HTTP 500' });
+    ml.getSellers.mockReset().mockResolvedValue(new Map());
+    const outcomes = await priceProducts([product()], 'token', { directLinks: true });
+    expect(summarizePricing(outcomes)).toMatchObject({ revisados: 1, sin_tiempo: 0, errores_transitorios: 1 });
   });
 });
 

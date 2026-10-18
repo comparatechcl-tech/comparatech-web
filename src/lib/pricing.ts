@@ -111,6 +111,13 @@ export interface PricingOutcome {
   observation?: PriceObservation;
   /** Solo cuando cambió el precio: lo que regía hasta ahora. */
   previous?: PriceStart;
+  /**
+   * No se alcanzó a consultar: se acabó el tiempo de la corrida. No dice nada
+   * del producto (queda como error_transitorio, sin cambios) y no cuenta como
+   * falla de ML: conserva su hora de revisión vieja y pasa al frente de la
+   * próxima corrida.
+   */
+  sinTiempo?: boolean;
 }
 
 function listPriceOf(offer: { price: number; original_price: number | null }): number | null {
@@ -356,10 +363,11 @@ export async function priceProducts(
   const checkLink = !directLinks;
 
   const fetched = await mapWithConcurrency(products, concurrency, async (product) => {
-    const winners: WinnersResult = options.outOfTime?.()
-      ? { status: 'error', detail: 'sin tiempo en esta corrida' }
-      : await getWinners(product.ml_product_id, token);
-    return { product, winners };
+    if (options.outOfTime?.()) {
+      const winners: WinnersResult = { status: 'error', detail: 'sin tiempo en esta corrida' };
+      return { product, winners, reached: false };
+    }
+    return { product, winners: await getWinners(product.ml_product_id, token), reached: true };
   });
 
   const sellers = await getSellers(
@@ -409,7 +417,8 @@ export async function priceProducts(
   });
 
   const now = new Date().toISOString();
-  return fetched.map(({ product, winners }) => {
+  return fetched.map(({ product, winners, reached }) => {
+    if (!reached) return { ...decide(product, winners, sellers, now, checkLink, roots), sinTiempo: true };
     const target = targets.get(product.id);
     if (!target) return decide(product, winners, sellers, now, checkLink, roots);
 
@@ -599,10 +608,17 @@ export async function applyPricing(
   return [...results, ...touchFailures].reduce<number>((sum, failed) => sum + failed, 0);
 }
 
+/**
+ * Resumen de una tanda. `revisados` son los que se alcanzó a consultar en ML;
+ * los que quedaron fuera por tiempo van aparte, en `sin_tiempo`, y no cuentan
+ * como errores: es lo esperado cuando el catálogo no cabe en una corrida.
+ */
 export function summarizePricing(outcomes: PricingOutcome[]) {
-  const count = (result: PricingResult) => outcomes.filter((o) => o.result === result).length;
+  const reached = outcomes.filter((o) => !o.sinTiempo);
+  const count = (result: PricingResult) => reached.filter((o) => o.result === result).length;
   return {
-    revisados: outcomes.length,
+    revisados: reached.length,
+    sin_tiempo: outcomes.length - reached.length,
     activos: count('activo'),
     precios_actualizados: outcomes.filter((o) => o.priceChanged).length,
     reactivados: outcomes.filter((o) => o.reactivated).length,

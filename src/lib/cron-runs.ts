@@ -15,10 +15,12 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
  */
 
 export interface CronRun {
+  /** La fila de la bitácora; null o ausente si no se pudo anotar (falta la tabla o la base falló). */
+  id?: number | string | null;
   finish(ok: boolean, summary: unknown, error?: string): Promise<void>;
 }
 
-const NOOP_RUN: CronRun = { finish: async () => {} };
+const NOOP_RUN: CronRun = { id: null, finish: async () => {} };
 
 /** jsonb solo acepta lo que sobrevive a JSON (sin funciones, ni ciclos, ni BigInt). */
 function toJson(value: unknown): unknown {
@@ -46,6 +48,7 @@ export async function startCronRun(admin: SupabaseClient, job: string): Promise<
 
   let finished = false;
   return {
+    id,
     async finish(ok, summary, error) {
       // Una sola vez: si una ruta llama a finish en el catch después de
       // haberlo hecho en el camino feliz, se queda el primer resultado.
@@ -67,6 +70,43 @@ export async function startCronRun(admin: SupabaseClient, job: string): Promise<
       }
     },
   };
+}
+
+/** Una función de Vercel muere a los 60 s: una corrida abierta hace más que esto ya terminó o se cortó. */
+const RUN_IN_PROGRESS_WINDOW_MS = 70_000;
+
+/**
+ * ¿Hay otra corrida del mismo cron en curso, empezada antes que esta? Sirve
+ * de candado sin migración: el refresco se lanza desde cuatro lados (pg_cron,
+ * Vercel, GitHub y el admin) y dos corridas juntas duplicaban filas del
+ * historial de precios y la carga a Mercado Libre.
+ *
+ * Cada corrida se anota primero y después mira si hay una anterior abierta:
+ * si dos parten a la vez, sigue solo la de id menor. Una corrida cortada sin
+ * cerrar deja de contar a los 70 s. Ante cualquier duda (sin bitácora, la base
+ * falla) responde false: es preferible una corrida de más que ninguna.
+ */
+export async function earlierRunInProgress(
+  admin: SupabaseClient,
+  job: string,
+  id: number | string | null | undefined,
+  windowMs = RUN_IN_PROGRESS_WINDOW_MS
+): Promise<boolean> {
+  if (id === null || id === undefined) return false;
+  try {
+    const { data, error } = await admin
+      .from('cron_runs')
+      .select('id')
+      .eq('job', job)
+      .is('finished_at', null)
+      .lt('id', id)
+      .gte('started_at', new Date(Date.now() - windowMs).toISOString())
+      .limit(1);
+    if (error) return false;
+    return Array.isArray(data) && data.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 const HEALTHCHECK_TIMEOUT_MS = 5000;

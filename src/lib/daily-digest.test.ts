@@ -236,6 +236,10 @@ describe('líneas fijas', () => {
   it('salud y errores', () => {
     expect(healthLine(5)).toBe('Salud: precios revisados hace 5 min');
     expect(healthLine(null)).toContain('no se sabe');
+    expect(healthLine(5, 40)).toBe('Salud: precios revisados hace 5 min · el más viejo de lo que está a la venta, hace 40 min');
+    expect(healthLine(5, 300)).toBe(
+      'Salud: precios revisados hace 5 min · ⚠ hay productos a la venta con el precio de hace 5 h'
+    );
     expect(errorsLine([])).toBe('');
     expect(errorsLine(['candidatos por revisar', 'clics de ayer'])).toBe(
       '⚠ Datos incompletos: falló candidatos por revisar, clics de ayer'
@@ -332,7 +336,9 @@ describe('gatherDigestInput', () => {
       if (q.table === 'product_candidates') return { data: [{ reviewed_at: '2026-09-28T15:00:00Z' }] };
       if (q.table === 'products' && q.head) return { count: 80 };
       if (q.table === 'products' && q.columns === 'price_checked_at') {
-        return { data: [{ price_checked_at: '2026-10-04T14:40:00Z' }] };
+        // La más vieja de lo visible se pide de menor a mayor.
+        const oldest = q.filters.some((f) => f === 'order:["price_checked_at",{"ascending":true}]');
+        return { data: [{ price_checked_at: oldest ? '2026-10-04T13:30:00Z' : '2026-10-04T14:40:00Z' }] };
       }
       if (q.table === 'products') {
         return {
@@ -355,6 +361,7 @@ describe('gatherDigestInput', () => {
     expect(result.needsLink).toEqual([{ name: 'Link roto' }]);
     expect(result.pausedCount).toBe(1);
     expect(result.lastPriceCheckMinutes).toBe(20);
+    expect(result.oldestPriceMinutes).toBe(90);
     expect(result.daysSinceLastApproval).toBe(6);
     expect(result.clicsAyer).toBeNull();
     expect(result.linkMode.directLinks).toBe(false);

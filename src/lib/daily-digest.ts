@@ -60,6 +60,11 @@ export interface DigestInput {
   attribution: DigestAttribution;
   /** Minutos desde la revisión de precios más reciente; null si no se sabe. */
   lastPriceCheckMinutes: number | null;
+  /**
+   * Minutos desde la revisión más vieja entre lo que está a la venta; null
+   * si no se sabe. Muestra si la revisión alcanza a todo el catálogo.
+   */
+  oldestPriceMinutes?: number | null;
   /** Clics hacia Mercado Libre ayer (hora de Chile); null si no se miden todavía. */
   clicsAyer: number | null;
   /** Consultas que fallaron al armar el correo. */
@@ -175,11 +180,17 @@ export function linkModeLine(input: Pick<DigestInput, 'linkMode' | 'attribution'
   return `Modo de links: ${mode}${word ? ` · matt_word=${word}` : ''}`;
 }
 
-/** "Salud: precios revisados hace 12 min". */
-export function healthLine(minutes: number | null): string {
-  return minutes === null
-    ? 'Salud: no se sabe cuándo se revisaron los precios por última vez'
-    : `Salud: precios revisados hace ${minutes} min`;
+/** Sobre esto el precio más viejo de lo que está a la venta es un atraso (igual que en /api/health). */
+const OLDEST_PRICE_ALERT_MIN = 240;
+
+/** "Salud: precios revisados hace 12 min · el más viejo de lo que está a la venta, hace 40 min". */
+export function healthLine(minutes: number | null, oldestMinutes: number | null = null): string {
+  if (minutes === null) return 'Salud: no se sabe cuándo se revisaron los precios por última vez';
+  const latest = `Salud: precios revisados hace ${minutes} min`;
+  if (oldestMinutes === null) return latest;
+  return oldestMinutes > OLDEST_PRICE_ALERT_MIN
+    ? `${latest} · ⚠ hay productos a la venta con el precio de hace ${Math.floor(oldestMinutes / 60)} h`
+    : `${latest} · el más viejo de lo que está a la venta, hace ${oldestMinutes} min`;
 }
 
 /** "⚠ Datos incompletos: falló productos publicados, clics de ayer". Vacío si no hubo errores. */
@@ -409,7 +420,7 @@ export function buildDigestHtml(input: DigestInput): string {
           <p style="font-size:12px;color:${MUTED};margin:28px 0 24px;border-top:1px solid ${BORDER};padding-top:16px;line-height:1.6;">
             ${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.${clicksLine}<br>
             ${escapeHtml(linkModeLine(input))}<br>
-            ${escapeHtml(healthLine(input.lastPriceCheckMinutes))}
+            ${escapeHtml(healthLine(input.lastPriceCheckMinutes, input.oldestPriceMinutes ?? null))}
           </p>
 
         </td></tr>
@@ -475,6 +486,6 @@ export function buildDigestText(input: DigestInput): string {
 
   lines.push('', `${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.`);
   if (clicsAyer !== null) lines.push(`${clicsAyer} ${plural(clicsAyer, 'clic', 'clics')} hacia Mercado Libre ayer.`);
-  lines.push(linkModeLine(input), healthLine(input.lastPriceCheckMinutes));
+  lines.push(linkModeLine(input), healthLine(input.lastPriceCheckMinutes, input.oldestPriceMinutes ?? null));
   return lines.join('\n');
 }

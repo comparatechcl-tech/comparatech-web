@@ -57,6 +57,20 @@ async function readLastPriceCheck(admin: SupabaseClient): Promise<{ at: string |
   return { at: ((data ?? [])[0] as { price_checked_at?: string | null } | undefined)?.price_checked_at ?? null, error: null };
 }
 
+/** Revisión más vieja entre lo que está a la venta: dice si la revisión alcanza a todo el catálogo. */
+async function readOldestVisiblePriceCheck(admin: SupabaseClient): Promise<{ at: string | null; error: DbError }> {
+  const { data, error } = await admin
+    .from('products')
+    .select('price_checked_at')
+    .eq('is_active', true)
+    .eq('is_hidden', false)
+    .not('price_checked_at', 'is', null)
+    .order('price_checked_at', { ascending: true })
+    .limit(1);
+  if (error) return { at: null, error };
+  return { at: ((data ?? [])[0] as { price_checked_at?: string | null } | undefined)?.price_checked_at ?? null, error: null };
+}
+
 /**
  * Clics de ayer (hora de Chile). null si la tabla todavía no existe
  * (migración 0015): no es un error, es algo que falta activar.
@@ -111,7 +125,7 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
   // zona horaria del servidor y del cambio de hora en Chile.
   const since = now.getTime() - 24 * 60 * 60 * 1000;
 
-  const [pendingRes, publishedRes, offSiteRes, approvalRes, priceRes, clicksRes, settingsRes, attributionRes] =
+  const [pendingRes, publishedRes, offSiteRes, approvalRes, priceRes, oldestRes, clicksRes, settingsRes, attributionRes] =
     await Promise.all([
       settle(readPending(admin)),
       settle(
@@ -135,6 +149,7 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
       ),
       settle(readDaysSinceLastApproval(admin, now)),
       settle(readLastPriceCheck(admin)),
+      settle(readOldestVisiblePriceCheck(admin)),
       settle(readClicksYesterday(admin, now)),
       settle(readAffiliateSettings(admin)),
       settle(readAttributionStatus(admin)),
@@ -173,6 +188,10 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
   if (!failed('última revisión de precios', priceRes.thrown ?? priceRes.value?.error)) {
     lastPriceCheckMinutes = minutesSince(priceRes.value?.at ?? null, now);
   }
+  let oldestPriceMinutes: number | null = null;
+  if (!failed('precio más viejo', oldestRes.thrown ?? oldestRes.value?.error)) {
+    oldestPriceMinutes = minutesSince(oldestRes.value?.at ?? null, now);
+  }
 
   // Clics de ayer
   let clicsAyer: number | null = null;
@@ -199,6 +218,7 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
     linkMode: { directLinks: settings.directLinks, word: settings.word },
     attribution,
     lastPriceCheckMinutes,
+    oldestPriceMinutes,
     clicsAyer,
     errors,
   };

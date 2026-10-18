@@ -27,6 +27,13 @@ const STALE_PUBLISH_DAYS = 3;
 const PRICE_WARN_MIN = 60;
 /** Sobre 6 horas el refresco no está corriendo (el respaldo de GitHub corre cada 3 a 6 h). */
 const PRICE_BAD_MIN = 360;
+/**
+ * El precio más viejo de lo que está a la venta. Con la revisión rotando
+ * (ver lib/refresh-queue) lo normal es menos de 2 horas; sobre 4 horas avisa
+ * también /api/health.
+ */
+const OLDEST_PRICE_WARN_MIN = 120;
+const OLDEST_PRICE_BAD_MIN = 240;
 /** La prospección corre una vez al día. */
 const PROSPECT_WARN_HOURS = 26;
 
@@ -142,7 +149,7 @@ export default async function ResumenPage() {
       <section className="mt-8">
         <h2 className="font-heading text-lg font-semibold text-fg">Salud</h2>
         <ul className="mt-3 divide-y divide-border rounded-xl border border-border bg-surface">
-          <PriceHealth stat={summary.ultimoPrecioMin} />
+          <PriceHealth stat={summary.ultimoPrecioMin} oldest={summary.precioMasViejoMin} />
           <HealthRow
             tone={prospectTone(summary.ultimaProspeccion.data?.at ?? null, now, summary.ultimaProspeccion.error)}
             label="Última prospección"
@@ -303,14 +310,19 @@ function HealthRow({
   );
 }
 
-function PriceHealth({ stat }: { stat: Stat<number | null> }) {
+function PriceHealth({ stat, oldest }: { stat: Stat<number | null>; oldest: Stat<number | null> }) {
   if (stat.error) return <HealthRow tone="neutral" label="Precios verificados" value="—" />;
   const min = stat.data;
   if (min === null) return <HealthRow tone="warn" label="Precios verificados" value="sin datos" />;
   const tone: Tone = min > PRICE_BAD_MIN ? 'bad' : min > PRICE_WARN_MIN ? 'warn' : 'ok';
+  // La última revisión puede estar al día y aun así quedar productos a la
+  // venta con el precio de hace horas (ver lib/refresh-queue).
+  const old = oldest.data;
+  const oldTone: Tone =
+    old === null ? 'ok' : old > OLDEST_PRICE_BAD_MIN ? 'bad' : old > OLDEST_PRICE_WARN_MIN ? 'warn' : 'ok';
   return (
     <HealthRow
-      tone={tone}
+      tone={tone === 'bad' || oldTone === 'bad' ? 'bad' : tone === 'warn' || oldTone === 'warn' ? 'warn' : 'ok'}
       label="Precios verificados"
       value={`hace ${formatMinutes(min)}`}
       hint={
@@ -318,7 +330,11 @@ function PriceHealth({ stat }: { stat: Stat<number | null> }) {
           ? 'El refresco cada 30 min no está corriendo: aplica la migración 0011 en Supabase'
           : tone === 'warn'
             ? 'El refresco va atrasado: debería correr cada 30 minutos.'
-            : undefined
+            : old !== null && oldTone !== 'ok'
+              ? `Hay productos a la venta con el precio de hace ${formatMinutes(old)}: la revisión no alcanza a todo el catálogo o un producto falla siempre.`
+              : old !== null
+                ? `El más viejo de lo que está a la venta: hace ${formatMinutes(old)}.`
+                : undefined
       }
     />
   );

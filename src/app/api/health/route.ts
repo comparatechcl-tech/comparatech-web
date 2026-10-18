@@ -27,12 +27,29 @@ export const revalidate = 0;
  */
 const DEFAULT_MAX_PRICE_AGE_MIN = 90;
 
+/**
+ * Antigüedad máxima del precio visible más viejo. La última revisión puede
+ * estar al día y aun así haber productos a la venta con el precio de hace
+ * horas: cuando el catálogo no cabe en una corrida, o si un producto falla
+ * siempre en ML. Con la revisión rotando, lo normal es menos de 2 horas
+ * (ver lib/refresh-queue). Se puede cambiar con HEALTH_MAX_OLDEST_PRICE_AGE_MIN.
+ */
+const DEFAULT_MAX_OLDEST_PRICE_AGE_MIN = 240;
+
 /** La prospección es diaria: 26 horas cubren el margen de hora de Vercel Cron. */
 const MAX_PROSPECT_AGE_H = 26;
 
+function envMinutes(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 function maxPriceAgeMin(): number {
-  const value = Number(process.env.HEALTH_MAX_PRICE_AGE_MIN);
-  return Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_PRICE_AGE_MIN;
+  return envMinutes('HEALTH_MAX_PRICE_AGE_MIN', DEFAULT_MAX_PRICE_AGE_MIN);
+}
+
+function maxOldestPriceAgeMin(): number {
+  return envMinutes('HEALTH_MAX_OLDEST_PRICE_AGE_MIN', DEFAULT_MAX_OLDEST_PRICE_AGE_MIN);
 }
 
 function ageMs(iso: string | null | undefined, now: number): number | null {
@@ -47,6 +64,20 @@ async function latestPriceCheck(admin: SupabaseClient): Promise<string | null> {
     .select('price_checked_at')
     .not('price_checked_at', 'is', null)
     .order('price_checked_at', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return ((data ?? [])[0] as { price_checked_at?: string } | undefined)?.price_checked_at ?? null;
+}
+
+/** La revisión más vieja entre los productos a la venta en el sitio (los borrados también están ocultos). */
+async function oldestVisiblePriceCheck(admin: SupabaseClient): Promise<string | null> {
+  const { data, error } = await admin
+    .from('products')
+    .select('price_checked_at')
+    .eq('is_active', true)
+    .eq('is_hidden', false)
+    .not('price_checked_at', 'is', null)
+    .order('price_checked_at', { ascending: true })
     .limit(1);
   if (error) throw new Error(error.message);
   return ((data ?? [])[0] as { price_checked_at?: string } | undefined)?.price_checked_at ?? null;
@@ -89,32 +120,45 @@ async function latestProspect(admin: SupabaseClient): Promise<string | null> {
 export async function GET() {
   const headers = { 'cache-control': 'no-store, max-age=0' };
   const admin = getSupabaseAdmin();
-  if (!admin) {
-    return NextResponse.json({ ok: false, precios_hace_min: null, prospeccion_hace_h: null }, { status: 503, headers });
-  }
+  const unknown = { ok: false, precios_hace_min: null, precio_mas_viejo_hace_min: null, prospeccion_hace_h: null };
+  if (!admin) return NextResponse.json(unknown, { status: 503, headers });
 
   try {
     const now = Date.now();
-    const [priceAt, prospectAt] = await Promise.all([latestPriceCheck(admin), latestProspect(admin)]);
+    const [priceAt, oldestAt, prospectAt] = await Promise.all([
+      latestPriceCheck(admin),
+      oldestVisiblePriceCheck(admin),
+      latestProspect(admin),
+    ]);
     const priceAge = ageMs(priceAt, now);
+    const oldestAge = ageMs(oldestAt, now);
     const prospectAge = ageMs(prospectAt, now);
 
     const preciosHaceMin = priceAge === null ? null : Math.floor(priceAge / 60_000);
+    const masViejoHaceMin = oldestAge === null ? null : Math.floor(oldestAge / 60_000);
     const prospeccionHaceH = prospectAge === null ? null : Math.round((prospectAge / 3_600_000) * 10) / 10;
 
+    // Sin productos visibles revisados no hay "más viejo" que medir: lo cubre
+    // la última revisión.
     const ok =
       preciosHaceMin !== null &&
       preciosHaceMin <= maxPriceAgeMin() &&
+      (masViejoHaceMin === null || masViejoHaceMin <= maxOldestPriceAgeMin()) &&
       prospeccionHaceH !== null &&
       prospeccionHaceH <= MAX_PROSPECT_AGE_H;
 
     return NextResponse.json(
-      { ok, precios_hace_min: preciosHaceMin, prospeccion_hace_h: prospeccionHaceH },
+      {
+        ok,
+        precios_hace_min: preciosHaceMin,
+        precio_mas_viejo_hace_min: masViejoHaceMin,
+        prospeccion_hace_h: prospeccionHaceH,
+      },
       { status: ok ? 200 : 503, headers }
     );
   } catch (err) {
     // El detalle va a los logs de Vercel, no a la respuesta pública.
     console.error('[health] no se pudo leer la base:', err instanceof Error ? err.message : err);
-    return NextResponse.json({ ok: false, precios_hace_min: null, prospeccion_hace_h: null }, { status: 503, headers });
+    return NextResponse.json(unknown, { status: 503, headers });
   }
 }

@@ -5,8 +5,9 @@ import { SITE_URL } from '@/lib/site';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
-import { pingHealthcheck, startCronRun } from '@/lib/cron-runs';
+import { earlierRunInProgress, pingHealthcheck, startCronRun } from '@/lib/cron-runs';
 import { fetchAllRows } from '@/lib/admin-stats';
+import { oldestVisibleMinutes, refreshQueue } from '@/lib/refresh-queue';
 import { syncTelegramPosts } from '@/lib/social/telegram';
 import { enrichFromMl, getMlToken, mlTokenAttempts, mlTokenError } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
@@ -43,6 +44,12 @@ import {
  * el curl -f de GitHub Actions y el healthcheck lo notan. Antes respondía
  * 200 aunque ML hubiera fallado en la mitad de los productos, y un precio
  * viejo pasaba días sin que nadie se enterara.
+ *
+ * Cuando el catálogo no cabe en una corrida (unos 1.300 productos en 40 s),
+ * lo que no se alcanzó queda para la siguiente sin contar como falla: primero
+ * van las ofertas y lo que tuvo clics o salió en redes, después lo revisado
+ * hace más tiempo (ver lib/refresh-queue). El atraso se mide con el precio
+ * visible más viejo, en el resumen de cada corrida y en /api/health.
  */
 
 export const maxDuration = 60;
@@ -77,8 +84,13 @@ const ENRICHMENT_CUTOFF_MS = WRITE_DEADLINE_MS - 18_000;
 
 /** Columnas de la migración 0016: si se leen, decide() compara contra lo guardado. */
 const COLUMNS_0016 = 'offer_info, ml_category_id, ml_root_category';
-// slug: para avisarle a Bing (IndexNow) qué fichas cambiaron.
-const REFRESH_COLUMNS = `${PRICED_COLUMNS}, slug, name, brand, specs, description, ml_family_id, ml_domain_id, category`;
+// slug: para avisarle a Bing (IndexNow) qué fichas cambiaron. price_checked_at:
+// para medir el precio visible más viejo que queda. Sin descripción ni specs:
+// eran la mitad de lo que se leía en cada corrida y solo las usa la
+// reparación, que lee aparte sus pocos productos.
+const REFRESH_COLUMNS = `${PRICED_COLUMNS}, slug, price_checked_at`;
+
+type RefreshRow = PricedProduct & { slug?: string | null; price_checked_at?: string | null };
 
 /** Sobre esta proporción de errores transitorios, la corrida cuenta como fallida. */
 const MAX_TRANSIENT_RATIO = 0.5;
@@ -102,15 +114,19 @@ interface RepairRow {
   category: string;
 }
 
+/**
+ * ¿Le falta algo que ML suele tener? La familia no cuenta: muchos productos
+ * de catálogo no tienen (71 de 1.214 el 18-10-2026), y esos se volvían a
+ * pedir en cada corrida sin resultado. Si falta junto con lo demás, la
+ * reparación la completa igual.
+ */
 function missingCatalogData(p: RepairRow): boolean {
-  return (
-    !p.brand?.trim() ||
-    !p.description?.trim() ||
-    !p.ml_family_id ||
-    !p.ml_domain_id ||
-    Object.keys(p.specs ?? {}).length === 0
-  );
+  return !p.brand?.trim() || !p.description?.trim() || !p.ml_domain_id || Object.keys(p.specs ?? {}).length === 0;
 }
+
+const REPAIR_COLUMNS = 'id, ml_product_id, name, brand, specs, description, ml_family_id, ml_domain_id, category';
+/** Lo mismo que missingCatalogData, en el idioma de PostgREST (se comprobó contra la base el 18-10). */
+const REPAIR_FILTER = 'brand.is.null,brand.eq.,description.is.null,description.eq.,ml_domain_id.is.null,specs.is.null,specs.eq.{}';
 
 /**
  * Completa marca, specs, descripción, familia y dominio de los productos que
@@ -119,11 +135,23 @@ function missingCatalogData(p: RepairRow): boolean {
  */
 async function repairMissingData(
   admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
-  rows: RepairRow[],
   token: string,
   outOfTime: () => boolean
 ): Promise<number> {
-  const pending = rows.filter(missingCatalogData).slice(0, MAX_REPAIRS_PER_RUN);
+  const { data, error } = await admin
+    .from('products')
+    .select(REPAIR_COLUMNS)
+    .not('ml_product_id', 'is', null)
+    .eq('is_hidden', false)
+    .or(REPAIR_FILTER)
+    .order('price_checked_at', { ascending: true, nullsFirst: true })
+    .order('id', { ascending: true })
+    .limit(MAX_REPAIRS_PER_RUN * 5);
+  if (error) {
+    console.warn('[refresh] no se pudieron leer los productos incompletos:', error.message);
+    return 0;
+  }
+  const pending = ((data ?? []) as unknown as RepairRow[]).filter(missingCatalogData).slice(0, MAX_REPAIRS_PER_RUN);
 
   const results = await mapWithConcurrency(pending, 4, async (p) => {
     if (outOfTime()) return 0;
@@ -146,16 +174,61 @@ async function repairMissingData(
   return results.reduce<number>((a, b) => a + b, 0);
 }
 
+/** Ventanas de "visto hace poco" para la prioridad (ver lib/refresh-queue). */
+const HOT_CLICK_DAYS = 7;
+const HOT_POST_DAYS = 14;
+/** Filas por fuente: alcanza para saber qué productos están en juego. */
+const HOT_ROWS = 1000;
+
+/**
+ * Productos con clics o publicaciones recientes. Si una consulta falla (o
+ * falta su tabla), esa fuente no suma prioridad y la corrida sigue igual.
+ */
+async function readHotProductIds(admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>): Promise<Set<string>> {
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+  const ids = new Set<string>();
+  try {
+    const [clicks, posts] = await Promise.all([
+      admin
+        .from('outbound_clicks')
+        .select('product_id')
+        .not('product_id', 'is', null)
+        .gte('created_at', daysAgo(HOT_CLICK_DAYS))
+        .order('created_at', { ascending: false })
+        .limit(HOT_ROWS),
+      admin
+        .from('social_posts')
+        .select('product_id')
+        .not('product_id', 'is', null)
+        .in('status', ['publicado', 'editado'])
+        .gte('posted_at', daysAgo(HOT_POST_DAYS))
+        .order('posted_at', { ascending: false })
+        .limit(HOT_ROWS),
+    ]);
+    for (const { data, error } of [clicks, posts]) {
+      if (error) continue;
+      for (const row of (data ?? []) as { product_id: string | null }[]) if (row.product_id) ids.add(row.product_id);
+    }
+  } catch (err) {
+    console.warn('[refresh] sin prioridad por clics y redes:', err instanceof Error ? err.message : err);
+  }
+  return ids;
+}
+
 type Summary = ReturnType<typeof summarizePricing>;
 
 /**
- * ¿La corrida hizo su trabajo? Falla si alguna escritura no se guardó o si
- * más de la mitad de los productos no se pudo revisar (ML caído, token
- * rechazado, sin tiempo): en ambos casos el sitio queda con precios viejos.
+ * ¿La corrida hizo su trabajo? Falla si alguna escritura no se guardó, si
+ * más de la mitad de lo que se consultó dio error (ML caído o limitando,
+ * token rechazado) o si no alcanzó a consultar nada. Lo que quedó fuera por
+ * tiempo no cuenta: pasa al frente de la corrida siguiente.
  */
-function isHealthy(summary: Pick<Summary, 'revisados' | 'errores_transitorios'>, writeErrors: number): boolean {
+function isHealthy(
+  summary: Pick<Summary, 'revisados' | 'errores_transitorios' | 'sin_tiempo'>,
+  writeErrors: number
+): boolean {
   if (writeErrors > 0) return false;
-  if (summary.revisados === 0) return true;
+  if (summary.revisados === 0) return summary.sin_tiempo === 0;
   return summary.errores_transitorios / summary.revisados <= MAX_TRANSIENT_RATIO;
 }
 
@@ -187,6 +260,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(payload, { status });
   };
 
+  // Candado: si otra corrida empezó antes y sigue abierta, esta se retira.
+  // Responde 200 porque no es una falla: la otra está haciendo el trabajo.
+  if (await earlierRunInProgress(admin, 'refresh-prices', run.id)) {
+    return finish(true, { omitida: 'otra revisión de precios estaba en curso' }, 200);
+  }
+
   try {
     // De a páginas: PostgREST corta en 1.000 filas y el catálogo crece.
     //
@@ -196,7 +275,7 @@ export async function GET(req: NextRequest) {
     // últimos de la lista se quedaban sin revisar corrida tras corrida, con
     // el precio viejo y sin que nada avisara.
     const readProducts = (columns: string) =>
-      fetchAllRows<PricedProduct & RepairRow>(
+      fetchAllRows<RefreshRow>(
         (from, to) =>
           admin
             .from('products')
@@ -213,6 +292,7 @@ export async function GET(req: NextRequest) {
     // leen sin ellas y no se buscan raíces: no habría dónde guardarlas, y
     // cada corrida repetía una consulta a ML por categoría.
     let has0016 = true;
+    const hotRead = readHotProductIds(admin);
     let { rows: data, error } = await readProducts(`${REFRESH_COLUMNS}, ${COLUMNS_0016}`);
     if (error && isMissingSchemaError(error)) {
       has0016 = false;
@@ -222,6 +302,7 @@ export async function GET(req: NextRequest) {
     if (error) return finish(false, { error: error.message }, 500, error.message);
     const rows = data;
     if (rows.length === 0) return finish(true, { revisados: 0 }, 200);
+    const { queue, priority } = refreshQueue(rows, await hotRead);
 
     const token = await getMlToken();
     if (!token) {
@@ -233,14 +314,16 @@ export async function GET(req: NextRequest) {
     const tokenAttempts = mlTokenAttempts();
 
     const { directLinks } = await readAffiliateSettings(admin);
-    const outcomes = await priceProducts(rows, token, {
-      concurrency: pricingConcurrency(rows.length),
+    const readMs = Date.now() - startedAt;
+    const outcomes = await priceProducts(queue, token, {
+      concurrency: pricingConcurrency(queue.length),
       outOfTime,
       directLinks,
       verifyLink: (p) => resolveLinkTarget(p.affiliate_url, p.ml_product_id, token),
       resolveRoots: has0016,
       stopEnrichment: () => Date.now() - startedAt > ENRICHMENT_CUTOFF_MS,
     });
+    const mlMs = Date.now() - startedAt - readMs;
     const summary = summarizePricing(outcomes);
 
     // Escribir tarde es peor que no escribir: Vercel corta a los 60 s y la
@@ -253,6 +336,8 @@ export async function GET(req: NextRequest) {
     const writesSkipped = elapsed > HARD_STOP_MS;
     const toWrite = !late ? outcomes : writesSkipped ? [] : priorityOutcomes(outcomes);
     const writeErrors = toWrite.length > 0 ? await applyPricing(admin, toWrite) : 0;
+    const writeMs = Date.now() - startedAt - elapsed;
+    const freshIds = new Set(toWrite.filter((o) => 'price_checked_at' in o.patch).map((o) => o.id));
 
     // Los posts de Telegram muestran el precio publicado: se corrigen apenas
     // cambió, si queda tiempo. Que falle no tumba el refresco.
@@ -265,7 +350,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const repaired = !late && !outOfTime() ? await repairMissingData(admin, rows, token, outOfTime) : 0;
+    const repaired = !late && !outOfTime() ? await repairMissingData(admin, token, outOfTime) : 0;
 
     // toWrite ya es lo que se escribió: vacío si se pasó del corte duro.
     const visible = hasVisibleChanges(toWrite) || repaired > 0;
@@ -277,7 +362,7 @@ export async function GET(req: NextRequest) {
     // Bing (IndexNow): las fichas cuyo precio o disponibilidad cambió. Con
     // tiempo se avisa acá y queda en la bitácora; sin tiempo, después de
     // responder. Que falle no cambia nada: igual están en el sitemap.
-    const slugById = new Map(rows.map((r) => [r.id, (r as { slug?: string }).slug]));
+    const slugById = new Map(rows.map((r) => [r.id, r.slug]));
     const changedUrls = priorityOutcomes(toWrite)
       .map((o) => slugById.get(o.id))
       .filter((slug): slug is string => Boolean(slug))
@@ -298,6 +383,13 @@ export async function GET(req: NextRequest) {
       ok,
       {
         ...summary,
+        // Ofertas y productos con clics o en redes que pasaron adelante.
+        prioritarios: priority,
+        // El precio visible más viejo que quedó: si sube corrida tras
+        // corrida, el catálogo ya no cabe en el ritmo de revisión.
+        precio_mas_viejo_min: oldestVisibleMinutes(rows, freshIds, Date.now()),
+        // preparacion: leer el catálogo, la prioridad, el token y la configuración.
+        tiempos_ms: { preparacion: readMs, mercado_libre: mlMs, escritura: writeMs },
         datos_reparados: repaired,
         errores_de_escritura: writeErrors,
         escrituras_omitidas_por_tiempo: writesSkipped,
@@ -321,7 +413,9 @@ export async function GET(req: NextRequest) {
             ? `sin tiempo: solo se escribieron ${toWrite.length} cambios urgentes`
             : writeErrors > 0
             ? `${writeErrors} escrituras fallidas`
-            : `${summary.errores_transitorios} de ${summary.revisados} con error transitorio`
+            : summary.revisados === 0
+              ? 'sin tiempo para consultar ningún producto'
+              : `${summary.errores_transitorios} de ${summary.revisados} con error transitorio`
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

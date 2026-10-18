@@ -328,6 +328,9 @@ describe('readAdminSummary', () => {
     expect(s.requierenAccion.data?.total).toBe(1);
     expect(s.linksSinVerificar.data).toBe(1);
     expect(s.ultimoPrecioMin.data).toBe(30);
+    // El más viejo de lo que está a la venta: los productos 1 y 4 (los otros
+    // están en pausa), el 4 con la hora por omisión del test, 12:00.
+    expect(s.precioMasViejoMin.data).toBe(300);
     expect(s.ultimaProspeccion.data).toEqual({ at: '2026-10-04T12:15:00Z', nuevos: 7, source: 'candidatos' });
     expect(s.correoAyer).toMatchObject({ missing: true, data: { status: 'sin_datos' } });
     expect(s.clics).toMatchObject({ missing: true, data: null, error: null });
@@ -380,6 +383,7 @@ describe('readAdminSummary', () => {
     expect(s.publicados).toEqual({ data: null, error: 'canceling statement due to statement timeout', missing: undefined });
     expect(s.requierenAccion.data).toBeNull();
     expect(s.ultimoPrecioMin.data).toBeNull();
+    expect(s.precioMasViejoMin.data).toBeNull();
     expect(s.coberturaPorCategoria.data).toBeNull();
     expect(s.errors).toContain('canceling statement due to statement timeout');
   });
