@@ -40,6 +40,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
     { url: `${SITE_URL}/comparador`, changeFrequency: 'weekly', priority: 0.6 },
     { url: `${SITE_URL}/nosotros`, changeFrequency: 'monthly', priority: 0.4 },
+    { url: `${SITE_URL}/como-funciona`, changeFrequency: 'monthly', priority: 0.5 },
+    { url: `${SITE_URL}/contacto`, changeFrequency: 'yearly', priority: 0.3 },
     { url: `${SITE_URL}/privacidad`, changeFrequency: 'yearly', priority: 0.2 },
     { url: `${SITE_URL}/terminos`, changeFrequency: 'yearly', priority: 0.2 },
     ...getPopulatedCategories(products).map((c) => ({

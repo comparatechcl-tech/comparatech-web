@@ -171,7 +171,11 @@ export default async function BlackFridayPage() {
             <dt className="font-medium text-fg">¿Qué significa &quot;Bajó $X&quot;?</dt>
             <dd className="mt-1 text-muted">
               Que el precio de hoy es menor que el que nosotros mismos registramos antes. No es el descuento que informa
-              el vendedor.
+              el vendedor.{' '}
+              <Link href="/como-funciona#etiquetas" className="text-accent hover:underline">
+                Qué significa cada etiqueta
+              </Link>
+              .
             </dd>
           </div>
           <div>

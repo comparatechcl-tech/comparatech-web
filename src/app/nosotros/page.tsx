@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { Metadata } from 'next';
 import { ListOrdered, ShieldCheck, RefreshCw, ThumbsUp } from 'lucide-react';
 import { BrandFace } from '@/components/brand/BrandFace';
@@ -9,7 +10,8 @@ import { SocialLinks } from '@/components/brand/SocialLinks';
  * productos uno por uno, así que nada acá puede prometerlo.
  */
 const STEPS = [
-  { icon: ListOrdered, title: 'Traemos', desc: 'Los productos salen de las listas de más vendidos de Mercado Libre Chile.' },
+  // Desde el 17-10-2026 también de lo más buscado: ML cerró la lista de más vendidos (ver lib/prospect-source).
+  { icon: ListOrdered, title: 'Traemos', desc: 'Los productos salen de lo más vendido y lo más buscado en Mercado Libre Chile.' },
   { icon: ShieldCheck, title: 'Filtramos', desc: 'Solo mostramos productos de vendedores con buena reputación en Mercado Libre.' },
   { icon: RefreshCw, title: 'Actualizamos', desc: 'El precio se actualiza solo, varias veces al día.' },
   { icon: ThumbsUp, title: 'Tú decides', desc: 'Comparas acá y compras en Mercado Libre.' },
@@ -58,6 +60,13 @@ export default function NosotrosPage() {
           );
         })}
       </div>
+      <p className="mt-4 text-sm text-muted">
+        El detalle, con el historial de precios y qué significa cada etiqueta, está en{' '}
+        <Link href="/como-funciona" className="text-accent hover:underline">
+          Cómo funciona
+        </Link>
+        .
+      </p>
 
       <div className="mt-10">
         <BrandFace compact />
@@ -73,6 +82,13 @@ export default function NosotrosPage() {
           Libre. Si compras a través de uno de nuestros links, podemos recibir
           una comisión, sin costo extra para ti. Esa comisión influye en qué
           productos aparecen en el sitio.
+        </p>
+        <p>
+          ¿Una duda o un precio que no coincide?{' '}
+          <Link href="/contacto" className="text-accent hover:underline">
+            Escríbenos
+          </Link>
+          .
         </p>
       </div>
     </div>

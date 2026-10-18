@@ -90,6 +90,16 @@ export function Footer({ categories }: { categories: CategoryInfo[] }) {
                 </Link>
               </li>
               <li>
+                <Link href="/como-funciona" className="transition hover:text-accent">
+                  Cómo funciona
+                </Link>
+              </li>
+              <li>
+                <Link href="/contacto" className="transition hover:text-accent">
+                  Contacto
+                </Link>
+              </li>
+              <li>
                 <Link href="/privacidad" className="transition hover:text-accent">
                   Privacidad
                 </Link>

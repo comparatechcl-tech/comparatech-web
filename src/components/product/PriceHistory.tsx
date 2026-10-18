@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getPriceHistoryCached } from '@/lib/queries/price-history';
 import {
   BUSY_CHANGES_48H,
@@ -70,6 +71,11 @@ export async function PriceHistory({
         </p>
       )}
       {!neverChanged && <Changes summary={summary} soldOut={soldOut} />}
+      <p className="mt-3 text-xs text-muted">
+        <Link href="/como-funciona#historial" className="hover:text-accent hover:underline">
+          Cómo armamos este historial
+        </Link>
+      </p>
     </section>
   );
 }

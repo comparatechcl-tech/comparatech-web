@@ -6,6 +6,7 @@ import './globals.css';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { SITE_URL } from '@/lib/site';
+import { CONTACT_EMAIL } from '@/lib/contact';
 import { getSiteCategories } from '@/lib/queries/site-categories';
 import { getDeals } from '@/lib/queries/products';
 import { UtmCapture } from '@/components/analytics/UtmCapture';
@@ -22,6 +23,15 @@ const ORGANIZATION_JSON_LD = JSON.stringify({
   url: SITE_URL,
   logo: `${SITE_URL}/brand/perfil-1080.png`,
   sameAs: SOCIAL_LINKS.map((s) => s.href),
+  // Quién responde y por dónde (SEO etapa 2): el mismo correo de /contacto.
+  email: CONTACT_EMAIL,
+  contactPoint: {
+    '@type': 'ContactPoint',
+    contactType: 'customer service',
+    email: CONTACT_EMAIL,
+    url: `${SITE_URL}/contacto`,
+    availableLanguage: 'es',
+  },
 }).replace(/</g, '\\u003c');
 
 const inter = Inter({
