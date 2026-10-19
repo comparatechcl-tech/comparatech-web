@@ -4,7 +4,8 @@ import { getLastPriceChanges } from '@/lib/queries/price-history';
 import { getPopulatedCategories } from '@/lib/categories';
 import { indexableTypes, productsOfType, typePath } from '@/lib/category-listing';
 import { latestDate, productLastModified } from '@/lib/sitemap-dates';
-import { MODELS, modelPath, versionsOf } from '@/lib/models';
+import { MODELS, getModel, modelPath, versionsOf } from '@/lib/models';
+import { COMPARISONS, comparisonPath } from '@/lib/comparisons';
 import { LISTING_FILTERS, MIN_FILTER_PAGE, filterPath, productsOfFilter } from '@/lib/listing-filters';
 import { THERMOMETER_PATH, thermometerLastModified } from '@/lib/black-friday-thermometer';
 import { GUIDES, guidePath } from '@/lib/guides';
@@ -93,6 +94,23 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
           changeFrequency: 'daily' as const,
           priority: 0.7,
           ...withDate(latestOf(matched)),
+        },
+      ];
+    }),
+    // Las comparaciones "X vs Y" (lib/comparisons) con los dos modelos a la venta.
+    ...COMPARISONS.flatMap((c) => {
+      const a = getModel(c.a);
+      const b = getModel(c.b);
+      const onSaleA = a ? versionsOf(a, products) : [];
+      const onSaleB = b ? versionsOf(b, products) : [];
+      if (onSaleA.length === 0 || onSaleB.length === 0) return [];
+      const onSale = [...onSaleA, ...onSaleB];
+      return [
+        {
+          url: `${SITE_URL}${comparisonPath(c)}`,
+          changeFrequency: 'daily' as const,
+          priority: 0.6,
+          ...withDate(latestOf(onSale)),
         },
       ];
     }),

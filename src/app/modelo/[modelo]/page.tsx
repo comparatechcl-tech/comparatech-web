@@ -4,8 +4,10 @@ import type { Metadata } from 'next';
 import { getCatalogProducts } from '@/lib/queries/products';
 import { getModelHistories, getModelVersions } from '@/lib/queries/models';
 import { getCategoryInfo } from '@/lib/queries/categories';
+import { comparisonPath, comparisonSlug, comparisonsOf, shortModelName } from '@/lib/comparisons';
 import {
   MODELS,
+  getModel,
   modelHeading,
   modelIntro,
   modelMetaDescription,
@@ -145,6 +147,24 @@ export default async function ModeloPage({ params }: { params: Params }) {
           </div>
         )}
       </section>
+
+      {comparisonsOf(model.slug).length > 0 && (
+        <nav aria-label="Comparaciones" className="mt-8 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted">Compáralo:</span>
+          {comparisonsOf(model.slug).map((c) => {
+            const other = getModel(c.a === model.slug ? c.b : c.a);
+            return other ? (
+              <Link
+                key={comparisonSlug(c)}
+                href={comparisonPath(c)}
+                className="inline-flex items-center rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-fg transition hover:border-accent/40 hover:text-accent"
+              >
+                {shortModelName(model)} vs {shortModelName(other)}
+              </Link>
+            ) : null;
+          })}
+        </nav>
+      )}
 
       <ModelPriceHistory model={model} versions={versions} histories={histories} now={now} />
 

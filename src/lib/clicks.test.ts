@@ -38,6 +38,7 @@ describe('placementFromPath', () => {
     ['/guias/no-existe', 'otro'],
     ['/guias/constructor', 'otro'],
     ['/guias', 'otro'],
+    ['/comparar/iphone-17-vs-iphone-17-pro', 'comparador'],
     ['/nosotros', 'otro'],
     ['/privacidad', 'otro'],
   ])('%s → %s', (path, expected) => {

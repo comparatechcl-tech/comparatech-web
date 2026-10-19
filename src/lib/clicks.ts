@@ -83,6 +83,8 @@ export function placementFromPath(pathname: string): Placement {
     case 'producto':
       return 'ficha';
     case 'comparador':
+    case 'comparar':
+      // /comparar/iphone-17-vs-iphone-17-pro también es comparar.
       return 'comparador';
     case 'hoy':
       // Landing a la que llevan los links de redes sociales.
