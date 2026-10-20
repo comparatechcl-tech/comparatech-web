@@ -32,6 +32,7 @@ describe('placementFromPath', () => {
     ['/comparador', 'comparador'],
     ['/hoy', 'social'],
     ['/black-friday', 'black-friday'],
+    ['/historial-de-precios', 'historial'],
     ['/modelo/iphone-17', 'modelo'],
     ['/guias/regalos-tecnologicos', 'guia-regalos'],
     ['/guias/regalos-tecnologicos/', 'guia-regalos'],

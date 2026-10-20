@@ -56,6 +56,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.7,
       ...withDate(thermometerLastModified(Date.now())),
     },
+    // Cambia con las bajas y las ofertas del día, como /black-friday.
+    {
+      url: `${SITE_URL}/historial-de-precios`,
+      changeFrequency: 'daily',
+      priority: 0.8,
+      ...withDate(latestOf(deals.length > 0 ? deals : products)),
+    },
     { url: `${SITE_URL}/comparador`, changeFrequency: 'weekly', priority: 0.6 },
     { url: `${SITE_URL}/nosotros`, changeFrequency: 'monthly', priority: 0.4 },
     { url: `${SITE_URL}/como-funciona`, changeFrequency: 'monthly', priority: 0.5 },

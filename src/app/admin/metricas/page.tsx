@@ -42,6 +42,7 @@ const PLACEMENT_LABELS: Record<Placement, string> = {
   modelo: 'Página de un modelo',
   'guia-regalos': 'Guía · regalos tecnológicos',
   'guia-notebook': 'Guía · notebook para la universidad',
+  historial: 'Historial de precios',
   otro: 'Otro',
 };
 

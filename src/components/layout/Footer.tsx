@@ -89,6 +89,11 @@ export function Footer({ categories }: { categories: CategoryInfo[] }) {
                 </Link>
               </li>
               <li>
+                <Link href="/historial-de-precios" className="transition hover:text-accent">
+                  Historial de precios
+                </Link>
+              </li>
+              <li>
                 <Link href="/comparador" className="transition hover:text-accent">
                   Comparador
                 </Link>
