@@ -84,10 +84,14 @@ export default async function CarruselPage({
           Mira la línea bajo cada precio. Si todas dicen <strong>✓ Mismo precio que en Mercado Libre</strong>, súbelo. Si
           una dice en rojo que cambió, no lo subas y toca <strong>Actualizar</strong>.
         </li>
+        {/*
+          Probado por el dueño el 19-10-2026: desde Compartir, Instagram las deja cuadradas y corta arriba y abajo;
+          desde la galería, con el ícono de ajustar, quedan enteras. Las láminas igual caben en el cuadrado del centro.
+        */}
         <li>
-          Toca <strong>Compartir</strong> y elige Instagram, <strong>Publicación</strong>: van todas las imágenes en
-          orden y el texto queda copiado para pegarlo. Si Instagram no aparece, toca <strong>Guardar</strong> y súbelas
-          desde la app.
+          Toca <strong>Guardar las imágenes</strong> (quedan en la galería) y <strong>Copiar texto (Instagram)</strong>. En
+          Instagram toca <strong>+</strong> → <strong>Publicación</strong>, elige las imágenes en orden y toca el ícono
+          de <strong>ajustar</strong> de la foto para que queden enteras. Pega el texto y publica.
         </li>
         <li>
           Para Facebook, activa &quot;Compartir en Facebook&quot; al publicar, o comparte de nuevo, elige Facebook y pega

@@ -4,6 +4,7 @@ import { ImageResponse } from 'next/og';
 import sharp from 'sharp';
 import { interFonts } from '@/lib/content/og-fonts';
 import {
+  CAROUSEL_SAFE,
   CAROUSEL_SIZE,
   CarouselClosing,
   CarouselCover,
@@ -56,6 +57,21 @@ async function draw(node: JSX.Element) {
 
 const BACKGROUND = [7, 11, 20];
 
+/**
+ * Instagram puede cortar la lámina al cuadrado del centro (y de 135 a 1215):
+ * afuera solo puede haber fondo. Arriba el fondo es un degradado vertical, así
+ * que cada fila tiene que ser pareja de lado a lado; abajo es el fondo liso.
+ */
+function expectOnlyBackgroundOutsideSquare(image: Awaited<ReturnType<typeof draw>>, skipBottomRight = false) {
+  for (let y = 0; y < CAROUSEL_SAFE.top; y += 6) {
+    const edge = image.at(4, y);
+    for (const x of [100, 300, 540, 780, 1000]) expect(image.at(x, y)).toEqual(edge);
+  }
+  for (let y = CAROUSEL_SAFE.bottom + 1; y < 1350; y += 6) {
+    for (const x of skipBottomRight ? [40, 300, 540] : [40, 300, 540, 780, 1040]) expect(image.at(x, y)).toEqual(BACKGROUND);
+  }
+}
+
 describe('la lámina de un producto', () => {
   it('dice el puesto, la marca, el precio de hoy, cuánto bajó y desde qué día, y la hora del precio', () => {
     const t = text(<CarouselProductSlide product={product()} rank={1} photo={null} />);
@@ -91,13 +107,13 @@ describe('la lámina de un producto', () => {
     expect(big).toBeGreaterThanOrEqual(40);
   });
 
-  it('mide 1080x1350 y la tarjeta llega de margen a margen hasta y=1278, con la franja verde de la baja', async () => {
+  it('mide 1080x1350 y todo cabe en el cuadrado del centro: la tarjeta termina en y=1192, con la franja verde de la baja', async () => {
     for (const p of [product(), product({ name: 'Notebook Asus Gaming A16 AMD Ryzen 7 170C 16GB 512GB 16" RTX 4050 6GB Windows 11', price: 1_249_990, dropAmount: 1_250_000, freeShipping: false, full: false })]) {
       const image = await draw(<CarouselProductSlide product={p} rank={1} photo={null} />);
       expect([image.width, image.height]).toEqual([1080, 1350]);
-      // El filete cian del borde izquierdo de la tarjeta sigue antes de y=1278 y ya no después.
-      expect(image.at(72, 1230)[2]).toBeGreaterThan(80);
-      for (const y of [1290, 1340]) expect(image.at(540, y)).toEqual(BACKGROUND);
+      // El filete cian del borde izquierdo de la tarjeta sigue antes de y=1192 y ya no después.
+      expect(image.at(72, 1150)[2]).toBeGreaterThan(80);
+      expectOnlyBackgroundOutsideSquare(image);
     }
     // La franja de la baja es verde (#34D399), no el cian del descuento.
     const image = await draw(<CarouselProductSlide product={product()} rank={1} photo={null} />);
@@ -141,14 +157,20 @@ describe('la portada y el cierre', () => {
     }
   });
 
-  it('las dos miden 1080x1350 y dejan libre el margen de abajo', async () => {
-    for (const node of [
-      <CarouselCover key="p" kind="bajas" rangeLabel="del 28 de octubre al 3 de noviembre" photos={[null, null, null, null, null]} />,
-      <CarouselClosing key="c" site="comparatech.cl" rangeLabel="del 28 de octubre al 3 de noviembre" />,
-    ]) {
-      const image = await draw(node);
-      expect([image.width, image.height]).toEqual([1080, 1350]);
-      for (const x of [40, 540, 1040]) expect(image.at(x, 1330)).toEqual(BACKGROUND);
+  it('las dos miden 1080x1350 y todo lo que dicen cabe en el cuadrado del centro; afuera, solo "Desliza" en la portada', async () => {
+    const cover = await draw(<CarouselCover kind="bajas" rangeLabel="del 28 de octubre al 3 de noviembre" photos={[null, null, null, null, null]} />);
+    expect([cover.width, cover.height]).toEqual([1080, 1350]);
+    expectOnlyBackgroundOutsideSquare(cover, true);
+    // "Desliza" va abajo a la derecha, fuera del cuadrado: si Instagram corta, sobra.
+    let cyan = 0;
+    for (let x = 640; x < 1040; x += 4) {
+      const [r, g, b] = cover.at(x, 1270);
+      if (r < 30 && g > 190 && b > 230) cyan++;
     }
+    expect(cyan).toBeGreaterThan(10);
+
+    const closing = await draw(<CarouselClosing site="comparatech.cl" rangeLabel="del 28 de octubre al 3 de noviembre" />);
+    expect([closing.width, closing.height]).toEqual([1080, 1350]);
+    expectOnlyBackgroundOutsideSquare(closing);
   }, 60_000);
 });

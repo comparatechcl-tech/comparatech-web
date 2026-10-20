@@ -37,14 +37,23 @@ const COLORS = {
   green: '#34D399',
 };
 
-// El mismo reparto que la publicación del feed: la tarjeta va de margen a margen y termina en y=1278.
-const TOP = 66;
+/**
+ * Instagram, cuando recibe varias fotos desde Compartir, puede cortarlas al
+ * cuadrado del centro (1080x1080: de y=135 a y=1215), y así salió el primer
+ * carrusel (19-10-2026). Todo lo que la lámina dice va dentro de ese cuadrado;
+ * en el formato vertical completo, las franjas de arriba y de abajo quedan de
+ * fondo (la portada lleva ahí solo "Desliza", que sobra si se corta).
+ */
+export const CAROUSEL_SAFE = { top: 135, bottom: 1215 } as const;
+
+// La tarjeta va de margen a margen, como en la publicación del feed, pero dentro del cuadrado del centro.
+const TOP = 160;
 const MARGIN = 72;
 const CONTENT_W = 1080 - MARGIN * 2; // 936
 const HEADER_H = 72;
-const CARD_BOTTOM = 1278;
-const TITLE_GAP = 20;
-const CARD_GAP = 32;
+const CARD_BOTTOM = 1192;
+const TITLE_GAP = 16;
+const CARD_GAP = 24;
 const RADIUS = 44;
 const HAIRLINE = 2;
 const INNER_W = CONTENT_W - HAIRLINE * 2;
@@ -52,9 +61,9 @@ const CARD_PAD = 44;
 const PHOTO_PAD = 12;
 const KICKER_H = 40;
 const NAME_SPACING = -0.5;
-const DROP_BAND_H = 124;
-const PANEL_H = 172;
-const PANEL_CHIPS_H = 232;
+const DROP_BAND_H = 112;
+const PANEL_H = 160;
+const PANEL_CHIPS_H = 212;
 const PRICE_MAX = 150;
 const PRICE_LH = 0.74;
 const PRICE_TRACK = -0.027;
@@ -328,22 +337,21 @@ export function CarouselCover({
   return (
     <Canvas>
       <Header right={['Precios en Mercado Libre']} />
-      <div style={{ display: 'flex', flexDirection: 'column', marginTop: 54 }}>
-        <div style={{ display: 'flex', fontSize: 190, fontWeight: 800, lineHeight: 0.82, letterSpacing: -8, color: COLORS.cyan }}>{big.toUpperCase()}</div>
-        <div style={{ display: 'flex', marginTop: 24, fontSize: 84, fontWeight: 800, lineHeight: 1, letterSpacing: -2.5 }}>{rest}</div>
-        <div style={{ display: 'flex', marginTop: 20, fontSize: 34, fontWeight: 600, color: COLORS.muted }}>{KIND_TEXT[kind].subtitle}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', marginTop: 30 }}>
+        <div style={{ display: 'flex', fontSize: 170, fontWeight: 800, lineHeight: 0.82, letterSpacing: -7, color: COLORS.cyan }}>{big.toUpperCase()}</div>
+        <div style={{ display: 'flex', marginTop: 20, fontSize: 76, fontWeight: 800, lineHeight: 1, letterSpacing: -2.5 }}>{rest}</div>
+        <div style={{ display: 'flex', marginTop: 16, fontSize: 32, fontWeight: 600, color: COLORS.muted }}>{KIND_TEXT[kind].subtitle}</div>
       </div>
-      <div style={{ display: 'flex', marginTop: 30 }}>
-        <div style={{ display: 'flex', alignItems: 'center', height: 60, padding: '0 26px', borderRadius: 30, border: `2px solid ${COLORS.cyan}`, fontSize: 32, fontWeight: 600 }}>{range}</div>
+      <div style={{ display: 'flex', marginTop: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', height: 58, padding: '0 26px', borderRadius: 29, border: `2px solid ${COLORS.cyan}`, fontSize: 32, fontWeight: 600 }}>{range}</div>
       </div>
-      <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 1350 - CARD_BOTTOM }}>
         <PhotoGrid photos={photos} />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', height: 72, marginBottom: 1350 - CARD_BOTTOM }}>
-        <div style={{ display: 'flex', alignItems: 'center', height: 72, padding: '0 30px 0 34px', borderRadius: 36, background: COLORS.cyan, color: COLORS.ink, fontSize: 36, fontWeight: 800 }}>
-          <span>Desliza</span>
-          <img src={ICON_NEXT} alt="" width={40} height={40} style={{ marginLeft: 12 }} />
-        </div>
+      {/* Fuera del cuadrado del centro: si Instagram corta la lámina, "Desliza" sobra (ya muestra los puntos). */}
+      <div style={{ display: 'flex', position: 'absolute', right: MARGIN, top: 1238, alignItems: 'center', height: 64, padding: '0 28px 0 32px', borderRadius: 32, background: COLORS.cyan, color: COLORS.ink, fontSize: 34, fontWeight: 800 }}>
+        <span>Desliza</span>
+        <img src={ICON_NEXT} alt="" width={38} height={38} style={{ marginLeft: 12 }} />
       </div>
     </Canvas>
   );
