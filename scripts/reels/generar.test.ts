@@ -219,10 +219,10 @@ describe('generate: lo que arma y lo que salta', () => {
     // la versión 2 del aspecto).
     const stored = Array.from(site.stored.keys());
     expect(stored).toEqual([
-      `2026-10-13/${items[0].id}-219990-estudio-9436e838.jpg`,
-      `2026-10-13/${items[0].id}-219990-estudio-9436e838.mp4`,
-      `2026-10-13/${items[2].id}-189990-estudio-c0974736.jpg`,
-      `2026-10-13/${items[2].id}-189990-estudio-c0974736.mp4`,
+      `2026-10-13/${items[0].id}-219990-estudio-fae9bbc2.jpg`,
+      `2026-10-13/${items[0].id}-219990-estudio-fae9bbc2.mp4`,
+      `2026-10-13/${items[2].id}-189990-estudio-bb658ca0.jpg`,
+      `2026-10-13/${items[2].id}-189990-estudio-bb658ca0.mp4`,
     ]);
     expect(site.stored.get(stored[1])?.toString()).toBe('video de mentira');
     // Tampoco bajó la foto del que ya existía.

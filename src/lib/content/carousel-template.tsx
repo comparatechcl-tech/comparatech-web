@@ -63,7 +63,7 @@ const KICKER_H = 40;
 const NAME_SPACING = -0.5;
 const DROP_BAND_H = 112;
 const PANEL_H = 160;
-const PANEL_CHIPS_H = 212;
+const PANEL_CHIPS_H = 226; // con aire arriba y abajo de las etiquetas (el dueño, 20-10-2026)
 const PRICE_MAX = 150;
 const PRICE_LH = 0.74;
 const PRICE_TRACK = -0.027;
@@ -283,7 +283,7 @@ export function CarouselProductSlide({
             </div>
           </div>
           {hasChips ? (
-            <div style={{ display: 'flex', gap: 14, marginTop: 20 }}>
+            <div style={{ display: 'flex', gap: 16, marginTop: 26 }}>
               {product.freeShipping ? <Chip text="Envío gratis" icon={ICON_SHIPPING} /> : null}
               {product.full ? <Chip text="Full" icon={ICON_FULL} /> : null}
             </div>

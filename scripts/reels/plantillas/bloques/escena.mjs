@@ -203,8 +203,8 @@ async function armarPrecio(producto, apaisada, dicho) {
   if (!dicho.includes(nombre.filas.join(' '))) dicho.push(nombre.filas.join(' '));
 
   // La fila del descuento: un bloque blanco ("−45%"), al lado "sin descuento" sobre "$399.990" (la cifra tachada
-  // que pone el vendedor, que se tacha) y, si caben, las etiquetas apiladas a la derecha. Todo pegado a la
-  // izquierda, lejos de los botones.
+  // que pone el vendedor, que se tacha). Las etiquetas van en su propio renglón, debajo: apiladas al lado se veía
+  // todo pegado (el dueño, 20-10-2026). Todo pegado a la izquierda, lejos de los botones.
   const F = C.fila;
   const etiquetas = async (chicas) => {
     const lista = [];
@@ -223,7 +223,7 @@ async function armarPrecio(producto, apaisada, dicho) {
       : [{ p: 70, a: 32, b: 32 }, { p: 64, a: 30, b: 30 }, { p: 58, a: 28, b: 28 }];
     const renglones = conLista ? ['sin descuento', formatoPrecio(producto.precioLista)] : ['según nuestro', 'historial'];
     let armado = null;
-    for (const alLado of hayEtiquetas ? [true, false] : [false]) {
+    for (const alLado of [false]) {
       for (const m of tamanos) {
         const bloque = await bloqueTexto(textoBloque, { tam: m.p, anchoMax: ANCHO_TEXTO });
         const a = await capas.renglon(renglones[0], { tam: m.a, alto: m.a + 8, peso: 600, color: conLista ? COLOR.nota : COLOR.blanco, anchoMax: ANCHO_TEXTO });
@@ -242,7 +242,7 @@ async function armarPrecio(producto, apaisada, dicho) {
     const { bloque, a, b, lado } = armado;
     const altoFila = Math.max(bloque.h, lado.length * 46 + (lado.length - 1) * 8);
     F.bloque = { capa: bloque, x: 0, y: y + Math.round((altoFila - bloque.h) / 2) };
-    const xb = bloque.w + 24;
+    const xb = bloque.w + 30;
     const yb = y + Math.round((altoFila - (a.h + b.h)) / 2);
     F.lista = [
       { capa: a, x: xb, y: yb },
@@ -264,11 +264,11 @@ async function armarPrecio(producto, apaisada, dicho) {
     y += altoFila;
   }
   if (etiquetasAbajo) {
-    if (y > 0) y += 16;
+    if (y > 0) y += 22;
     let xe = 0;
     for (const capa of await etiquetas(false)) {
       F.etiquetas.push({ capa, x: xe, y });
-      xe += capa.w + 14;
+      xe += capa.w + 16;
     }
     y += 58;
   }
@@ -337,7 +337,8 @@ export async function preparar(producto, cta, { zonas = false } = {}) {
   // C. Lo que va bajo la tarjeta, de arriba abajo: la etiqueta (montada SOLAPE px sobre la tarjeta), el nombre,
   // la fila del descuento y la letra chica. La tarjeta ocupa todo lo que eso deja libre.
   const et = C.etiqueta.capa;
-  const huecos = [12, C.fila.alto ? 14 : 0, 14]; // etiqueta-nombre, nombre-fila, fila (o nombre)-letra chica
+  // Con aire entre cada cosa (el dueño, 20-10-2026: "se ve todo pegado"); la tarjeta se achica lo que haga falta.
+  const huecos = [20, C.fila.alto ? 26 : 0, 24]; // etiqueta-nombre, nombre-fila, fila (o nombre)-letra chica
   const usados = () => huecos.filter(Boolean).length;
   const suma = () => huecos.reduce((s, v) => s + v, 0);
   const pila = () => et.h - SOLAPE + suma() + C.nombreAlto + C.fila.alto + C.notasAlto;
@@ -352,7 +353,7 @@ export async function preparar(producto, cta, { zonas = false } = {}) {
   const bajoMitad = apaisada ? SEGURO.mitad : Infinity;
   let fondoC = PIE - pila();
   if (apaisada) fondoC = Math.min(fondoC, SEGURO.mitad + PAD_PIE);
-  repartir(PIE - pila() - fondoC, 40); // si sobra alto, los huecos crecen un poco (sin despegarse demasiado)
+  repartir(PIE - pila() - fondoC, 52); // si sobra alto, los huecos crecen un poco (sin despegarse demasiado)
   const cardC0 = { x: molde.x, y: TARJETA_Y, w: molde.w, h: fondoC - TARJETA_Y };
   if (cardC0.h < 420) throw new Error('No queda sitio para la foto: el precio, el nombre y el descuento ocupan demasiado');
   // B. Antes del precio la tarjeta es más grande: debajo solo van la marca y el nombre. Justo antes de que se
@@ -381,7 +382,7 @@ export async function preparar(producto, cta, { zonas = false } = {}) {
   const cajaB = cajaEn(cardB, PAD);
   const cajaC = cajaEn(cardC, PAD_PIE);
   // Lo que sobra bajo la letra chica (si la tarjeta se achicó) agranda un poco los huecos.
-  repartir(PIE - (fondoC - SOLAPE + et.h + suma() + C.nombreAlto + C.fila.alto + C.notasAlto), 40);
+  repartir(PIE - (fondoC - SOLAPE + et.h + suma() + C.nombreAlto + C.fila.alto + C.notasAlto), 52);
   const geo = {};
   geo.etiquetaY = fondoC - SOLAPE;
   geo.nombreY = Math.round(geo.etiquetaY + et.h + huecos[0] - C.nombreArriba);

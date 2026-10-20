@@ -213,11 +213,12 @@ export function videoClaims(
  * Versión de cómo el video dice las cosas. Se sube cada vez que cambia lo que
  * el video dice con las mismas cifras (las palabras de la plantilla: por
  * ejemplo, "por debajo del precio de lista" pasó a ser "de descuento" y "sin
- * descuento" el 14/10/2026), para que los videos ya armados queden viejos y
- * se rehagan: va primero en la huella, así que con otra versión cada video
- * guardado tiene otro nombre que el que saldría ahora.
+ * descuento" el 14/10/2026; el 20/10/2026 el bloque bajo el precio ganó aire
+ * y las etiquetas pasaron a su propio renglón), para que los videos ya
+ * armados queden viejos y se rehagan: va primero en la huella, así que con
+ * otra versión cada video guardado tiene otro nombre que el que saldría ahora.
  */
-export const VIDEO_LOOK_VERSION = 2;
+export const VIDEO_LOOK_VERSION = 3;
 
 /**
  * La huella de lo que el video dice: los primeros 8 caracteres, en

@@ -124,17 +124,18 @@ async function armarPrecio(producto, dicho) {
   const nombre = await capas.bloque(producto.nombre, { anchoMax: ANCHO_TEXTO, peso: 600, pasos });
   C.nombre = nombre.capas.map((capa, i) => ({ capa, y: i * nombre.alto }));
   if (!dicho.includes(nombre.filas.join(' '))) dicho.push(nombre.filas.join(' '));
-  let y = nombre.capas.length * nombre.alto + 8;
+  // Con aire entre cada cosa (el dueño, 20-10-2026: "se ve todo pegado"); la foto se achica lo que haga falta.
+  let y = nombre.capas.length * nombre.alto + 14;
 
   // El precio, en unos 170 px. Cae desde más grande: el tamaño más grande con que cabe sin pasar de x=924.
   const precio = await capas.capaPrecio(producto.precio, { anchoMax: ANCHO_TEXTO, tamMax: 170 });
   C.precio = { capa: precio, y, desde: limitar((ANCHO_TEXTO - 2) / (precio.tinta.x1 + 1), 1, 1.36) };
   dicho.push(precio.texto);
-  y += precio.h + 12;
+  y += precio.h + 22;
 
   // La fila del descuento: pastilla grande ("−45%"), al lado "sin descuento" sobre "$399.990" (la cifra tachada
-  // que pone el vendedor, que se tacha) y, si caben, las etiquetas apiladas a la derecha. Todo pegado a la
-  // izquierda, lejos de los botones.
+  // que pone el vendedor, que se tacha). Las etiquetas van en su propio renglón, debajo: apiladas al lado se veía
+  // todo pegado. Todo pegado a la izquierda, lejos de los botones.
   const etiquetas = async (chicas) => {
     const lista = [];
     if (producto.envioGratis) lista.push(await capas.etiquetaEnvio(chicas));
@@ -153,7 +154,7 @@ async function armarPrecio(producto, dicho) {
       : [{ p: 90, a: 32, b: 32 }, { p: 80, a: 30, b: 30 }, { p: 72, a: 28, b: 28 }];
     const renglones = conLista ? ['sin descuento', formatoPrecio(producto.precioLista)] : ['según nuestro', 'historial'];
     let armado = null;
-    for (const alLado of hayEtiquetas ? [true, false] : [false]) {
+    for (const alLado of [false]) {
       for (const m of tamanos) {
         const pastilla = await capas.pastillaDescuento(textoPastilla, m.p);
         const a = await capas.renglon(renglones[0], { tam: m.a, alto: m.a + 8, peso: 600, anchoMax: ANCHO_TEXTO });
@@ -172,7 +173,7 @@ async function armarPrecio(producto, dicho) {
     const { pastilla, a, b, lado } = armado;
     const altoFila = Math.max(pastilla.h, lado.length * 46 + (lado.length - 1) * 8);
     C.pastilla = { capa: pastilla, x: 0, y: y + Math.round((altoFila - pastilla.h) / 2) };
-    const xb = pastilla.w + 22;
+    const xb = pastilla.w + 28;
     const yb = y + Math.round((altoFila - (a.h + b.h)) / 2);
     C.lista = [
       { capa: a, x: xb, y: yb },
@@ -192,16 +193,16 @@ async function armarPrecio(producto, dicho) {
         ye += 54;
       }
     }
-    y += altoFila + 12;
+    y += altoFila + 22;
   }
   if (etiquetasAbajo) {
     // Sin fila de descuento (o si al lado no cabían): las etiquetas van en su propio renglón.
     let xe = 0;
     for (const capa of await etiquetas(false)) {
       C.etiquetas.push({ capa, x: xe, y: y + 2 });
-      xe += capa.w + 14;
+      xe += capa.w + 16;
     }
-    y += 58 + 12;
+    y += 58 + 22;
   }
   for (const e of C.etiquetas) dicho.push(e.capa.texto);
 

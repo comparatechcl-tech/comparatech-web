@@ -93,7 +93,7 @@ const PHOTO_PAD = 12; // aire sobre y bajo la foto
 const BAND_H = 110; // franja del descuento
 const RULE_H = 8; // sin descuento, la franja queda en un filete cian grueso
 const PANEL_H = 172; // bloque del precio...
-const PANEL_CHIPS_H = 232; // ...y con la fila de etiquetas
+const PANEL_CHIPS_H = 252; // ...y con la fila de etiquetas, con aire arriba y abajo (el dueño, 20-10-2026)
 
 // Nombre: solo dos tamaños, y casi iguales, para que las piezas de un mismo día se vean como una serie.
 const NAME_SPACING = -0.5;
@@ -327,7 +327,7 @@ export function OfferTemplate({
             </div>
           </div>
           {hasChips ? (
-            <div style={{ display: 'flex', gap: 14, marginTop: 20 }}>
+            <div style={{ display: 'flex', gap: 16, marginTop: 26 }}>
               {freeShipping ? <Chip text="Envío gratis" icon={ICON_SHIPPING} /> : null}
               {full ? <Chip text="Full" icon={ICON_FULL} /> : null}
             </div>
