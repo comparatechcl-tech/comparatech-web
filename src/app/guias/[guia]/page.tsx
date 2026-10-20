@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getGuideView } from '@/lib/queries/guides';
-import { GUIDES, getGuide, guidePath, sectionRange, sectionSummary } from '@/lib/guides';
+import { GUIDES, getGuide, guidePath, sectionSummary } from '@/lib/guides';
 import { itemListJsonLd } from '@/lib/category-listing';
 import { SITE_URL } from '@/lib/site';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
@@ -62,6 +62,8 @@ export default async function GuiaPage({ params }: { params: Params }) {
 
   const view = await getGuideView(guide);
   const others = GUIDES.filter((g) => g.slug !== guide.slug);
+  // Solo la primera sección con productos pide sus primeras fotos sin esperar.
+  const firstFilled = view.sections.findIndex((s) => s.products.length > 0);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
@@ -94,22 +96,42 @@ export default async function GuiaPage({ params }: { params: Params }) {
         </nav>
       )}
 
-      {view.sections.map((s, i) => (
-        <section key={s.section.id} id={s.section.id} aria-labelledby={`${s.section.id}-titulo`} className="mt-10 scroll-mt-24">
-          <h2 id={`${s.section.id}-titulo`} className="font-heading text-lg font-semibold">
-            {s.section.title}
+      {view.sections.map((s, i) => {
+        const summary = sectionSummary(s, guide.unit);
+        return (
+          <section key={s.section.id} id={s.section.id} aria-labelledby={`${s.section.id}-titulo`} className="mt-10 scroll-mt-24">
+            <h2 id={`${s.section.id}-titulo`} className="font-heading text-lg font-semibold">
+              {s.section.title}
+            </h2>
+            {summary && <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">{summary}</p>}
+            {s.products.length > 0 ? (
+              <ProductGrid
+                products={s.products}
+                placement={guide.placement}
+                drops={s.drops}
+                eagerImages={i === firstFilled ? 4 : 0}
+              />
+            ) : (
+              <p className="mt-3 rounded-xl border border-border bg-surface p-4 text-sm text-muted">
+                Hoy ningún producto cumple las reglas de esta sección. La lista se rearma sola con los precios del día.
+              </p>
+            )}
+          </section>
+        );
+      })}
+
+      {guide.tips && (
+        <section aria-labelledby="que-mirar" className="mt-12 max-w-3xl">
+          <h2 id="que-mirar" className="mb-3 font-heading text-lg font-semibold">
+            {guide.tips.title}
           </h2>
-          <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">{sectionSummary(s)}</p>
-          {s.products.length > 0 ? (
-            <ProductGrid products={s.products} placement={guide.placement} drops={s.drops} eagerImages={i === 0 ? 4 : 0} />
-          ) : (
-            <p className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
-              Hoy no hay productos que cumplan las reglas de esta lista ({sectionRange(s.section).toLowerCase()}). Se
-              rearma sola con los precios del día.
-            </p>
-          )}
+          <ul className="list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted">
+            {guide.tips.items.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         </section>
-      ))}
+      )}
 
       <section aria-labelledby="como-armamos" className="mt-12 max-w-3xl">
         <h2 id="como-armamos" className="mb-3 font-heading text-lg font-semibold">

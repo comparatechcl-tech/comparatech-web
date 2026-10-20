@@ -41,6 +41,7 @@ const PLACEMENT_LABELS: Record<Placement, string> = {
   'black-friday': 'Black Friday',
   modelo: 'Página de un modelo',
   'guia-regalos': 'Guía · regalos tecnológicos',
+  'guia-notebook': 'Guía · notebook para la universidad',
   otro: 'Otro',
 };
 

@@ -35,6 +35,7 @@ describe('placementFromPath', () => {
     ['/modelo/iphone-17', 'modelo'],
     ['/guias/regalos-tecnologicos', 'guia-regalos'],
     ['/guias/regalos-tecnologicos/', 'guia-regalos'],
+    ['/guias/notebook-para-la-universidad', 'guia-notebook'],
     ['/guias/no-existe', 'otro'],
     ['/guias/constructor', 'otro'],
     ['/guias', 'otro'],

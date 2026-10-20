@@ -25,6 +25,7 @@ export const PLACEMENTS = [
   'black-friday',
   'modelo',
   'guia-regalos',
+  'guia-notebook',
   'otro',
 ] as const;
 
@@ -108,7 +109,10 @@ export function placementFromPath(pathname: string): Placement {
  * dos listas coincidan. Un Map y no un objeto: "/guias/constructor" no es
  * una guía.
  */
-const GUIDE_PLACEMENTS = new Map<string, Placement>([['regalos-tecnologicos', 'guia-regalos']]);
+const GUIDE_PLACEMENTS = new Map<string, Placement>([
+  ['regalos-tecnologicos', 'guia-regalos'],
+  ['notebook-para-la-universidad', 'guia-notebook'],
+]);
 
 /** Qué tipo de link abrió el comprador: el acortador o la ficha directa. */
 export function linkModeFromHref(href: string): LinkMode {

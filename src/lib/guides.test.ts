@@ -7,7 +7,10 @@ import {
   getGuide,
   guideCandidates,
   guidePath,
+  hasDedicatedGpu,
   historyBlocker,
+  memoryBlocker,
+  memoryOf,
   sectionRange,
   sectionSummary,
   staticBlocker,
@@ -81,6 +84,7 @@ function statsFor(products: Product[], history: Record<string, PricePoint[]> = {
 }
 
 const regalos = getGuide('regalos-tecnologicos')!;
+const notebooks = getGuide('notebook-para-la-universidad')!;
 /** Una guía de una sola sección para probar la variedad sin depender de los montos de verdad. */
 const oneSection: GuideDef = {
   ...regalos,
@@ -357,10 +361,93 @@ describe('textos de cada sección', () => {
   it('el rango y el resumen con los precios del día', () => {
     expect(sectionRange({ above: 0, upTo: 20_000 })).toBe('Hasta $20.000');
     expect(sectionRange({ above: 20_000, upTo: 50_000 })).toBe('De $20.000 a $50.000');
+    expect(sectionRange({ above: 500_000, upTo: Infinity })).toBe('Más de $500.000');
+    expect(sectionRange({ above: 0, upTo: Infinity })).toBe('Cualquier precio');
     const section = regalos.sections[1];
     const two = [product({ price: 24_990 }), product({ price: 43_990 })];
-    expect(sectionSummary({ section, products: two, drops: {} })).toBe('2 ideas de $24.990 a $43.990, con el precio de hoy.');
-    expect(sectionSummary({ section, products: [two[0]], drops: {} })).toBe('1 idea a $24.990, con el precio de hoy.');
-    expect(sectionSummary({ section, products: [], drops: {} })).toBe('De $20.000 a $50.000');
+    expect(sectionSummary({ section, products: two, drops: {} }, regalos.unit)).toBe('2 ideas de $24.990 a $43.990, con el precio de hoy.');
+    expect(sectionSummary({ section, products: [two[0]], drops: {} }, regalos.unit)).toBe('1 idea a $24.990, con el precio de hoy.');
+    expect(sectionSummary({ section, products: [], drops: {} }, regalos.unit)).toBeNull();
+    expect(sectionSummary({ section: notebooks.sections[0], products: two, drops: {} }, notebooks.unit)).toBe(
+      '2 notebooks de $24.990 a $43.990, con el precio de hoy.',
+    );
+  });
+});
+
+describe('memoryOf', () => {
+  it('la RAM y el disco salen de la ficha, en GB', () => {
+    expect(memoryOf({ name: 'Notebook X', specs: { 'Capacidad total del módulo de memoria RAM': '16 GB', 'Capacidad de disco SSD': '512 GB' } })).toEqual({ ramGb: 16, storageGb: 512 });
+    expect(memoryOf({ name: 'Celular X', specs: { 'Memoria RAM': '6 GB', 'Memoria interna': '128 GB' } })).toEqual({ ramGb: 6, storageGb: 128 });
+    expect(memoryOf({ name: 'Teléfono Senior', specs: { 'Memoria interna': '128 MB' } }).storageGb).toBeCloseTo(0.125);
+    expect(memoryOf({ name: 'Notebook X', specs: { 'Capacidad del disco rígido': '1 TB' } }).storageGb).toBe(1024);
+  });
+
+  it('si la ficha no lo dice, del nombre; si tampoco, no se sabe', () => {
+    expect(memoryOf({ name: 'Notebook HP 245 G10 AMD Ryzen 3 8gb Ram 256GB Ssd', specs: {} })).toEqual({ ramGb: 8, storageGb: 256 });
+    expect(memoryOf({ name: 'Xiaomi Redmi Note 15 Negro 256 GB ROM 8 GB RAM', specs: {} })).toEqual({ ramGb: 8, storageGb: 256 });
+    expect(memoryOf({ name: 'Notebook Lenovo Ideapad 14IRH10 i5-13420H 8Gb 512Gb', specs: {} })).toEqual({ ramGb: null, storageGb: null });
+  });
+});
+
+describe('hasDedicatedGpu', () => {
+  it('reconoce la tarjeta de video en el nombre, con o sin espacio', () => {
+    expect(hasDedicatedGpu('Notebook Gamer Loq Gen 9 Core R5 16gb 512gb + Rtx 3050 6gb')).toBe(true);
+    expect(hasDedicatedGpu('Notebook HP Gamer Victus 15-fb3032la Ryzen 5 RTX3050 6gb')).toBe(true);
+    expect(hasDedicatedGpu('Notebook Asus TUF Gaming Radeon RX 6500M')).toBe(true);
+    expect(hasDedicatedGpu('Notebook Acer Nitro GTX 1650')).toBe(true);
+  });
+
+  it('los gráficos integrados no cuentan', () => {
+    expect(hasDedicatedGpu('Notebook ASUS Vivobook Go 15 AMD Ryzen 5 Radeon Graphics')).toBe(false);
+    expect(hasDedicatedGpu('Notebook HP 14 Intel Core 3 8GB 512GB SSD')).toBe(false);
+  });
+});
+
+describe('la guía de notebooks', () => {
+  const laptop = (over: Partial<Product>) =>
+    product({
+      name: 'Notebook Lenovo Ideapad Slim 3 Ryzen 5 8gb Ram 512gb Ssd',
+      brand: 'Lenovo',
+      category: 'computacion',
+      ml_domain_id: 'MLC-NOTEBOOKS',
+      price: 459_990,
+      original_price: 549_990,
+      ...over,
+    });
+
+  it('tres secciones: hasta $500.000, más de $500.000 y con tarjeta de video', () => {
+    expect(notebooks.sections.map((s) => [s.id, s.title, s.gpu])).toEqual([
+      ['hasta-500000', 'Hasta $500.000', false],
+      ['mas-de-500000', 'Más de $500.000', false],
+      ['con-tarjeta-de-video', 'Con tarjeta de video', true],
+    ]);
+    expect(notebooks).toMatchObject({ minRamGb: 8, minStorageGb: 256, variety: { perBrand: 2 } });
+    expect(notebooks.tips?.items.length).toBeGreaterThan(0);
+    for (const line of notebooks.tips?.items ?? []) expect(line).not.toMatch(AVOIDED);
+  });
+
+  it('cada notebook en su sección: los de tarjeta de video van aparte, a cualquier precio', () => {
+    const cheap = laptop({});
+    const pricey = laptop({ name: 'Notebook Samsung Galaxy Book4 i7 16gb Ram 512gb Ssd', brand: 'Samsung', price: 749_990 });
+    const gamer = laptop({ name: 'Notebook Gamer Lenovo LOQ Ryzen 5 16gb 512gb Rtx 3050', price: 799_990 });
+    const cheapGamer = laptop({ name: 'Notebook HP Victus Ryzen 5 8gb Ram 512gb Ssd RTX3050', brand: 'HP', price: 489_990 });
+    const all = [cheap, pricey, gamer, cheapGamer];
+    const view = buildGuide(notebooks, all, statsFor(all), new Set(), NOW);
+    expect(view.sections.map((s) => s.products.map((p) => p.id).sort())).toEqual([
+      [cheap.id],
+      [pricey.id],
+      [gamer.id, cheapGamer.id].sort(),
+    ]);
+  });
+
+  it('fuera los de menos de 8 GB de RAM o menos de 256 GB de disco; sin el dato, entran', () => {
+    const small = laptop({ name: 'Notebook Chuwi Celeron 4gb Ram 128gb Ssd', brand: 'Chuwi' });
+    const emmc = laptop({ specs: { 'Capacidad total del módulo de memoria RAM': '8 GB', 'Capacidad de disco SSD': '128 GB' } });
+    const unknown = laptop({ name: 'Notebook Lenovo Ideapad 14IRH10 i5-13420H 8Gb 512Gb' });
+    expect(memoryBlocker(notebooks, small)).toBe('low-memory');
+    expect(memoryBlocker(notebooks, emmc)).toBe('low-memory');
+    expect(memoryBlocker(notebooks, unknown)).toBeNull();
+    expect(memoryBlocker(regalos, small)).toBeNull();
+    expect(guideCandidates(notebooks, [small, emmc, unknown]).map((p) => p.id)).toEqual([unknown.id]);
   });
 });

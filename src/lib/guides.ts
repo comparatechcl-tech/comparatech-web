@@ -32,11 +32,16 @@ export interface GuideSection {
   id: string;
   /** El título de la sección (H2). */
   title: string;
-  /** Rango de precio: más de `above` y hasta `upTo` pesos. */
+  /** Rango de precio: más de `above` y hasta `upTo` pesos (Infinity: sin tope). */
   above: number;
   upTo: number;
   /** Los tipos de producto que entran (los nombres de lib/product-types). */
   types: readonly string[];
+  /**
+   * true: solo los que tienen tarjeta de video (hasDedicatedGpu); false:
+   * solo los que no. Sin el campo, da igual.
+   */
+  gpu?: boolean;
   /** Cuántos productos muestra, como mucho. */
   size: number;
 }
@@ -56,9 +61,19 @@ export interface GuideDef {
   description: string;
   /** La primera frase de la página. */
   intro: string;
+  /** Cómo se cuentan sus productos en el resumen de cada sección ("8 ideas", "3 notebooks"). */
+  unit: { one: string; many: string };
   sections: readonly GuideSection[];
   /** La variedad de cada sección (ver GuideVariety). */
   variety: GuideVariety;
+  /**
+   * Memoria mínima, en GB (ver memoryOf). Queda fuera lo que tiene menos
+   * según la ficha o el nombre; si no lo dice, entra.
+   */
+  minRamGb?: number;
+  minStorageGb?: number;
+  /** "Qué mirar": datos generales para elegir, cortos y sin nombrar productos. */
+  tips?: { title: string; items: readonly string[] };
   /** "Cómo armamos esta lista": frases cortas que dicen las reglas de verdad. */
   method: readonly string[];
 }
@@ -115,6 +130,7 @@ export const GUIDES: readonly GuideDef[] = [
       'Ideas de regalos tecnológicos hasta $20.000, $50.000 y $100.000: audífonos, parlantes, relojes inteligentes y más, con el precio de hoy en Mercado Libre.',
     intro:
       'Ideas para regalar tecnología según cuánto quieras gastar, con el precio de hoy en Mercado Libre. La lista se arma sola con nuestro catálogo y cambia con los precios del día.',
+    unit: { one: 'idea', many: 'ideas' },
     sections: [
       { id: 'hasta-20000', title: 'Hasta $20.000', above: 0, upTo: 20_000, types: GIFT_TYPES, size: 8 },
       { id: 'hasta-50000', title: 'Hasta $50.000', above: 20_000, upTo: 50_000, types: GIFT_TYPES, size: 8 },
@@ -129,6 +145,42 @@ export const GUIDES: readonly GuideDef[] = [
       'En cada presupuesto, hasta dos del mismo tipo y dos de la misma marca, repartidos entre categorías. El orden lo pone un puntaje automático: tipo de producto, marca, descuento y envío, entre otras cosas.',
     ],
   },
+  {
+    slug: 'notebook-para-la-universidad',
+    placement: 'guia-notebook',
+    name: 'Notebook para la universidad',
+    title: 'Notebook para la universidad: precios en Chile | ComparaTech',
+    heading: 'Notebook para la universidad',
+    description:
+      'Notebooks para la universidad con 8 GB de RAM o más, por presupuesto, y con tarjeta de video para diseño o ingeniería. Con el precio de hoy en Mercado Libre.',
+    intro:
+      'Notebooks nuevos con 8 GB de RAM o más, ordenados por presupuesto, con el precio de hoy en Mercado Libre. La lista se arma sola con nuestro catálogo y cambia con los precios del día.',
+    unit: { one: 'notebook', many: 'notebooks' },
+    sections: [
+      { id: 'hasta-500000', title: 'Hasta $500.000', above: 0, upTo: 500_000, types: ['Notebooks'], gpu: false, size: 8 },
+      { id: 'mas-de-500000', title: 'Más de $500.000', above: 500_000, upTo: Infinity, types: ['Notebooks'], gpu: false, size: 8 },
+      { id: 'con-tarjeta-de-video', title: 'Con tarjeta de video', above: 0, upTo: Infinity, types: ['Notebooks'], gpu: true, size: 8 },
+    ],
+    // Todos son del mismo tipo: la variedad está en la marca.
+    variety: { perBrand: 2 },
+    minRamGb: 8,
+    minStorageGb: 256,
+    tips: {
+      title: 'Qué mirar',
+      items: [
+        'Memoria RAM: 8 GB alcanzan para clases, documentos y navegar; con 16 GB se nota menos el peso de muchas pestañas o programas abiertos.',
+        'Disco: uno SSD prende y abre los programas rápido. 256 GB se llenan pronto; 512 GB dan más espacio.',
+        'Tarjeta de video: hace falta para programas 3D, render o juegos, como en arquitectura, diseño o algunas ingenierías.',
+        'Pantalla: 14 pulgadas pesan menos para llevar todos los días; 15,6 son más cómodas para trabajar.',
+      ],
+    },
+    method: [
+      'Salen de nuestro catálogo, que se arma solo con lo más vendido y lo más buscado en Mercado Libre, de vendedores con reputación verde.',
+      'Solo notebooks nuevos con 8 GB de RAM o más y 256 GB de disco o más, según la ficha de Mercado Libre. Los que tienen tarjeta de video van aparte.',
+      'Quedan fuera los de precio que cambia seguido, los que hoy cuestan 10% o más sobre su precio más bajo del último mes, los que tienen un nombre que es un código y los de vendedores con pocas ventas.',
+      'Hasta dos de la misma marca en cada sección. El orden lo pone un puntaje automático: marca, descuento y envío, entre otras cosas.',
+    ],
+  },
 ];
 
 export function guidePath(slug: string): string {
@@ -139,11 +191,69 @@ export function getGuide(slug: string): GuideDef | undefined {
   return GUIDES.find((g) => g.slug === slug);
 }
 
-/** El rango de una sección en palabras: "Hasta $20.000" o "De $20.000 a $50.000". */
+/**
+ * El rango de una sección en palabras: "Hasta $20.000", "De $20.000 a
+ * $50.000", "Más de $500.000" o, sin límites, "Cualquier precio".
+ */
 export function sectionRange(section: Pick<GuideSection, 'above' | 'upTo'>): string {
-  return section.above > 0
-    ? `De ${formatCLP(section.above)} a ${formatCLP(section.upTo)}`
-    : `Hasta ${formatCLP(section.upTo)}`;
+  const capped = Number.isFinite(section.upTo);
+  if (section.above > 0) {
+    return capped ? `De ${formatCLP(section.above)} a ${formatCLP(section.upTo)}` : `Más de ${formatCLP(section.above)}`;
+  }
+  return capped ? `Hasta ${formatCLP(section.upTo)}` : 'Cualquier precio';
+}
+
+// ---------------------------------------------------------------------------
+// Lo que dice la ficha
+
+/** Las especificaciones de Mercado Libre con la RAM y con el disco, por tipo de producto. */
+const RAM_SPECS = ['Capacidad total del módulo de memoria RAM', 'Memoria RAM'];
+const STORAGE_SPECS = ['Capacidad de disco SSD', 'Capacidad del disco rígido', 'Memoria interna', 'Capacidad'];
+
+/** "8 GB", "1 TB", "128 MB" → GB. null si no es una cantidad de memoria. */
+function gigabytes(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const match = String(value).toLowerCase().match(/(\d+(?:[.,]\d+)?)\s*(tb|gb|mb)\b/);
+  if (!match) return null;
+  const amount = Number(match[1].replace(',', '.'));
+  return match[2] === 'tb' ? amount * 1024 : match[2] === 'mb' ? amount / 1024 : amount;
+}
+
+function firstSpec(specs: Product['specs'] | null | undefined, keys: string[]): number | null {
+  for (const key of keys) {
+    const gb = gigabytes(specs?.[key]);
+    if (gb !== null) return gb;
+  }
+  return null;
+}
+
+/**
+ * La RAM y el disco, en GB: de la ficha de Mercado Libre y, si la ficha no
+ * lo dice, del nombre ("8gb ram", "512gb ssd"). null si no se sabe. La
+ * ficha a veces se equivoca de campo (un SSD como "disco rígido"), pero la
+ * cantidad es la misma: por eso se mira cuánto y no de qué tipo.
+ */
+export function memoryOf(product: Pick<Product, 'name' | 'specs'>): { ramGb: number | null; storageGb: number | null } {
+  const name = normalizeName(product.name);
+  const ramInName = name.match(/\b(\d{1,2}) ?gb (?:de )?ram\b/) ?? name.match(/\bram (?:de )?(\d{1,2}) ?gb\b/);
+  const storageInName =
+    name.match(/\b(\d{2,4}) ?(gb|tb) (?:de )?(?:ssd|rom|almacenamiento|memoria interna)\b/) ??
+    name.match(/\bssd (?:de )?(\d{2,4}) ?(gb|tb)\b/);
+  return {
+    ramGb: firstSpec(product.specs, RAM_SPECS) ?? (ramInName ? Number(ramInName[1]) : null),
+    storageGb:
+      firstSpec(product.specs, STORAGE_SPECS) ??
+      (storageInName ? Number(storageInName[1]) * (storageInName[2] === 'tb' ? 1024 : 1) : null),
+  };
+}
+
+/**
+ * ¿Tiene tarjeta de video aparte? Se lee del nombre ("RTX 3050", "RTX3050",
+ * "GTX 1650", "Radeon RX 6500M"): la ficha de Mercado Libre no trae el dato
+ * de forma pareja.
+ */
+export function hasDedicatedGpu(name: string): boolean {
+  return /\b(?:rtx|gtx) ?\d{3,4}\b|\brtx\b|\bradeon rx ?\d{3,4}/.test(normalizeName(name));
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +283,7 @@ export function sectionRange(section: Pick<GuideSection, 'above' | 'upTo'>): str
  *    conocidos, y muchos llevan días con el mismo precio;
  *  - above-minimum: hoy cuesta 10% o más sobre el precio más bajo que se
  *    sostuvo en los últimos 30 días;
+ *  - low-memory: menos RAM o disco que el mínimo de la guía (memoryOf);
  *  - low-interest: menos de GUIDE_MIN_POINTS en el puntaje de interés.
  */
 export type GuideBlocker =
@@ -185,6 +296,7 @@ export type GuideBlocker =
   | 'moving-price'
   | 'many-sellers'
   | 'above-minimum'
+  | 'low-memory'
   | 'low-interest';
 
 /**
@@ -241,8 +353,18 @@ export function fitsSection(product: Product, section: GuideSection): boolean {
   return (
     product.price > section.above &&
     product.price <= section.upTo &&
-    section.types.includes(domainLabel(product.ml_domain_id))
+    section.types.includes(domainLabel(product.ml_domain_id)) &&
+    (section.gpu === undefined || hasDedicatedGpu(product.name) === section.gpu)
   );
+}
+
+/** Menos RAM o disco que el mínimo de la guía, según lo que se sabe (memoryOf). */
+export function memoryBlocker(guide: Pick<GuideDef, 'minRamGb' | 'minStorageGb'>, product: Product): GuideBlocker | null {
+  if (guide.minRamGb === undefined && guide.minStorageGb === undefined) return null;
+  const { ramGb, storageGb } = memoryOf(product);
+  if (guide.minRamGb !== undefined && ramGb !== null && ramGb < guide.minRamGb) return 'low-memory';
+  if (guide.minStorageGb !== undefined && storageGb !== null && storageGb < guide.minStorageGb) return 'low-memory';
+  return null;
 }
 
 /**
@@ -250,7 +372,9 @@ export function fitsSection(product: Product, section: GuideSection): boolean {
  * se vean sin historial): a estos, y solo a estos, se les lee el historial.
  */
 export function guideCandidates(guide: GuideDef, catalog: Product[]): Product[] {
-  return catalog.filter((p) => guide.sections.some((s) => fitsSection(p, s)) && staticBlocker(p) === null);
+  return catalog.filter(
+    (p) => guide.sections.some((s) => fitsSection(p, s)) && staticBlocker(p) === null && memoryBlocker(guide, p) === null,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -343,13 +467,13 @@ export function buildGuide(
   return { sections, products: sections.flatMap((s) => s.products) };
 }
 
-/** La línea bajo el título de una sección: cuántos hay y entre qué precios. */
-export function sectionSummary(view: GuideSectionView): string {
+/** La línea bajo el título de una sección: cuántos hay y entre qué precios. null si no hay ninguno. */
+export function sectionSummary(view: GuideSectionView, unit: GuideDef['unit']): string | null {
   const prices = view.products.map((p) => p.price);
-  if (prices.length === 0) return sectionRange(view.section);
+  if (prices.length === 0) return null;
   const min = Math.min(...prices);
   const max = Math.max(...prices);
-  const what = prices.length === 1 ? '1 idea' : `${prices.length} ideas`;
+  const what = prices.length === 1 ? `1 ${unit.one}` : `${prices.length} ${unit.many}`;
   const range = min === max ? `a ${formatCLP(min)}` : `de ${formatCLP(min)} a ${formatCLP(max)}`;
   return `${what} ${range}, con el precio de hoy.`;
 }

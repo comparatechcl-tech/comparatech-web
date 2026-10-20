@@ -145,7 +145,7 @@ describe('/guias/[guia]', () => {
     expect(html).toContain(`href="/producto/${jbl.slug}"`);
     expect(read).toContain('Bajó $3.669');
     // Una sección sin productos lo dice, sin inventar nada.
-    expect(read).toContain('Hoy no hay productos que cumplan las reglas de esta lista (de $50.000 a $100.000).');
+    expect(read).toContain('Hoy ningún producto cumple las reglas de esta sección.');
     // Cómo se armó: sin decir que alguien eligió o probó cada producto.
     expect(read).toContain('Cómo armamos esta lista');
     expect(read).toContain('No probamos los productos.');
@@ -174,7 +174,29 @@ describe('/guias/[guia]', () => {
     vi.mocked(getGuideView).mockResolvedValue(view({ 'hasta-20000': [], 'hasta-50000': [] }));
     const html = renderToStaticMarkup(await GuiaPage(params('regalos-tecnologicos')));
     expect(jsonLd(html).some((d) => d['@type'] === 'ItemList')).toBe(false);
-    expect(text(html)).toContain('Hoy no hay productos que cumplan las reglas de esta lista (hasta $20.000).');
+    expect(text(html)).toContain('Hoy ningún producto cumple las reglas de esta sección.');
+    // Sin productos no hay resumen de precios que mostrar.
+    expect(text(html)).not.toMatch(/\bideas? (de|a) \$/);
+  });
+
+  it('la guía de notebooks: "Qué mirar", sus secciones y el enlace a la otra guía', async () => {
+    const notebooks = getGuide('notebook-para-la-universidad')!;
+    const laptop = product({ name: 'Notebook Lenovo Ideapad Slim 3 Ryzen 3 8gb Ram 512gb Ssd', brand: 'Lenovo', price: 459_990, ml_domain_id: 'MLC-NOTEBOOKS', category: 'computacion' });
+    vi.mocked(getGuideView).mockResolvedValue({
+      sections: notebooks.sections.map((section, i) => ({ section, products: i === 0 ? [laptop] : [], drops: {} })),
+      products: [laptop],
+    });
+    vi.mocked(ProductGrid).mockClear();
+    const html = renderToStaticMarkup(await GuiaPage(params('notebook-para-la-universidad')));
+    const read = text(html);
+    expect(read).toContain('Notebook para la universidad');
+    expect(read).toContain('1 notebook a $459.990, con el precio de hoy.');
+    expect(read).toContain('Qué mirar');
+    expect(read).toContain('Memoria RAM: 8 GB alcanzan');
+    for (const id of ['hasta-500000', 'mas-de-500000', 'con-tarjeta-de-video']) expect(html).toContain(`id="${id}"`);
+    expect(html).toContain('href="/guias/regalos-tecnologicos"');
+    for (const [props] of vi.mocked(ProductGrid).mock.calls) expect(props.placement).toBe('guia-notebook');
+    expect(read).not.toMatch(AVOIDED);
   });
 
   it('una guía que no está en la lista no tiene página', async () => {
