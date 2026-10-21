@@ -97,6 +97,34 @@ function fromUrl(raw: string): MlInput {
   return { kind: 'otro', raw };
 }
 
+/**
+ * El link de afiliado para compartir una publicación que el sitio no puede
+ * agregar (no se sabe a qué ficha pertenece): la misma dirección, con
+ * matt_word y matt_tool, como hace el generador de links de Mercado Libre con
+ * cualquier producto. Se queda solo `pdp_filters` (elige la publicación de
+ * ese vendedor dentro de /up/…); se van el seguimiento de quien compartió
+ * (otro matt_tool, ua, sid) y lo que va después de #. null si no es un link
+ * de un producto de Mercado Libre Chile, o si faltan matt_word o matt_tool.
+ */
+export function shareAffiliateUrl(raw: string, params: { word: string | null; tool: string | null }): string | null {
+  if (!params.word || !params.tool) return null;
+  let url: URL;
+  try {
+    url = new URL(trimPunctuation(raw));
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  if (isShortLink(url) || !isChileHost(url.hostname)) return null;
+  if (!USER_PRODUCT_RE.test(url.pathname) && !ITEM_PATH_RE.test(url.pathname) && !CATALOG_PATH_RE.test(url.pathname)) return null;
+  const clean = new URL(`https://${url.hostname.toLowerCase()}${url.pathname}`);
+  const filters = url.searchParams.get('pdp_filters');
+  if (filters) clean.searchParams.set('pdp_filters', filters);
+  clean.searchParams.set('matt_word', params.word);
+  clean.searchParams.set('matt_tool', params.tool);
+  return clean.toString();
+}
+
 function keyOf(input: MlInput): string {
   return 'id' in input ? input.id : input.raw;
 }

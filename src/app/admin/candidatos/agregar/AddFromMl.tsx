@@ -230,6 +230,11 @@ export function ReviewItemCard({
     <div className="rounded-xl border border-border bg-surface p-3">
       <p className="break-all text-xs text-muted">{item.raw}</p>
       <p className="mt-1 text-sm text-fg">{item.message}</p>
+      {item.kind === 'publicacion' && item.shareUrl && (
+        <div className="mt-3">
+          <CopyLink url={item.shareUrl} />
+        </div>
+      )}
       {item.kind === 'publicacion' && item.suggestions.length > 0 && (
         <Suggestions suggestions={item.suggestions} busy={busy} onPick={onPick} />
       )}

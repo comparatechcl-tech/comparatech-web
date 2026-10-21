@@ -13,7 +13,7 @@ import {
   lookupProduct,
   searchCatalogProducts,
 } from '@/lib/ml-catalog';
-import type { MlInput } from '@/lib/ml-links';
+import { shareAffiliateUrl, type MlInput } from '@/lib/ml-links';
 import { directAffiliateUrl } from '@/lib/outbound';
 import { passesCommissionFloor } from '@/lib/prospect-filter';
 import { pickSiteDomain } from '@/lib/prospect-finders';
@@ -68,8 +68,12 @@ export interface CatalogSuggestion {
 
 export type ReviewItem =
   | ProductPreview
-  /** Publicación de un vendedor: fichas del catálogo parecidas a su título. */
-  | { kind: 'publicacion'; id: string; raw: string; message: string; suggestions: CatalogSuggestion[] }
+  /**
+   * Publicación de un vendedor: no se puede agregar al sitio, pero sí lleva su
+   * link de afiliado para compartirla (shareUrl), y las fichas del catálogo
+   * parecidas a su título.
+   */
+  | { kind: 'publicacion'; id: string; raw: string; message: string; suggestions: CatalogSuggestion[]; shareUrl: string | null }
   /** Algo que no se puede revisar, con la explicación. */
   | { kind: 'aviso'; raw: string; message: string };
 
@@ -105,6 +109,8 @@ export const NOT_ML_MESSAGE = 'Eso no es un link de un producto de Mercado Libre
 const ITEM_MESSAGE =
   'Este link es de una publicación de un vendedor, no de la ficha del producto, y Mercado Libre no deja ' +
   'ver a qué ficha pertenece.';
+
+const SHARE_HELP = 'No se puede agregar al sitio, pero abajo tienes su link de afiliado para compartirlo.';
 
 const FIND_CATALOG_HELP =
   'Busca el producto en Mercado Libre hasta llegar a su ficha (la dirección tiene /p/MLC…) y pega esa dirección.';
@@ -336,14 +342,18 @@ export async function reviewInput(input: MlInput, ctx: ReviewContext): Promise<R
     case 'otro':
       return { kind: 'aviso', raw: input.raw, message: NOT_ML_MESSAGE };
     case 'publicacion': {
-      const suggestions = await suggestCatalogProducts(input.words, ctx.token);
+      // Un link de la app de Mercado Libre ("Compartir" da …/up/MLCU…) no trae el título: no hay con qué buscar.
+      const suggestions = input.words ? await suggestCatalogProducts(input.words, ctx.token) : [];
+      // Como el generador de links de Mercado Libre: el link de afiliado de la publicación, aunque no entre al sitio.
+      const shareUrl = ctx.affiliate ? shareAffiliateUrl(input.raw, ctx.affiliate) : null;
+      const share = shareUrl ? ` ${SHARE_HELP}` : '';
       const message =
         suggestions === null
-          ? `${ITEM_MESSAGE} No pude buscar fichas parecidas (Mercado Libre no respondió). ${FIND_CATALOG_HELP}`
+          ? `${ITEM_MESSAGE}${share} No pude buscar fichas parecidas (Mercado Libre no respondió). ${FIND_CATALOG_HELP}`
           : suggestions.length > 0
-            ? `${ITEM_MESSAGE} ¿Es alguna de estas fichas?`
-            : `${ITEM_MESSAGE} ${FIND_CATALOG_HELP}`;
-      return { kind: 'publicacion', id: input.id, raw: input.raw, message, suggestions: suggestions ?? [] };
+            ? `${ITEM_MESSAGE}${share} Si es alguna de estas fichas, esa sí se puede agregar:`
+            : `${ITEM_MESSAGE}${share} Para agregarlo al sitio: ${FIND_CATALOG_HELP.charAt(0).toLowerCase()}${FIND_CATALOG_HELP.slice(1)}`;
+      return { kind: 'publicacion', id: input.id, raw: input.raw, message, suggestions: suggestions ?? [], shareUrl };
     }
     case 'ficha':
     case 'codigo': {
@@ -357,6 +367,7 @@ export async function reviewInput(input: MlInput, ctx: ReviewContext): Promise<R
             raw: input.raw,
             message: `${input.id} no es el código de una ficha de catálogo (parece el de una publicación). ${FIND_CATALOG_HELP}`,
             suggestions: [],
+            shareUrl: null,
           };
     }
   }

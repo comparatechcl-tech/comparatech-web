@@ -92,9 +92,25 @@ describe('Agregar desde Mercado Libre', () => {
       raw: 'https://articulo.mercadolibre.cl/MLC-1517429417-audifonos-sony-_JM',
       message: 'Este link es de una publicación de un vendedor… ¿Es alguna de estas fichas?',
       suggestions: [{ id: 'MLC40650114', name: 'Sony WH-1000XM5', imageUrl: 'https://http2.mlstatic.com/D_s.jpg' }],
+      shareUrl: null,
     });
     expect(html).toContain('¿Es alguna de estas fichas?');
     expect(html).toContain('Sony WH-1000XM5');
     expect(html).toContain('Revisar esta');
+    expect(html).not.toContain('Link de afiliado');
+  });
+
+  it('una publicación que no se puede agregar muestra su link de afiliado para copiar', () => {
+    const html = draw({
+      kind: 'publicacion',
+      id: 'MLCU3539944844',
+      raw: 'https://www.mercadolibre.cl/up/MLCU3539944844',
+      message: 'Este link es de una publicación de un vendedor… abajo tienes su link de afiliado para compartirlo.',
+      suggestions: [],
+      shareUrl: 'https://www.mercadolibre.cl/up/MLCU3539944844?pdp_filters=item_id%3AMLC3302018534&matt_word=comparatech&matt_tool=15629069',
+    });
+    expect(html).toContain('Link de afiliado');
+    expect(html).toContain('matt_tool=15629069');
+    expect(html).toContain('Copiar');
   });
 });

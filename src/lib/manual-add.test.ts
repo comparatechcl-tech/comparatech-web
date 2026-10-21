@@ -329,7 +329,27 @@ describe('reviewInput', () => {
         { id: 'MLC3', name: 'Parlante JBL Charge 5 Azul', imageUrl: null },
       ],
     });
-    expect((item as { message: string }).message).toContain('¿Es alguna de estas fichas?');
+    expect((item as { message: string }).message).toContain('Si es alguna de estas fichas, esa sí se puede agregar');
+  });
+
+  it('un link de "Compartir" de la app de Mercado Libre (/up/MLCU…) no se puede agregar, pero trae su link de afiliado', async () => {
+    // El que pegó el dueño el 21-10-2026: sin título en la dirección y con el seguimiento de quien compartió.
+    const raw = 'https://www.mercadolibre.cl/up/MLCU3539944844?matt_tool=94515950&pdp_filters=item_id:MLC3302018534&ua=naCzlPxu2spR9k36kNTvMhlkNEvoZB-JbeXPwqRUtApsqts#origin=share&sid=share&wid=MLC3302018534&action=copy';
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const item = await reviewInput({ kind: 'publicacion', id: 'MLCU3539944844', words: '', raw }, context());
+    expect(item).toMatchObject({
+      kind: 'publicacion',
+      suggestions: [],
+      shareUrl: 'https://www.mercadolibre.cl/up/MLCU3539944844?pdp_filters=item_id%3AMLC3302018534&matt_word=comparatech&matt_tool=15629069',
+    });
+    expect((item as { message: string }).message).toContain('abajo tienes su link de afiliado para compartirlo');
+    // Sin título no hay con qué buscar fichas parecidas: no se le pregunta nada a Mercado Libre.
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Sin links directos confirmados, no se inventa un link de afiliado.
+    const off = await reviewInput({ kind: 'publicacion', id: 'MLCU3539944844', words: '', raw }, context({ affiliate: null }));
+    expect(off).toMatchObject({ kind: 'publicacion', shareUrl: null });
+    expect((off as { message: string }).message).not.toContain('link de afiliado');
   });
 
   it('si ML no responde la búsqueda, lo dice en vez de dar a entender que no hay parecidas', async () => {

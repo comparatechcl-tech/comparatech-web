@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMlInput } from '@/lib/ml-links';
+import { parseMlInput, shareAffiliateUrl } from '@/lib/ml-links';
 
 /*
  * Lo que el dueño pega en "Agregar desde Mercado Libre": links copiados del
@@ -64,10 +64,48 @@ describe('parseMlInput', () => {
     ).toHaveLength(1);
   });
 
+  it('el link de "Compartir" de la app (/up/MLCU…, sin título) es una publicación', () => {
+    expect(parseMlInput('https://www.mercadolibre.cl/up/MLCU3539944844?matt_tool=94515950&pdp_filters=item_id:MLC3302018534&ua=naCzlPxu2spR9k36kNTvMhlkNEvoZB-JbeXPwqRUtApsqts#origin=share&sid=share&wid=MLC3302018534&action=copy')).toEqual([
+      { kind: 'publicacion', id: 'MLCU3539944844', words: '', raw: 'https://www.mercadolibre.cl/up/MLCU3539944844?matt_tool=94515950&pdp_filters=item_id:MLC3302018534&ua=naCzlPxu2spR9k36kNTvMhlkNEvoZB-JbeXPwqRUtApsqts#origin=share&sid=share&wid=MLC3302018534&action=copy' },
+    ]);
+  });
+
   it('lo que no es de Mercado Libre Chile queda como "otro"', () => {
     expect(parseMlInput('https://www.mercadolibre.com.ar/p/MLA123456')).toMatchObject([{ kind: 'otro' }]);
     expect(parseMlInput('https://www.mercadolibre.cl/ofertas')).toMatchObject([{ kind: 'otro' }]);
     expect(parseMlInput('https://mercadolibre.cl.estafa.com/p/MLC45203390')).toMatchObject([{ kind: 'otro' }]);
     expect(parseMlInput('hola, nada que ver')).toEqual([]);
+  });
+});
+
+describe('shareAffiliateUrl', () => {
+  const affiliate = { word: 'comparatech', tool: '15629069' };
+
+  it('el link de una publicación con matt_word y matt_tool, sin el seguimiento de quien compartió', () => {
+    expect(shareAffiliateUrl('https://www.mercadolibre.cl/up/MLCU3539944844?matt_tool=94515950&pdp_filters=item_id:MLC3302018534&ua=naCzlPxu2spR9k36kNTvMhlkNEvoZB-JbeXPwqRUtApsqts#origin=share&sid=share&wid=MLC3302018534&action=copy', affiliate)).toBe('https://www.mercadolibre.cl/up/MLCU3539944844?pdp_filters=item_id%3AMLC3302018534&matt_word=comparatech&matt_tool=15629069');
+    // El matt_tool de otro se reemplaza: nunca quedan dos.
+    const url = new URL(shareAffiliateUrl('https://www.mercadolibre.cl/up/MLCU3539944844?matt_tool=94515950&pdp_filters=item_id:MLC3302018534&ua=naCzlPxu2spR9k36kNTvMhlkNEvoZB-JbeXPwqRUtApsqts#origin=share&sid=share&wid=MLC3302018534&action=copy', affiliate)!);
+    expect(url.searchParams.getAll('matt_tool')).toEqual(['15629069']);
+    expect(url.hash).toBe('');
+    expect(url.searchParams.has('ua')).toBe(false);
+  });
+
+  it('sirve igual para una publicación vieja y para una ficha', () => {
+    expect(shareAffiliateUrl('https://articulo.mercadolibre.cl/MLC-1618906261-parlante-jbl-_JM?searchVariation=1#reco', affiliate)).toBe(
+      'https://articulo.mercadolibre.cl/MLC-1618906261-parlante-jbl-_JM?matt_word=comparatech&matt_tool=15629069'
+    );
+    expect(shareAffiliateUrl('https://www.mercadolibre.cl/parlante/p/MLC45203390.', affiliate)).toBe(
+      'https://www.mercadolibre.cl/parlante/p/MLC45203390?matt_word=comparatech&matt_tool=15629069'
+    );
+  });
+
+  it('nada para links cortos, de otros países, que no son de un producto, o sin datos de afiliado', () => {
+    expect(shareAffiliateUrl('https://meli.la/2abcXYZ', affiliate)).toBeNull();
+    expect(shareAffiliateUrl('https://www.mercadolibre.com.ar/up/MLAU123456', affiliate)).toBeNull();
+    expect(shareAffiliateUrl('https://mercadolibre.cl.estafa.com/up/MLCU3539944844', affiliate)).toBeNull();
+    expect(shareAffiliateUrl('https://www.mercadolibre.cl/ofertas', affiliate)).toBeNull();
+    expect(shareAffiliateUrl('MLC-1618906261', affiliate)).toBeNull();
+    expect(shareAffiliateUrl('javascript:alert(1)//www.mercadolibre.cl/up/MLCU1', affiliate)).toBeNull();
+    expect(shareAffiliateUrl('https://www.mercadolibre.cl/up/MLCU3539944844?matt_tool=94515950&pdp_filters=item_id:MLC3302018534&ua=naCzlPxu2spR9k36kNTvMhlkNEvoZB-JbeXPwqRUtApsqts#origin=share&sid=share&wid=MLC3302018534&action=copy', { word: null, tool: '15629069' })).toBeNull();
   });
 });
