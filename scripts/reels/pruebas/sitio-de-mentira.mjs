@@ -31,7 +31,7 @@ function readBody(req) {
  * en vez de "por debajo del precio de lista" y "precio de lista"), para que los videos viejos dejen de
  * ofrecerse y se armen de nuevo.
  */
-export const VIDEO_LOOK_VERSION = 3;
+export const VIDEO_LOOK_VERSION = 4;
 
 /**
  * La huella de la oferta, calculada como la calcula el sitio de verdad (src/lib/social/videos.ts): los

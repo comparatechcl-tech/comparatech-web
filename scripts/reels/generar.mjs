@@ -52,7 +52,7 @@ import {
 export const PRODUCTION = 'https://comparatech-web.vercel.app';
 const PLAN_PATH = '/api/social/videos/plan';
 /** Volumen de la canción de fondo (0 a 1): el video no tiene voz, pero tampoco tiene que reventar los oídos. */
-const MUSIC_VOLUME = 0.55;
+const MUSIC_VOLUME = 0.9;
 /** Una canción de más de esto no es una pista de fondo de 10 segundos. */
 const MUSIC_MAX_BYTES = 15 * 1024 * 1024;
 const ENV_FILE = fileURLToPath(new URL('../../.env.local', import.meta.url));

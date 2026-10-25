@@ -218,7 +218,7 @@ export function videoClaims(
  * armados queden viejos y se rehagan: va primero en la huella, así que con
  * otra versión cada video guardado tiene otro nombre que el que saldría ahora.
  */
-export const VIDEO_LOOK_VERSION = 3;
+export const VIDEO_LOOK_VERSION = 4;
 
 /**
  * La huella de lo que el video dice: los primeros 8 caracteres, en
