@@ -1,9 +1,11 @@
 import 'server-only';
 import {
+  GRAPH_VERSION,
   MetaApiError,
   graphGet,
   graphPost,
   pageAuth,
+  redactTokens,
   type FetchLike,
   type MetaConnection,
   type MetaCredentials,
@@ -160,4 +162,120 @@ export async function publishFacebookPhotos(
     // Ya está publicado: sin el link igual sirve.
   }
   return { postId, permalink };
+}
+
+// ---------------------------------------------------------------------------
+// Reels (la publicación diaria automática, lib/social/meta-daily).
+
+/**
+ * Paso 1 del reel de Instagram: el contenedor. Meta baja el video de
+ * video_url por su cuenta y lo procesa (suele tardar entre 30 segundos y
+ * unos minutos): se publica después con publishInstagramContainer, cuando
+ * instagramContainerStatus diga FINISHED.
+ */
+export async function createInstagramReel(
+  conn: Pick<MetaConnection, 'igUserId' | 'pageToken'>,
+  creds: MetaCredentials,
+  input: { videoUrl: string; caption: string; coverUrl?: string | null },
+  deps: PublishDeps = {}
+): Promise<string> {
+  const params: Record<string, string> = {
+    media_type: 'REELS',
+    video_url: input.videoUrl,
+    caption: input.caption,
+    // También en el feed del perfil, no solo en la pestaña de Reels.
+    share_to_feed: 'true',
+    ...pageAuth(conn, creds),
+  };
+  if (input.coverUrl) params.cover_url = input.coverUrl;
+  return idOf(await graphPost(`${conn.igUserId}/media`, params, deps.fetchImpl ?? fetch), 'el reel');
+}
+
+/** IN_PROGRESS, FINISHED, PUBLISHED, ERROR o EXPIRED (o '' si Meta no lo dice). */
+export async function instagramContainerStatus(
+  conn: Pick<MetaConnection, 'pageToken'>,
+  creds: MetaCredentials,
+  containerId: string,
+  deps: PublishDeps = {}
+): Promise<string> {
+  const body = await graphGet(containerId, { fields: 'status_code', ...pageAuth(conn, creds) }, deps.fetchImpl ?? fetch);
+  return typeof body.status_code === 'string' ? body.status_code : '';
+}
+
+/** El último paso de Instagram: publica un contenedor listo. */
+export async function publishInstagramContainer(
+  conn: Pick<MetaConnection, 'igUserId' | 'pageToken'>,
+  creds: MetaCredentials,
+  containerId: string,
+  deps: PublishDeps = {}
+): Promise<{ mediaId: string; permalink: string | null }> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const auth = pageAuth(conn, creds);
+  const mediaId = await finalStep(async () =>
+    idOf(await graphPost(`${conn.igUserId}/media_publish`, { creation_id: containerId, ...auth }, fetchImpl), 'la publicación')
+  );
+  let permalink: string | null = null;
+  try {
+    const media = await graphGet(mediaId, { fields: 'permalink', ...auth }, fetchImpl);
+    permalink = typeof media.permalink === 'string' ? media.permalink : null;
+  } catch {
+    // Ya está publicado: sin el link igual sirve.
+  }
+  return { mediaId, permalink };
+}
+
+const RUPLOAD_HOST = 'rupload.facebook.com';
+
+/**
+ * Reel en la página de Facebook (guía "Reels publishing"): se abre la subida,
+ * Meta baja el video desde su dirección (file_url) y se publica con
+ * video_state=PUBLISHED. Facebook lo procesa después por su cuenta.
+ */
+export async function publishFacebookReel(
+  conn: Pick<MetaConnection, 'pageId' | 'pageToken'>,
+  creds: MetaCredentials,
+  input: { videoUrl: string; description: string },
+  deps: PublishDeps = {}
+): Promise<{ videoId: string }> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const auth = pageAuth(conn, creds);
+  const start = await graphPost(`${conn.pageId}/video_reels`, { upload_phase: 'start', ...auth }, fetchImpl);
+  const videoId = typeof start.video_id === 'string' ? start.video_id : typeof start.video_id === 'number' ? String(start.video_id) : '';
+  if (!videoId) throw new MetaApiError('Meta no devolvió el id del video', null, null, 200);
+
+  // El token va solo a la dirección de subida de Meta: nunca a otra que venga en la respuesta.
+  let uploadUrl = `https://${RUPLOAD_HOST}/video-upload/${GRAPH_VERSION}/${videoId}`;
+  if (typeof start.upload_url === 'string') {
+    try {
+      if (new URL(start.upload_url).hostname === RUPLOAD_HOST) uploadUrl = start.upload_url;
+    } catch {
+      // Se usa la de siempre.
+    }
+  }
+  let uploaded: Response;
+  try {
+    uploaded = await fetchImpl(uploadUrl, {
+      method: 'POST',
+      headers: { Authorization: `OAuth ${conn.pageToken}`, file_url: input.videoUrl },
+      signal: AbortSignal.timeout(30_000),
+      cache: 'no-store',
+    });
+  } catch (err) {
+    throw new MetaApiError(`No se pudo subir el video a Facebook (${redactTokens(err instanceof Error ? err.message : String(err))})`, null, null, 0);
+  }
+  const body = (await uploaded.json().catch(() => ({}))) as { success?: unknown; error?: { message?: unknown; code?: unknown } };
+  if (!uploaded.ok || body.success !== true) {
+    const message = typeof body.error?.message === 'string' ? body.error.message : `HTTP ${uploaded.status}`;
+    throw new MetaApiError(`Facebook no aceptó el video: ${redactTokens(message)}`, typeof body.error?.code === 'number' ? body.error.code : null, null, uploaded.status);
+  }
+
+  await finalStep(async () => {
+    const done = await graphPost(
+      `${conn.pageId}/video_reels`,
+      { upload_phase: 'finish', video_id: videoId, video_state: 'PUBLISHED', description: input.description, ...auth },
+      fetchImpl
+    );
+    if (done.success !== true) throw new MetaApiError('Facebook no confirmó la publicación del reel', null, null, 200);
+  });
+  return { videoId };
 }

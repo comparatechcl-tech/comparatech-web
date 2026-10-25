@@ -15,6 +15,14 @@
     {
       "path": "/api/cron/backup",
       "schedule": "0 15 * * 1"
+    },
+    {
+      "path": "/api/cron/meta-diario?pasada=1",
+      "schedule": "30 13 * * *"
+    },
+    {
+      "path": "/api/cron/meta-diario?pasada=2",
+      "schedule": "30 15 * * *"
     }
   ]
 }
