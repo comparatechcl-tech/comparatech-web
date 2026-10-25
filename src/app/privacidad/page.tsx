@@ -70,7 +70,24 @@ export default function PrivacidadPage() {
             <strong className="text-fg">Mercado Libre</strong>: al seguir un link, entras a su sitio y desde ese
             momento rigen su política de privacidad y sus cookies. Mercado Libre sabe que llegaste desde ComparaTech.
           </li>
+          <li>
+            <strong className="text-fg">Meta (Instagram y Facebook)</strong>: ComparaTech tiene una app de Meta que
+            usa solo para publicar en sus propias cuentas (@comparatech.cl y su página de Facebook). La app no te pide
+            iniciar sesión y no guarda nada de quien ve, comenta o reacciona a esas publicaciones.
+          </li>
         </ul>
+
+        <h2 id="borrar-datos" className="scroll-mt-24 pt-2 font-heading text-lg font-semibold text-fg">
+          Borrar tus datos
+        </h2>
+        <p>
+          No tenemos cuentas ni datos que te identifiquen, tampoco desde la app de Meta. Si igual quieres que borremos
+          algo, escríbenos a{' '}
+          <a href={`mailto:${CONTACT_EMAIL}?subject=Borrar%20mis%20datos`} className="text-accent hover:underline">
+            {CONTACT_EMAIL}
+          </a>{' '}
+          con el asunto &quot;Borrar mis datos&quot;. Te respondemos qué hay y lo borramos en un plazo de 30 días.
+        </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Tus derechos</h2>
         <p>
