@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { SITE_URL } from '@/lib/site';
 import { CAROUSEL_RULES, readCarouselPage, type CarouselPage } from '@/lib/social/carousel';
 import { carouselKey } from '@/lib/social/carousel-url';
+import { metaCredentials, readMetaConnection } from '@/lib/social/meta';
 import { CarouselView } from './CarouselView';
 import { PublishedPanel } from './PublishedPanel';
 
@@ -49,6 +50,7 @@ export default async function CarruselPage({
     }
   }
 
+  const metaReady = metaCredentials() !== null && (await readMetaConnection(admin)).connection !== null;
   const carousel = page?.carousel ?? null;
   const published = page?.published ?? null;
   const showCarousel = !published || force;
@@ -102,6 +104,12 @@ export default async function CarruselPage({
           en {CAROUSEL_RULES.everyDays} días.
         </li>
       </ol>
+      {metaReady && (
+        <p className="mt-3 text-sm text-muted">
+          Más simple: con <strong className="text-fg">Publicar en Instagram y Facebook</strong> (abajo) sale completo en las
+          dos redes y queda marcado solo. Los pasos 3 a 5 son para hacerlo a mano desde el teléfono.
+        </p>
+      )}
 
       {error && (
         <div role="alert" className="mt-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
@@ -147,6 +155,7 @@ export default async function CarruselPage({
             carousel={carousel}
             maxPriceAgeMs={CAROUSEL_RULES.maxPriceAgeMs}
             renderedAt={now.getTime()}
+            metaReady={metaReady}
           />
         </>
       )}

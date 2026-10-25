@@ -118,18 +118,45 @@ export function appSecretProof(token: string, appSecret: string): string {
   return createHmac('sha256', appSecret).update(token).digest('hex');
 }
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-async function graphGet(
+/** Token de la página y su appsecret_proof, para cada llamada que publica o lee con la conexión. */
+export function pageAuth(conn: Pick<MetaConnection, 'pageToken'>, creds: MetaCredentials): Record<string, string> {
+  return { access_token: conn.pageToken, appsecret_proof: appSecretProof(conn.pageToken, creds.appSecret) };
+}
+
+export function graphGet(
   path: string,
   params: Record<string, string>,
   fetchImpl: FetchLike
 ): Promise<Record<string, unknown>> {
   const url = new URL(`${GRAPH}/${path.replace(/^\//, '')}`);
   for (const key of Object.keys(params)) url.searchParams.set(key, params[key]);
+  return graphFetch(url.toString(), { cache: 'no-store' }, fetchImpl);
+}
+
+/**
+ * POST con los parámetros en el cuerpo, no en la dirección: ahí quedarían el
+ * token y el texto en los registros de cualquier intermediario.
+ */
+export function graphPost(
+  path: string,
+  params: Record<string, string>,
+  fetchImpl: FetchLike
+): Promise<Record<string, unknown>> {
+  const body = new URLSearchParams();
+  for (const key of Object.keys(params)) body.set(key, params[key]);
+  return graphFetch(
+    `${GRAPH}/${path.replace(/^\//, '')}`,
+    { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, cache: 'no-store' },
+    fetchImpl
+  );
+}
+
+async function graphFetch(url: string, init: RequestInit, fetchImpl: FetchLike): Promise<Record<string, unknown>> {
   let res: Response;
   try {
-    res = await fetchImpl(url.toString(), { signal: AbortSignal.timeout(TIMEOUT_MS), cache: 'no-store' });
+    res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new MetaApiError(`No se pudo conectar con Meta (${redactTokens(reason)})`, null, null, 0);

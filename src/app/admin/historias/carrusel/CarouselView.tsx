@@ -10,6 +10,7 @@ import { checkSummary, type FileState } from '../StoryList';
 import { createLiveChecker } from '../live-checks';
 import { safeMlUrl, type CardCheck } from '../rules';
 import { markCarouselPublished, undoCarouselPublished } from './actions';
+import { MetaPublishPanel } from './MetaPublishPanel';
 import {
   createCarouselGestures,
   slidesOf,
@@ -78,10 +79,13 @@ export function CarouselView({
   carousel,
   maxPriceAgeMs,
   renderedAt,
+  metaReady = false,
 }: {
   carousel: WeeklyCarousel;
   maxPriceAgeMs: number;
   renderedAt: number;
+  /** Meta conectado: aparece "Publicar desde el sitio". */
+  metaReady?: boolean;
 }) {
   const slides = slidesOf(carousel);
   const [openedAt] = useState(() => {
@@ -230,6 +234,18 @@ export function CarouselView({
           </button>
         )}
       </div>
+
+      <MetaPublishPanel
+        metaReady={metaReady}
+        slides={slides.map((slide) => slide.image)}
+        ready={gate.ok}
+        blocked={!gate.ok && gate.kind !== 'checking' ? gate.message : null}
+        alreadyMarked={published !== null}
+        onMarked={(mark) => {
+          marks.set(carousel.cover.image, mark);
+          setPublished(mark);
+        }}
+      />
 
       <section className="rounded-xl border border-border bg-surface p-3 sm:p-4">
         <div className="grid gap-2 sm:grid-cols-2">
