@@ -180,6 +180,9 @@ describe('Graph API', () => {
     expect(metaErrorMessage(new MetaApiError('x', 200, null, 403))).toMatch(/permiso/);
     expect(metaErrorMessage(new MetaApiError('x', 4, null, 400))).toMatch(/esperar/);
     expect(metaErrorMessage(new MetaApiError('x', 101, null, 400))).toMatch(/META_APP_ID/);
+    // La conexión guardada no vence: si Meta la rechaza, es que le quitaron el acceso (25-10-2026).
+    expect(metaErrorMessage(new MetaApiError('x', 190, null, 400), 'guardada')).toMatch(/Vuelve a conectar/);
+    expect(metaErrorMessage(new MetaApiError('x', 190, null, 400), 'guardada')).not.toMatch(/1 hora/);
     expect(metaErrorMessage(new Error(`se cayó ${PAGE_TOKEN}`))).toBe('se cayó EAA…');
   });
 });

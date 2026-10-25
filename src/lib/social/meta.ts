@@ -354,11 +354,21 @@ export function missingScopes(scopes: string[]): string[] {
   return REQUIRED_SCOPES.filter((s) => !scopes.includes(s));
 }
 
-/** Mensaje en español para el admin a partir de un error de Meta. */
-export function metaErrorMessage(err: unknown): string {
+/**
+ * Mensaje en español para el admin a partir de un error de Meta.
+ *
+ * 'conectar': el token es el que se acaba de pegar (dura 1 hora). 'guardada':
+ * es la conexión guardada, que no vence sola. Si Meta la rechaza (código
+ * 190), es porque después se le quitó el acceso a la página o a la app; pasó
+ * el 25-10-2026: "Any of the pages_read_engagement… permission(s) must be
+ * granted before impersonating a user's page".
+ */
+export function metaErrorMessage(err: unknown, context: 'conectar' | 'guardada' = 'conectar'): string {
   if (err instanceof MetaApiError) {
     if (err.code === 190) {
-      return 'Meta rechazó el token: venció (dura 1 hora) o no se copió completo. Genera uno nuevo y pégalo de inmediato.';
+      return context === 'guardada'
+        ? 'Meta ya no acepta la conexión guardada: a la app le quitaron el acceso a la página o a Instagram. Vuelve a conectar en Configuración → Instagram y Facebook. No se publicó nada.'
+        : 'Meta rechazó el token: venció (dura 1 hora) o no se copió completo. Genera uno nuevo y pégalo de inmediato.';
     }
     if (err.code === 10 || (err.code !== null && err.code >= 200 && err.code < 300)) {
       return `Falta un permiso en la app de Meta (${err.message}).`;

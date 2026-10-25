@@ -92,7 +92,7 @@ export async function testMeta(): Promise<TestResult> {
     const quota = await publishingQuota(connection, creds);
     return { ok: true, ...quota };
   } catch (err) {
-    return { ok: false, error: metaErrorMessage(err) };
+    return { ok: false, error: metaErrorMessage(err, 'guardada') };
   }
 }
 

@@ -15,7 +15,7 @@ import {
   type MetaNetwork,
   type PublishEvent,
 } from '@/lib/social/carousel-publish';
-import { metaCredentials, metaErrorMessage, readMetaConnection } from '@/lib/social/meta';
+import { metaCredentials, metaErrorMessage, readMetaConnection, redactTokens } from '@/lib/social/meta';
 import { PublishError, publishFacebookPhotos, publishInstagramCarousel } from '@/lib/social/meta-publish';
 import { isOnSale, selectSocialProducts } from '@/lib/social/telegram';
 import { markCarouselPublished } from './actions';
@@ -142,8 +142,10 @@ export async function publishCarouselOnMeta(input: { slides: string[]; networks:
       return { ok: true, permalink: done.permalink };
     } catch (err) {
       const uncertain = err instanceof PublishError && err.uncertain;
-      const error = err instanceof PublishError ? err.message : metaErrorMessage(err);
-      await log(network, { estado: uncertain ? 'incierto' : 'error', error });
+      const error = err instanceof PublishError ? err.message : metaErrorMessage(err, 'guardada');
+      // El texto de Meta tal cual (sin tokens): el mensaje para el dueño no alcanza para saber qué pasó.
+      const detalle = err instanceof Error ? redactTokens(err.message).slice(0, 500) : null;
+      await log(network, { estado: uncertain ? 'incierto' : 'error', error, detalle });
       return uncertain ? { ok: false, error, uncertain: true } : { ok: false, error };
     }
   }
