@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { expectedAffiliateParams, readAffiliateSettingsWithDate } from '@/lib/settings';
 import { readAttributionTest } from '@/lib/admin-settings';
+import { readMetaConnection } from '@/lib/social/meta';
 import { directAffiliateUrl, isMeliLaUrl } from '@/lib/outbound';
 import { AffiliateSettingsForm } from './AffiliateSettingsForm';
 import { AttributionTestForm } from './AttributionTestForm';
@@ -68,6 +69,7 @@ export default async function ConfiguracionPage() {
   const sample = sampleRes.data;
   const testUrl = sample ? directAffiliateUrl(sample.ml_product_id, settings) : null;
   const attributionLabel = ATTRIBUTION_LABELS[attribution.test.status];
+  const meta = (await readMetaConnection(admin)).connection;
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10">
@@ -77,6 +79,19 @@ export default async function ConfiguracionPage() {
           Ver historial de cambios
         </Link>
       </div>
+
+      <Link
+        href="/admin/configuracion/meta"
+        className="mt-6 flex min-h-11 items-center justify-between gap-3 rounded-xl border border-border bg-surface px-5 py-4 transition hover:border-accent"
+      >
+        <span>
+          <span className="block font-heading text-base font-semibold text-fg">Instagram y Facebook (app de Meta)</span>
+          <span className="block text-sm text-muted">
+            {meta ? `Conectado: ${meta.pageName}${meta.igUsername ? ` · @${meta.igUsername}` : ''}` : 'Sin conectar'}
+          </span>
+        </span>
+        <span className="text-sm font-medium text-accent">Abrir →</span>
+      </Link>
 
       <section className="mt-8 rounded-xl border border-border bg-surface p-5">
         <h2 className="font-heading text-lg font-semibold text-fg">Modo de links</h2>
