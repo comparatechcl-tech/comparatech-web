@@ -51,7 +51,6 @@ const ALL_SCOPES = [
   'pages_read_engagement',
   'pages_manage_posts',
   'business_management',
-  'publish_video',
 ];
 
 function happyGraph(overrides: Partial<Record<string, unknown>> = {}): Handler {
@@ -257,9 +256,9 @@ describe('buildConnection', () => {
   });
 
   it('avisa los permisos opcionales que faltan', async () => {
-    const { impl } = fakeFetch(happyGraph({ scopes: ALL_SCOPES.filter((s) => s !== 'publish_video') }));
+    const { impl } = fakeFetch(happyGraph({ scopes: ALL_SCOPES.filter((s) => s !== 'business_management') }));
     const result = await buildConnection(SHORT, { creds: CREDS, actor: 'x', now, fetchImpl: impl });
-    expect(result.ok && result.missingOptional).toEqual(['publish_video']);
+    expect(result.ok && result.missingOptional).toEqual(['business_management']);
   });
 
   it('si el usuario no puede crear contenido en la página, no conecta', async () => {

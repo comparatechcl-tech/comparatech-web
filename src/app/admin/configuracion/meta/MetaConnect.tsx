@@ -31,7 +31,7 @@ export function MetaConnectForm({ scopes }: { scopes: string[] }) {
         setChoices(null);
         const extra =
           result.missingOptional.length > 0
-            ? ` Faltan permisos opcionales (${result.missingOptional.join(', ')}): sin ellos podría fallar la publicación de videos en Facebook.`
+            ? ` Falta un permiso opcional (${result.missingOptional.join(', ')}): si algo no se puede publicar, vuelve a conectar agregándolo.`
             : '';
         setMessage({ ok: true, text: `Conectado.${extra}` });
         router.refresh();

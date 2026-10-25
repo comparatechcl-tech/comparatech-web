@@ -45,8 +45,14 @@ export const REQUIRED_SCOPES = [
   'pages_manage_posts',
 ] as const;
 
-/** Útiles, pero sin ellos igual se conecta: se avisa cuál falta. */
-export const OPTIONAL_SCOPES = ['business_management', 'publish_video'] as const;
+/**
+ * Útil, pero sin él igual se conecta: se avisa si falta. publish_video no
+ * va: el caso de uso "Administra todo en tu página" no lo ofrece (revisado
+ * en el panel el 24-10-2026) y pedir en el Graph API Explorer un permiso que
+ * la app no tiene hace fallar la ventana de Meta. Los reels de la página
+ * usan pages_manage_posts.
+ */
+export const OPTIONAL_SCOPES = ['business_management'] as const;
 
 export interface MetaCredentials {
   appId: string;
