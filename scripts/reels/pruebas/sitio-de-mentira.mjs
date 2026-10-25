@@ -135,15 +135,17 @@ export function sampleItems() {
  *                 (con status 3xx y headers.location hace de sitio que redirige)
  *   rejectUploads ids de productos cuyas subidas se rechazan; el mensaje de error repite la dirección firmada,
  *                 para probar que el generador no la deja pasar a lo que imprime
+ *   music         { name, bytes }: la canción de fondo, servida en una dirección firmada como la del bucket
+ *                 privado "musica" (va en `musica` de cada video por armar). Sin esto, el plan va sin música
  *
  * El nombre de cada archivo lleva su huella (ver fileName), y un video "ya existe" solo si están arriba su
  * .mp4 y su .jpg con ese nombre exacto, igual que en el sitio de verdad.
  *
- * Devuelve { origin, requests, stored, tokens, close }.
+ * Devuelve { origin, requests, stored, tokens, musicToken, close }.
  *
- * @param {{ secret: string, items?: Record<string, any>[], date?: string, existing?: string[], planFailures?: { status: number, body?: unknown, headers?: Record<string, string> }[], rejectUploads?: string[], deleted?: number, unreadHistory?: number }} options
+ * @param {{ secret: string, items?: Record<string, any>[], date?: string, existing?: string[], planFailures?: { status: number, body?: unknown, headers?: Record<string, string> }[], rejectUploads?: string[], deleted?: number, unreadHistory?: number, music?: { name: string, bytes: Buffer } | null }} options
  */
-export async function startFakeSite({ secret, items = sampleItems(), date = '2026-10-13', existing = [], planFailures = [], rejectUploads = [], deleted = 0, unreadHistory = 0 }) {
+export async function startFakeSite({ secret, items = sampleItems(), date = '2026-10-13', existing = [], planFailures = [], rejectUploads = [], deleted = 0, unreadHistory = 0, music = null }) {
   /** @type {{ method: string, path: string, authorization: string | null, contentType: string | null, cacheControl: string | null, upsert: string | null, bytes: number }[]} */
   const requests = []; // todo lo que llegó
   /** @type {Map<string, Buffer>} */
@@ -152,6 +154,9 @@ export async function startFakeSite({ secret, items = sampleItems(), date = '202
   const tokens = new Map(); // archivo -> token de su dirección firmada
   const pendingFailures = [...planFailures];
   let origin = '';
+  // La canción de fondo (como el bucket privado "musica"): { name, bytes } o null para un plan sin música.
+  const musicToken = fakeToken();
+  const musicPath = music ? `/storage/v1/object/sign/musica/${music.name}` : null;
 
   const signedUrl = (objectPath) => {
     if (!tokens.has(objectPath)) tokens.set(objectPath, fakeToken());
@@ -162,7 +167,8 @@ export async function startFakeSite({ secret, items = sampleItems(), date = '202
     const archivo = item.archivo ?? fileName(item, date);
     const yaExiste = item.ya_existe ?? (existing.includes(item.id) || (stored.has(`${archivo}.mp4`) && stored.has(`${archivo}.jpg`)));
     const subir = 'subir' in item ? item.subir : yaExiste ? null : { video: signedUrl(`${archivo}.mp4`), portada: signedUrl(`${archivo}.jpg`) };
-    return { ...item, archivo, ya_existe: yaExiste, subir };
+    const musica = 'musica' in item ? item.musica : !yaExiste && music ? { nombre: music.name, url: `${origin}${musicPath}?token=${musicToken}` } : null;
+    return { ...item, archivo, ya_existe: yaExiste, subir, musica };
   };
 
   const server = http.createServer(async (req, res) => {
@@ -199,6 +205,12 @@ export async function startFakeSite({ secret, items = sampleItems(), date = '202
       });
     }
 
+    if (req.method === 'GET' && musicPath && url.pathname === musicPath) {
+      if (url.searchParams.get('token') !== musicToken) return json(400, { statusCode: '403', error: 'Unauthorized' });
+      res.writeHead(200, { 'content-type': 'audio/mpeg' });
+      return res.end(music.bytes);
+    }
+
     if (req.method === 'PUT' && url.pathname.startsWith(UPLOAD_PREFIX)) {
       const objectPath = decodeURIComponent(url.pathname.slice(UPLOAD_PREFIX.length));
       const token = url.searchParams.get('token');
@@ -222,6 +234,7 @@ export async function startFakeSite({ secret, items = sampleItems(), date = '202
     requests,
     stored,
     tokens,
+    musicToken,
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();

@@ -165,6 +165,34 @@ export function uploadUrlProblem(value, objectPath, { allowLocal = false } = {})
 }
 
 /**
+ * ¿Se puede bajar la canción de fondo de esta dirección? Tiene que ser una dirección firmada del bucket
+ * privado "musica" del almacén (ver src/lib/social/music.ts), por https, de un archivo de audio. Devuelve null
+ * si está bien, o el motivo (sin la dirección, que es secreta).
+ */
+export function musicUrlProblem(value, { allowLocal = false } = {}) {
+  let url;
+  try {
+    url = new URL(String(value));
+  } catch {
+    return 'no trae una dirección válida';
+  }
+  const local = allowLocal && url.protocol === 'http:' && isLocalHost(url.hostname);
+  if (url.protocol !== 'https:' && !local) return 'la dirección no va por https';
+  if (url.username || url.password) return 'la dirección no es válida';
+  if (!url.searchParams.get('token')) return 'la dirección no trae su firma';
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return 'la dirección no es válida';
+  }
+  if (!/\/storage\/v1\/object\/sign\/musica\/[a-z0-9][a-z0-9._-]{0,80}\.(mp3|m4a|aac|wav|ogg)$/i.test(pathname)) {
+    return 'la dirección no es la de una canción del almacén';
+  }
+  return null;
+}
+
+/**
  * La entrada del reel a partir de un elemento del plan: los mismos campos que una entrada de productos.json
  * (ver resolverProducto en datos.mjs). "Envío gratis" y "Full" salen solo de sus campos de sí o no; el motivo
  * y los demás textos no se pasan, para que nada de lo que va en pantalla se deduzca de una frase.

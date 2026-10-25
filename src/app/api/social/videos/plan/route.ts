@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { SITE_URL } from '@/lib/site';
+import { listMusic, pickTrack, signMusic } from '@/lib/social/music';
 import {
   VIDEO_PLAN_MAX,
   VIDEO_RULES,
@@ -40,7 +41,11 @@ import {
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-function describe(item: VideoPick, uploads: { video: string; cover: string } | null) {
+function describe(
+  item: VideoPick,
+  uploads: { video: string; cover: string } | null,
+  music: { nombre: string; url: string } | null = null
+) {
   const p = item.product;
   // Lo que el video dice sale de videos.ts (videoClaims), ya calculado: es lo
   // mismo sobre lo que se sacó la huella de `archivo`. Acá no se arma de
@@ -67,6 +72,8 @@ function describe(item: VideoPick, uploads: { video: string; cover: string } | n
     archivo: item.file,
     ya_existe: item.exists,
     subir: uploads ? { video: uploads.video, portada: uploads.cover } : null,
+    // La canción de fondo (lib/social/music), solo para lo que hay que armar.
+    musica: music,
   };
 }
 
@@ -86,9 +93,16 @@ export async function GET(req: NextRequest) {
     await ensureVideoBucket(admin);
     const plan = await readVideoPicks(admin, now, count);
 
+    const tracks = await listMusic(admin);
     const seleccion = [];
     for (const item of plan.picks) {
-      seleccion.push(describe(item, item.exists ? null : await signVideoUploads(admin, item.file)));
+      if (item.exists) {
+        seleccion.push(describe(item, null));
+        continue;
+      }
+      const track = pickTrack(tracks, `${plan.date}|${item.product.id}`);
+      const url = track ? await signMusic(admin, track) : null;
+      seleccion.push(describe(item, await signVideoUploads(admin, item.file), track && url ? { nombre: track, url } : null));
     }
 
     // Al final: si no se pudo limpiar, el plan sale igual (removeOldVideos no lanza).

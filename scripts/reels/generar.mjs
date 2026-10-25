@@ -45,11 +45,16 @@ import {
   readPlan,
   reelInput,
   uploadUrlProblem,
+  musicUrlProblem,
 } from './plan.mjs';
 
 /** El sitio publicado. Cambiar acá (y en scripts/redes.mjs) cuando el dominio propio esté funcionando. */
 export const PRODUCTION = 'https://comparatech-web.vercel.app';
 const PLAN_PATH = '/api/social/videos/plan';
+/** Volumen de la canción de fondo (0 a 1): el video no tiene voz, pero tampoco tiene que reventar los oídos. */
+const MUSIC_VOLUME = 0.55;
+/** Una canción de más de esto no es una pista de fondo de 10 segundos. */
+const MUSIC_MAX_BYTES = 15 * 1024 * 1024;
 const ENV_FILE = fileURLToPath(new URL('../../.env.local', import.meta.url));
 const DEFAULT_COUNT = 4;
 const MAX_COUNT = 6;
@@ -319,11 +324,11 @@ async function uploadSigned(fetchFn, url, file, contentType) {
  * Arma el video y su portada con la plantilla pedida. El armador se carga recién aquí: trae el dibujante y
  * los hilos, que --seco no necesita.
  */
-async function renderReel({ product, template, video, cover }) {
+async function renderReel({ product, template, video, cover, music = null }) {
   const [{ prepararReel }, { cortarVideos }] = await Promise.all([import('./armar.mjs'), import('./video.mjs')]);
   stopEncoders = cortarVideos;
-  const reel = await prepararReel(product, { plantilla: template });
-  const result = await reel.armar({ salida: video, portada: cover });
+  const reel = await prepararReel(product, { plantilla: template, musica: music });
+  const result = await reel.armar({ salida: video, portada: cover, ...(music ? { volumen: MUSIC_VOLUME } : {}) });
   return { bytes: result.peso, lowered: result.calidadBajada, notes: reel.avisos };
 }
 
@@ -361,16 +366,43 @@ export function discardOpenWork() {
   return left;
 }
 
-/** Un producto: baja la foto, arma el video y su portada en una carpeta temporal y sube los dos archivos. */
+/**
+ * Baja la canción de fondo a la carpeta del video. Si falla, el video se arma igual en silencio (un aviso en
+ * el registro): es peor quedarse sin video del día que sin música. Devuelve la ruta o null.
+ */
+async function downloadMusic(ctx, item, dir) {
+  const music = item.musica;
+  if (!music || typeof music !== 'object' || typeof music.url !== 'string') return { file: null, note: null };
+  const name = oneLine(String(music.nombre ?? 'canción'), 80);
+  const problem = musicUrlProblem(music.url, { allowLocal: ctx.allowLocal });
+  if (problem) return { file: null, note: `la canción "${name}" no se usó: ${problem}. Sale en silencio.` };
+  try {
+    const res = await ctx.fetchFn(music.url, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`el almacén respondió ${res.status}`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length < 1024 || bytes.length > MUSIC_MAX_BYTES) throw new Error(`pesa ${bytes.length} bytes`);
+    const ext = (/\.(mp3|m4a|aac|wav|ogg)$/i.exec(new URL(music.url).pathname) ?? ['', 'mp3'])[1].toLowerCase();
+    const file = path.join(dir, `musica.${ext}`);
+    await writeFile(file, bytes);
+    return { file, note: null, name };
+  } catch (err) {
+    return { file: null, note: `la canción "${name}" no se pudo bajar (${oneLine(reason(err), 200)}). Sale en silencio.` };
+  }
+}
+
+/** Un producto: baja la foto (y la canción), arma el video y su portada en una carpeta temporal y sube los dos archivos. */
 async function makeOne(ctx, item) {
   const dir = await mkdtemp(path.join(ctx.tmpRoot, 'comparatech-reel-'));
   openDirs.add(dir);
   try {
     const photo = await downloadPhoto(ctx.fetchFn, item.foto, dir);
+    const music = await downloadMusic(ctx, item, dir);
     const product = resolverProducto(reelInput(item), { foto: photo, quien: 'producto' });
     const video = path.join(dir, 'reel.mp4');
     const cover = path.join(dir, 'portada.jpg');
-    const rendered = await ctx.render({ product, template: item.plantilla, video, cover });
+    const rendered = await ctx.render({ product, template: item.plantilla, video, cover, music: music.file });
+    if (music.note) rendered.notes = [...(rendered.notes ?? []), music.note];
+    if (music.file) rendered.music = music.name;
     // La portada primero: el sitio da un video por hecho cuando existe su .mp4, así que ese archivo se sube
     // al final, cuando la portada ya está arriba.
     await uploadSigned(ctx.fetchFn, item.subir.portada, cover, 'image/jpeg');
@@ -432,7 +464,8 @@ export async function generate({
   }
   // Las direcciones firmadas y sus tokens también son secretos: si un mensaje de error los trajera, salen tapados.
   for (const item of plan.items) {
-    for (const url of Object.values(item && typeof item.subir === 'object' && item.subir ? item.subir : {})) {
+    const musicUrl = item && typeof item.musica === 'object' && item.musica ? [item.musica.url] : [];
+    for (const url of [...Object.values(item && typeof item.subir === 'object' && item.subir ? item.subir : {}), ...musicUrl]) {
       if (typeof url !== 'string' || !url) continue;
       secrets.add(url);
       try {
@@ -453,7 +486,7 @@ export async function generate({
   if (plan.deleted) say(`El sitio borró ${plan.deleted} ${plan.deleted === 1 ? 'archivo' : 'archivos'} de días anteriores.`);
   if (plan.unreadHistory) say(`Aviso: ${plan.unreadHistory} ${plan.unreadHistory === 1 ? 'producto quedó' : 'productos quedaron'} fuera porque no se pudo leer su historial de precios.`);
 
-  const ctx = { fetchFn, render, tmpRoot };
+  const ctx = { fetchFn, render, tmpRoot, allowLocal: origin !== PRODUCTION };
   for (let i = 0; i < total; i++) {
     const item = items[i];
     const name = oneLine(item?.nombre_corto || item?.nombre || 'producto sin nombre', 70);
@@ -498,7 +531,8 @@ export async function generate({
       totals.made++;
       const how = done.fresh ? 'armado y subido' : 'armado; ya había uno igual arriba';
       const quality = done.lowered ? ' (con un poco menos de calidad, para no pasar de 4 MB)' : '';
-      say(`${label} · ${how} en ${comma((Date.now() - started) / 1000)} s · ${megabytes(done.bytes)}${quality}`);
+      const withMusic = done.music ? ` · con música "${oneLine(done.music, 60)}"` : '';
+      say(`${label} · ${how} en ${comma((Date.now() - started) / 1000)} s · ${megabytes(done.bytes)}${quality}${withMusic}`);
       for (const note of done.notes ?? []) say(`    Aviso: ${oneLine(note, 300)}`);
     } catch (err) {
       fail(reason(err));

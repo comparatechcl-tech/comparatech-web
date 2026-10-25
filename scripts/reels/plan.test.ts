@@ -338,3 +338,23 @@ describe('plantillas', () => {
     }
   });
 });
+
+describe('musicUrlProblem', () => {
+  const ok = 'https://abc.supabase.co/storage/v1/object/sign/musica/pista-1.mp3?token=firma';
+
+  it('acepta una dirección firmada del bucket "musica"', async () => {
+    const { musicUrlProblem } = await import('./plan.mjs');
+    expect(musicUrlProblem(ok)).toBeNull();
+    expect(musicUrlProblem(ok.replace('.mp3', '.m4a'))).toBeNull();
+  });
+
+  it('rechaza otro bucket, otro tipo de archivo, sin firma o sin https', async () => {
+    const { musicUrlProblem } = await import('./plan.mjs');
+    expect(musicUrlProblem(ok.replace('/musica/', '/reels/'))).not.toBeNull();
+    expect(musicUrlProblem(ok.replace('.mp3', '.exe'))).not.toBeNull();
+    expect(musicUrlProblem(ok.replace('?token=firma', ''))).not.toBeNull();
+    expect(musicUrlProblem(ok.replace('https:', 'http:'))).not.toBeNull();
+    expect(musicUrlProblem('no es una dirección')).not.toBeNull();
+    expect(musicUrlProblem(ok.replace('pista-1.mp3', '..%2F..%2Fsecreto.mp3'))).not.toBeNull();
+  });
+});

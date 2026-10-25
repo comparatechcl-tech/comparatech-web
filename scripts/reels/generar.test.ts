@@ -450,6 +450,50 @@ describe('generate: la foto', () => {
   });
 });
 
+describe('generate: la música de fondo', () => {
+  /** Un MP3 de mentira: basta con que pese más de 1 KB (el armador de verdad no corre aquí). */
+  const TRACK = Buffer.alloc(4096, 7);
+
+  it('baja la canción firmada del almacén y se la pasa al armado, sin imprimir su dirección', async () => {
+    site = await startFakeSite({ secret: SECRET, music: { name: 'pista-1.mp3', bytes: TRACK } });
+    const got: { music: string | null; size: number }[] = [];
+    const { result, products, printed } = await run({
+      render: async (job: { video: string; cover: string; music?: string | null }) => {
+        const { readFileSync } = await import('node:fs');
+        got.push({ music: job.music ?? null, size: job.music ? readFileSync(job.music).length : 0 });
+        return fakeRender(job);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(got.length).toBeGreaterThan(0);
+    for (const g of got) {
+      expect(g.music).toMatch(/musica.mp3$/);
+      expect(g.size).toBe(TRACK.length);
+    }
+    expect(products.every((line) => line.includes('con música "pista-1.mp3"'))).toBe(true);
+    expectPublic(printed);
+    expect(printed).not.toContain('/sign/musica/');
+    expect(printed).not.toContain(site.musicToken);
+  });
+
+  it('una dirección que no es del almacén no se baja: el video sale igual, en silencio, con un aviso', async () => {
+    const items = sampleItems().slice(0, 1).map((item) => ({ ...item, musica: { nombre: 'rara.mp3', url: 'https://otro.example/rara.mp3?token=abc' } }));
+    site = await startFakeSite({ secret: SECRET, items });
+    const got: (string | null)[] = [];
+    const { result, calls, printed } = await run({
+      render: async (job: { video: string; cover: string; music?: string | null }) => {
+        got.push(job.music ?? null);
+        return fakeRender(job);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(got).toEqual([null]);
+    expect(calls.some((c) => c.host === 'otro.example')).toBe(false);
+    expect(printed).toContain('Sale en silencio');
+    expectPublic(printed);
+  });
+});
+
 describe('generate: cuando algo falla', () => {
   it('si un producto falla, sigue con los demás y avisa con ok: false', async () => {
     const items = sampleItems();

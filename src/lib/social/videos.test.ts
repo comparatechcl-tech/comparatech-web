@@ -1848,6 +1848,7 @@ describe('/api/social/videos/plan', () => {
         'archivo',
         'ya_existe',
         'subir',
+        'musica',
       ].sort()
     );
     // Con Full: no es la huella de las demás ofertas de este archivo.
@@ -1877,6 +1878,8 @@ describe('/api/social/videos/plan', () => {
         video: `${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.mp4?token=firma-1`,
         portada: `${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.jpg?token=firma-2`,
       },
+      // Sin canciones en el bucket "musica": el video sale en silencio, como antes.
+      musica: null,
     });
     expect(row.puntos as number).toBeGreaterThanOrEqual(MIN_INTEREST_POINTS);
     expect(fake.signed.every((upload) => upload.upsert)).toBe(true);
