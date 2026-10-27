@@ -21,7 +21,7 @@ import {
   type VideoGestures,
 } from './gestures';
 import { createLiveChecker, isPriceOff, liveLine, liveTargets, type LiveEntry, type LiveTone } from './live';
-import { NETWORK_KEYS, NETWORK_LABELS } from './texts';
+import { NETWORK_KEYS, NETWORK_LABELS, networkList } from './texts';
 import { browserEnv, screenUi, watchLive, type LiveGlobals, type ManualCopy, type PostedByNetwork, type Visit } from './wiring';
 
 /**
@@ -116,6 +116,18 @@ export function isEverywhere(posted: PostedByNetwork | undefined): boolean {
   return NETWORK_KEYS.every((network) => Boolean(posted?.[network]));
 }
 
+/**
+ * "Ya está en Instagram y Facebook. Falta: TikTok y YouTube." cuando el
+ * video salió en alguna red pero no en todas; null si no salió en ninguna o
+ * ya está en todas. Puro.
+ */
+export function missingLine(posted: PostedByNetwork | undefined): string | null {
+  const done = NETWORK_KEYS.filter((network) => Boolean(posted?.[network]));
+  const missing = NETWORK_KEYS.filter((network) => !posted?.[network]);
+  if (done.length === 0 || missing.length === 0) return null;
+  return `Ya está en ${networkList(done)}. Falta: ${networkList(missing)}.`;
+}
+
 /** Así separa lib/social/videos el motivo de lo que hay que mirar antes de subir el video. */
 const WARNING_MARK = '. Ojo: ';
 
@@ -129,8 +141,14 @@ export function splitReason(reason: string): { why: string; warning: string | nu
   return { why: reason.slice(0, at), warning: reason.slice(at + WARNING_MARK.length) };
 }
 
-/** Los tres grupos de la lista, cada uno en el orden en que vino. */
+/** Los grupos de la lista, cada uno en el orden en que vino. */
 export interface VideoGroups {
+  /**
+   * Lo que ya salió en alguna red pero no en todas (por ejemplo, la
+   * publicación diaria lo subió a Instagram y Facebook): va primero, para que
+   * se vea qué falta y dónde.
+   */
+  started: ReadyVideo[];
   /** Lo que falta subir a alguna red, sin nada que mirar. */
   clean: ReadyVideo[];
   /** Lo que falta subir y trae un "Ojo": va después, en "Con algo que mirar". */
@@ -140,15 +158,16 @@ export interface VideoGroups {
 }
 
 /**
- * Reparte los videos en los tres grupos, sin cambiar el orden dentro de cada
+ * Reparte los videos en los grupos, sin cambiar el orden dentro de cada
  * uno. Se decide una vez, al montar: si una tarjeta se fuera abajo al marcar
  * la cuarta red, las de abajo se correrían bajo el dedo. Puro.
  */
 export function arrange(videos: ReadyVideo[], posted: Record<string, PostedByNetwork>): VideoGroups {
-  const groups: VideoGroups = { clean: [], warned: [], done: [] };
+  const groups: VideoGroups = { started: [], clean: [], warned: [], done: [] };
   for (const video of videos) {
     if (isEverywhere(posted[video.id])) groups.done.push(video);
     else if (splitReason(video.reason).warning !== null) groups.warned.push(video);
+    else if (NETWORK_KEYS.some((network) => Boolean(posted[video.id]?.[network]))) groups.started.push(video);
     else groups.clean.push(video);
   }
   return groups;
@@ -422,6 +441,7 @@ export function VideoCard({
               );
             })}
           </div>
+          {missingLine(posted) && <p className="mt-1.5 text-xs font-semibold text-amber-300">{missingLine(posted)}</p>}
         </div>
 
         {manual && (
@@ -575,6 +595,18 @@ export function VideoList({
           El botón <strong className="text-fg">Compartir</strong> aparece en el teléfono, con Chrome o Safari. Acá
           puedes guardar el video y copiar los textos.
         </p>
+      )}
+      {groups.started.length > 0 && (
+        <section aria-labelledby="videos-te-falta" className="flex flex-col gap-3 rounded-xl border border-amber-400/50 bg-amber-400/5 p-3">
+          <h2 id="videos-te-falta" className="font-heading text-base font-semibold text-fg">
+            Te falta subir ({groups.started.length})
+          </h2>
+          <p className="text-sm text-muted">
+            Estos ya salieron en alguna red: la publicación diaria los sube sola a Instagram y Facebook. Súbelos a las
+            redes que faltan y márcalas.
+          </p>
+          <ul className="flex flex-col gap-4">{groups.started.map((video) => card(video))}</ul>
+        </section>
       )}
       {groups.clean.length > 0 && <ul className="flex flex-col gap-4">{groups.clean.map((video) => card(video))}</ul>}
 

@@ -27,6 +27,7 @@ import ActividadPage from '@/app/admin/actividad/page';
 import { AdminTabs } from '@/app/admin/AdminTabs';
 import VideosPage, * as videosPageModule from '@/app/admin/videos/page';
 import {
+  missingLine,
   VideoCard,
   VideoList,
   arrange,
@@ -379,6 +380,24 @@ describe('VideoList: lo ya subido a las cuatro redes', () => {
     expect(groups.done.map((item) => item.id)).toEqual([a.id, d.id, f.id]);
     // Un video sin anotación cuenta como pendiente.
     expect(arrange([a, b], {}).clean.map((item) => item.id)).toEqual([a.id, b.id]);
+  });
+
+  it('lo que ya salió en alguna red, y no en todas, va primero en "Te falta subir" y dice qué falta', () => {
+    const half = { instagram: mark(1), facebook: mark(4) };
+    const [a, b, c] = [video(), video({ posted: half }), video({ posted: EVERYWHERE })];
+    const posted: Record<string, ReadyVideo['posted']> = {};
+    for (const item of [a, b, c]) posted[item.id] = item.posted;
+    const groups = arrange([a, b, c], posted);
+    expect(groups.started.map((item) => item.id)).toEqual([b.id]);
+    expect(groups.clean.map((item) => item.id)).toEqual([a.id]);
+    expect(missingLine(half)).toBe('Ya está en Instagram y Facebook. Falta: TikTok y YouTube.');
+    expect(missingLine({})).toBeNull();
+    expect(missingLine(EVERYWHERE)).toBeNull();
+
+    const html = render([a, b]);
+    expect(html).toContain('Te falta subir (1)');
+    expect(html.indexOf('Te falta subir')).toBeLessThan(html.indexOf(a.id));
+    expect(html).toContain('Falta: TikTok y YouTube.');
   });
 
   it('isEverywhere pide las cuatro', () => {
