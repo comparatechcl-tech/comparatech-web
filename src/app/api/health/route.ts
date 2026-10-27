@@ -20,21 +20,23 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 /**
- * Antigüedad máxima aceptable de la última revisión de precios. pg_cron la
- * corre cada 30 minutos (migración 0011): 90 deja pasar una corrida fallida
- * sin alarma, pero no dos seguidas. Se puede subir con
- * HEALTH_MAX_PRICE_AGE_MIN si algún día se vuelve al cron diario.
+ * Antigüedad máxima aceptable de la última revisión de precios. Se revisa
+ * cada 2 horas (api/cron/refresh-prices, REFRESH_EVERY_MS), y si una
+ * corrida falla se reintenta a la media hora: 180 deja pasar una corrida
+ * fallida sin alarma, pero no varias seguidas. Se puede cambiar con
+ * HEALTH_MAX_PRICE_AGE_MIN.
  */
-const DEFAULT_MAX_PRICE_AGE_MIN = 90;
+const DEFAULT_MAX_PRICE_AGE_MIN = 180;
 
 /**
  * Antigüedad máxima del precio visible más viejo. La última revisión puede
  * estar al día y aun así haber productos a la venta con el precio de hace
  * horas: cuando el catálogo no cabe en una corrida, o si un producto falla
  * siempre en ML. Con la revisión rotando, lo normal es menos de 2 horas
- * (ver lib/refresh-queue). Se puede cambiar con HEALTH_MAX_OLDEST_PRICE_AGE_MIN.
+ * (ver lib/refresh-queue); con la revisión cada 2 horas, hasta unas 3. Se
+ * puede cambiar con HEALTH_MAX_OLDEST_PRICE_AGE_MIN.
  */
-const DEFAULT_MAX_OLDEST_PRICE_AGE_MIN = 240;
+const DEFAULT_MAX_OLDEST_PRICE_AGE_MIN = 300;
 
 /** La prospección es diaria: 26 horas cubren el margen de hora de Vercel Cron. */
 const MAX_PROSPECT_AGE_H = 26;

@@ -150,7 +150,11 @@ const readCatalogPage = unstable_cache(
     return (data ?? []) as Product[];
   },
   ['catalog-v2'],
-  { revalidate: 60, tags: ['catalog'] }
+  // Una hora: cada cambio visible ya avisa con la etiqueta 'catalog' (el
+  // refresco de precios y las acciones del admin). Era de 60 s, y como casi
+  // todas las páginas leen el catálogo, cada una se volvía a armar cada
+  // minuto: el plan gratuito de Vercel llegó al 100% de su CPU el 26-10-2026.
+  { revalidate: 3600, tags: ['catalog'] }
 );
 
 /** El catálogo completo, armado de sus páginas. */
@@ -228,7 +232,7 @@ const readPausedProducts = unstable_cache(
     return all;
   },
   ['paused-v1'],
-  { revalidate: 300, tags: ['catalog'] }
+  { revalidate: 3600, tags: ['catalog'] }
 );
 
 const fetchPausedProducts = cache(() => readPausedProducts());

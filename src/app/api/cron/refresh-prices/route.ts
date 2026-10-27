@@ -6,7 +6,7 @@ import { SITE_URL } from '@/lib/site';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
-import { earlierRunInProgress, pingHealthcheck, startCronRun } from '@/lib/cron-runs';
+import { earlierRunInProgress, lastFullRunWithin, pingHealthcheck, startCronRun } from '@/lib/cron-runs';
 import { fetchAllRows } from '@/lib/admin-stats';
 import { oldestVisibleMinutes, refreshQueue } from '@/lib/refresh-queue';
 import { syncTelegramPosts } from '@/lib/social/telegram';
@@ -29,10 +29,18 @@ import {
 /**
  * Refresco de precios y disponibilidad.
  *
- * Corre cada 30 minutos desde Supabase (pg_cron, ver la migración 0011),
+ * Lo llaman cada 30 minutos desde Supabase (pg_cron, ver la migración 0011),
  * además de una vez al día desde Vercel Cron y de respaldo desde GitHub
  * Actions: el plan gratuito de Vercel solo permite crons diarios, y el
  * programador de GitHub resultó impuntual (corría cada 3 a 6 horas).
+ *
+ * Pero revisa de verdad cada REFRESH_EVERY_MS (2 horas): el 26-10-2026 el
+ * plan gratuito de Vercel llegó al 100% de su CPU del mes (4 horas), y el
+ * refresco, con unas 60 corridas al día y la caché de todo el sitio borrada
+ * en cada una, era lo que más gastaba. Los llamados de entremedio se retiran
+ * en el acto. Si una corrida falla, la siguiente llamada (30 minutos
+ * después) revisa igual: solo cuentan las completas. Las publicaciones
+ * piden precios de menos de 6 horas, así que les sobra.
  *
  * El precio publicado es el del ganador de la caja de compra — lo que ve el
  * comprador en la ficha (ver lib/pricing). Cuando algo cambia, se invalida
@@ -57,6 +65,9 @@ import {
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
+
+/** Cada cuánto se revisa de verdad (un poco menos de 2 horas: pg_cron llama a la hora y a la media). */
+const REFRESH_EVERY_MS = 115 * 60_000;
 
 /** Desde aquí no se piden más datos a ML: lo que falta queda para la próxima. */
 const TIME_BUDGET_MS = 40_000;
@@ -267,6 +278,15 @@ export async function GET(req: NextRequest) {
   // Responde 200 porque no es una falla: la otra está haciendo el trabajo.
   if (await earlierRunInProgress(admin, 'refresh-prices', run.id)) {
     return finish(true, { omitida: 'otra revisión de precios estaba en curso' }, 200);
+  }
+
+  // Cada 2 horas, no cada media hora (ver arriba). ?forzar=1 revisa igual, para lanzarlo a mano.
+  if (req.nextUrl.searchParams.get('forzar') !== '1') {
+    const last = await lastFullRunWithin(admin, 'refresh-prices', run.id, REFRESH_EVERY_MS);
+    if (last) {
+      const minutes = Math.round((Date.now() - new Date(last).getTime()) / 60_000);
+      return finish(true, { omitida: `la última revisión completa fue hace ${minutes} min; se revisa cada 2 horas` }, 200);
+    }
   }
 
   try {

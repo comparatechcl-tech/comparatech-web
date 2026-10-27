@@ -14,7 +14,8 @@ import { BrandOgTemplate, OG_SIZES, productImageResponse, type OgProduct } from 
  * no oculto): no pasa por el catálogo completo, que esta imagen no necesita.
  */
 
-export const revalidate = 300;
+// Como la ficha: a lo más cada hora, y apenas cambia el precio (el refresco invalida el sitio).
+export const revalidate = 3600;
 export const alt = 'Precio en Mercado Libre, revisado por ComparaTech';
 export const size = OG_SIZES.og;
 export const contentType = 'image/png';

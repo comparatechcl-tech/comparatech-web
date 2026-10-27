@@ -48,7 +48,7 @@ type Fail = { ok: false; error: string };
 function refreshSite() {
   // Precios y disponibilidad se ven en casi todas las páginas públicas.
   // La etiqueta 'catalog' tira además la lectura compartida del catálogo
-  // (unstable_cache de 60 s), para que el cambio se vea de inmediato.
+  // (unstable_cache de una hora), para que el cambio se vea de inmediato.
   revalidateTag('catalog');
   revalidatePath('/', 'layout');
 }

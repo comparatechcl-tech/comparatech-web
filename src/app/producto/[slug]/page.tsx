@@ -65,10 +65,13 @@ export async function generateStaticParams() {
     .map((p) => ({ slug: p.slug }));
 }
 
-// Revalida cada 5 minutos (precios/specs actualizados) y permite que
-// productos nuevos, agregados después del build, se rendericen al vuelo
-// la primera vez que alguien entra a su ficha (dynamicParams por defecto).
-export const revalidate = 300;
+// Se vuelve a armar a lo más cada hora, y apenas cambia un precio: el
+// refresco (cada 2 horas) invalida todo el sitio cuando algo visible cambió.
+// Antes era cada 5 minutos, y con los robots recorriendo las 1.300 fichas
+// era CPU de Vercel gastada en armar lo mismo (el plan gratuito llegó a su
+// límite el 26-10-2026). Los productos nuevos, agregados después del build,
+// se arman al vuelo la primera vez que alguien entra (dynamicParams).
+export const revalidate = 3600;
 
 /** Lo que ve el comprador según por qué el producto salió de venta. */
 const INACTIVE_MESSAGES: Record<InactiveReason, string> = {

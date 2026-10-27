@@ -35,7 +35,7 @@ const readDealStats = unstable_cache(
   },
   // El número sube cada vez que cambia la forma de lo guardado: el caché de datos sobrevive a los despliegues.
   ['deal-stats-v3'],
-  { revalidate: 300, tags: ['catalog'] }
+  { revalidate: 3600, tags: ['catalog'] }
 );
 
 export interface DealsWithStats {

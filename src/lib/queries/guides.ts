@@ -26,7 +26,7 @@ const readGuideStats = unstable_cache(
   },
   // El número sube cada vez que cambia la forma de lo guardado: el caché de datos sobrevive a los despliegues.
   ['guide-stats-v1'],
-  { revalidate: 300, tags: ['catalog'] },
+  { revalidate: 3600, tags: ['catalog'] },
 );
 
 /**

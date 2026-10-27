@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { earlierRunInProgress } from '@/lib/cron-runs';
+import { earlierRunInProgress, lastFullRunWithin } from '@/lib/cron-runs';
 
 type Res = { data?: unknown; error?: { code?: string; message: string } | null };
 
@@ -11,7 +11,7 @@ function fakeAdmin(respond: (filters: string[]) => Res | Promise<Res>) {
     from(table: string) {
       filters.push(`from:${table}`);
       const builder: Record<string, unknown> = {};
-      for (const m of ['select', 'eq', 'is', 'lt', 'gte', 'limit']) {
+      for (const m of ['select', 'eq', 'is', 'lt', 'gte', 'order', 'limit']) {
         builder[m] = (...args: unknown[]) => {
           filters.push(`${m}:${JSON.stringify(args)}`);
           return builder;
@@ -60,5 +60,30 @@ describe('earlierRunInProgress', () => {
       throw new Error('red');
     });
     expect(await earlierRunInProgress(throwing.admin, 'refresh-prices', 42)).toBe(false);
+  });
+});
+
+describe('lastFullRunWithin', () => {
+  it('busca la última corrida completa y exitosa, anterior a esta y dentro de la ventana', async () => {
+    const before = Date.now();
+    const { admin, filters } = fakeAdmin(() => ({ data: [{ started_at: '2026-10-27T12:00:00Z' }] }));
+    expect(await lastFullRunWithin(admin, 'refresh-prices', 42, 115 * 60_000)).toBe('2026-10-27T12:00:00Z');
+    expect(filters).toContain('eq:["job","refresh-prices"]');
+    expect(filters).toContain('eq:["ok",true]');
+    // Las que se retiraron sin trabajar no cuentan.
+    expect(filters).toContain('is:["summary->>omitida",null]');
+    expect(filters).toContain('lt:["id",42]');
+    const since = JSON.parse(filters.find((f) => f.startsWith('gte:'))!.slice(4))[1] as string;
+    expect(before - new Date(since).getTime()).toBeGreaterThanOrEqual(115 * 60_000 - 1000);
+    expect(before - new Date(since).getTime()).toBeLessThan(115 * 60_000 + 5000);
+  });
+
+  it('sin corridas, sin id o si la base falla: null (ante la duda se revisa)', async () => {
+    expect(await lastFullRunWithin(fakeAdmin(() => ({ data: [] })).admin, 'refresh-prices', 42, 1000)).toBeNull();
+    expect(await lastFullRunWithin(fakeAdmin(() => ({ data: [{ id: 1 }] })).admin, 'refresh-prices', null, 1000)).toBeNull();
+    expect(await lastFullRunWithin(fakeAdmin(() => ({ error: { message: 'caída' } })).admin, 'refresh-prices', 42, 1000)).toBeNull();
+    expect(
+      await lastFullRunWithin(fakeAdmin(() => Promise.reject(new Error('red'))).admin, 'refresh-prices', 42, 1000)
+    ).toBeNull();
   });
 });

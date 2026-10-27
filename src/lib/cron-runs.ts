@@ -72,6 +72,38 @@ export async function startCronRun(admin: SupabaseClient, job: string): Promise<
   };
 }
 
+/**
+ * Cuándo empezó la última corrida completa y exitosa del cron, si fue dentro
+ * de `windowMs` y antes que esta; null si no hubo (o la base falla: ante la
+ * duda, se corre). Las que se retiraron sin trabajar (summary.omitida) no
+ * cuentan.
+ */
+export async function lastFullRunWithin(
+  admin: SupabaseClient,
+  job: string,
+  id: number | string | null | undefined,
+  windowMs: number
+): Promise<string | null> {
+  if (id === null || id === undefined) return null;
+  try {
+    const { data, error } = await admin
+      .from('cron_runs')
+      .select('started_at')
+      .eq('job', job)
+      .eq('ok', true)
+      .is('summary->>omitida', null)
+      .lt('id', id)
+      .gte('started_at', new Date(Date.now() - windowMs).toISOString())
+      .order('started_at', { ascending: false })
+      .limit(1);
+    if (error || !Array.isArray(data) || data.length === 0) return null;
+    const startedAt = (data[0] as { started_at?: unknown }).started_at;
+    return typeof startedAt === 'string' ? startedAt : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Una función de Vercel muere a los 60 s: una corrida abierta hace más que esto ya terminó o se cortó. */
 const RUN_IN_PROGRESS_WINDOW_MS = 70_000;
 
