@@ -72,6 +72,33 @@ async function finalStep<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * La guía pide mirar el estado de un contenedor antes de publicarlo. Con
+ * imágenes suele estar listo enseguida.
+ */
+async function waitUntilFinished(
+  container: string,
+  auth: Record<string, string>,
+  what: string,
+  fetchImpl: FetchLike,
+  sleep: (ms: number) => Promise<void>,
+  waitMs = 25_000
+): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const status = await graphGet(container, { fields: 'status_code', ...auth }, fetchImpl);
+    const code = typeof status.status_code === 'string' ? status.status_code : '';
+    if (code === 'FINISHED') return;
+    if (code === 'ERROR' || code === 'EXPIRED') {
+      throw new PublishError(`Instagram no pudo procesar ${what} (${code}). No se publicó nada.`, false);
+    }
+    if (Date.now() >= deadline) {
+      throw new PublishError(`Instagram tardó más de lo normal en procesar ${what}. No se publicó nada: prueba otra vez en unos minutos.`, false);
+    }
+    await sleep(2_000);
+  }
+}
+
 export const IG_CAROUSEL_MIN = 2;
 /** La guía permite hasta 20 hijos; el carrusel del sitio lleva a lo más 10 láminas. */
 export const IG_CAROUSEL_MAX = 20;
@@ -105,20 +132,7 @@ export async function publishInstagramCarousel(
     'el carrusel'
   );
 
-  // La guía pide mirar el estado antes de publicar. Con imágenes suele estar listo enseguida.
-  const deadline = Date.now() + (deps.waitMs ?? 25_000);
-  for (;;) {
-    const status = await graphGet(container, { fields: 'status_code', ...auth }, fetchImpl);
-    const code = typeof status.status_code === 'string' ? status.status_code : '';
-    if (code === 'FINISHED') break;
-    if (code === 'ERROR' || code === 'EXPIRED') {
-      throw new PublishError(`Instagram no pudo procesar el carrusel (${code}). No se publicó nada.`, false);
-    }
-    if (Date.now() >= deadline) {
-      throw new PublishError('Instagram tardó más de lo normal en procesar el carrusel. No se publicó nada: prueba otra vez en unos minutos.', false);
-    }
-    await sleep(2_000);
-  }
+  await waitUntilFinished(container, auth, 'el carrusel', fetchImpl, sleep, deps.waitMs);
 
   const mediaId = await finalStep(async () =>
     idOf(await graphPost(`${conn.igUserId}/media_publish`, { creation_id: container, ...auth }, fetchImpl), 'la publicación')
@@ -162,6 +176,28 @@ export async function publishFacebookPhotos(
     // Ya está publicado: sin el link igual sirve.
   }
   return { postId, permalink };
+}
+
+/**
+ * Una imagen sola en Instagram (los cupones, /admin/historias/cupones): al
+ * feed con su texto, o como historia. La historia no lleva texto ni sticker:
+ * la API no los pone.
+ */
+export async function publishInstagramImage(
+  conn: Pick<MetaConnection, 'igUserId' | 'pageToken'>,
+  creds: MetaCredentials,
+  input: { imageUrl: string; caption?: string; story?: boolean },
+  deps: PublishDeps = {}
+): Promise<{ mediaId: string; permalink: string | null }> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const auth = pageAuth(conn, creds);
+  const params: Record<string, string> = { image_url: input.imageUrl, ...auth };
+  if (input.story) params.media_type = 'STORIES';
+  else if (input.caption) params.caption = input.caption;
+  const what = input.story ? 'la historia' : 'la imagen';
+  const container = idOf(await graphPost(`${conn.igUserId}/media`, params, fetchImpl), what);
+  await waitUntilFinished(container, auth, what, fetchImpl, deps.sleep ?? defaultSleep, deps.waitMs);
+  return publishInstagramContainer(conn, creds, container, deps);
 }
 
 // ---------------------------------------------------------------------------

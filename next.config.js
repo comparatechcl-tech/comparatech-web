@@ -110,6 +110,7 @@ const nextConfig = {
   outputFileTracingIncludes: {
     '/social/pieza/[productId]/[file]': ['./src/lib/content/fonts/*.woff'],
     '/social/carrusel/[ids]/[file]': ['./src/lib/content/fonts/*.woff'],
+    '/social/cupones/[data]/[file]': ['./src/lib/content/fonts/*.woff'],
     '/admin/kit/[productId]': ['./src/lib/content/fonts/*.woff'],
   },
   images: {

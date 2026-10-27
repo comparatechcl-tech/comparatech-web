@@ -100,11 +100,11 @@ export type PublishState =
   | { kind: 'en-curso'; uncertain: boolean };
 
 /**
- * Si el carrusel ya salió en esa red, según la actividad (del más nuevo al
+ * Si el carrusel (o los cupones) ya salió en esa red, según la actividad (del más nuevo al
  * más viejo). "publicando" o "incierto" de hace menos de IN_FLIGHT_MS
  * bloquean; un "error" deja intentar de nuevo.
  */
-export function publishState(events: PublishEvent[], network: MetaNetwork, nowMs: number): PublishState {
+export function publishState(events: PublishEvent[], network: string, nowMs: number): PublishState {
   const sorted = [...events].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
   for (const event of sorted) {
     const after = (event.after ?? {}) as { red?: unknown; estado?: unknown; permalink?: unknown };

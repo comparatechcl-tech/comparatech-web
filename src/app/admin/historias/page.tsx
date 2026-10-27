@@ -87,6 +87,15 @@ export default async function HistoriasPage() {
         </span>
         <ChevronRight size={18} className="shrink-0 text-accent" aria-hidden />
       </Link>
+      <Link
+        href="/admin/historias/cupones"
+        className="mt-3 flex min-h-11 items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/5 px-4 py-3 text-sm text-fg transition hover:border-accent"
+      >
+        <span>
+          <strong>Cupones del canal:</strong> pega el aviso de cupones y publícalo en Instagram y Facebook, sin sticker.
+        </span>
+        <ChevronRight size={18} className="shrink-0 text-accent" aria-hidden />
+      </Link>
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         {/* La página no puede elegir la cuenta: Compartir abre la app con la última que se usó. */}

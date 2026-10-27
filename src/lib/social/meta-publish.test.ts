@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GRAPH_VERSION } from './meta';
-import { PublishError, publishFacebookPhotos, publishInstagramCarousel } from './meta-publish';
+import { PublishError, publishFacebookPhotos, publishInstagramCarousel, publishInstagramImage } from './meta-publish';
 
 /**
  * Publicar en Instagram y Facebook con la app de Meta, contra un Graph API de
@@ -141,6 +141,60 @@ describe('publishFacebookPhotos', () => {
   it('si la publicación del feed queda sin respuesta, avisa que puede haber salido', async () => {
     const { fetchImpl } = graph((c) => (c.path === '111/feed' ? { fail: true } : { body: { id: 'p' } }));
     const err = await publishFacebookPhotos(CONN, CREDS, { imageUrls: URLS, message: 'x' }, { fetchImpl }).catch((e) => e);
+    expect(err).toBeInstanceOf(PublishError);
+    expect(err.uncertain).toBe(true);
+  });
+});
+
+describe('publishInstagramImage', () => {
+  const IMG = 'https://www.comparatech.cl/social/cupones/abc/feed-1-x.jpg';
+
+  function api(statuses = ['FINISHED']) {
+    let poll = 0;
+    return graph((c) => {
+      if (c.path === '1784/media') return { body: { id: 'img1' } };
+      if (c.path === 'img1') return { body: { status_code: statuses[Math.min(poll++, statuses.length - 1)] } };
+      if (c.path === '1784/media_publish') return { body: { id: 'media7' } };
+      if (c.path === 'media7') return { body: { permalink: 'https://www.instagram.com/p/xyz/' } };
+      return { status: 400, body: { error: { message: `inesperado ${c.path}`, code: 100 } } };
+    });
+  }
+
+  it('al feed: la imagen con su texto, espera y publica', async () => {
+    const { fetchImpl, calls } = api(['IN_PROGRESS', 'FINISHED']);
+    const r = await publishInstagramImage(CONN, CREDS, { imageUrl: IMG, caption: 'Cupones' }, { fetchImpl, sleep: noSleep });
+    expect(r).toEqual({ mediaId: 'media7', permalink: 'https://www.instagram.com/p/xyz/' });
+    const created = calls.find((c) => c.path === '1784/media');
+    expect(created?.params).toMatchObject({ image_url: IMG, caption: 'Cupones' });
+    expect(created?.params.media_type).toBeUndefined();
+    expect(calls.filter((c) => c.path === 'img1')).toHaveLength(2);
+    expect(calls.find((c) => c.path === '1784/media_publish')?.params.creation_id).toBe('img1');
+  });
+
+  it('como historia: STORIES y sin texto', async () => {
+    const { fetchImpl, calls } = api();
+    await publishInstagramImage(CONN, CREDS, { imageUrl: IMG, caption: 'no va', story: true }, { fetchImpl, sleep: noSleep });
+    const created = calls.find((c) => c.path === '1784/media');
+    expect(created?.params.media_type).toBe('STORIES');
+    expect(created?.params.caption).toBeUndefined();
+  });
+
+  it('si Instagram no la procesa, no publica nada', async () => {
+    const { fetchImpl, calls } = api(['ERROR']);
+    await expect(publishInstagramImage(CONN, CREDS, { imageUrl: IMG, story: true }, { fetchImpl, sleep: noSleep })).rejects.toThrow(
+      'Instagram no pudo procesar la historia (ERROR)'
+    );
+    expect(calls.some((c) => c.path === '1784/media_publish')).toBe(false);
+  });
+
+  it('si el último paso queda sin respuesta, dice que puede haber salido', async () => {
+    const { fetchImpl } = graph((c) => {
+      if (c.path === '1784/media') return { body: { id: 'img1' } };
+      if (c.path === 'img1') return { body: { status_code: 'FINISHED' } };
+      if (c.path === '1784/media_publish') return { fail: true };
+      return { status: 400, body: {} };
+    });
+    const err = await publishInstagramImage(CONN, CREDS, { imageUrl: IMG }, { fetchImpl, sleep: noSleep }).catch((e) => e);
     expect(err).toBeInstanceOf(PublishError);
     expect(err.uncertain).toBe(true);
   });
