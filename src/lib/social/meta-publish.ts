@@ -260,6 +260,34 @@ export async function publishInstagramContainer(
   return { mediaId, permalink };
 }
 
+/**
+ * El reel más reciente de la cuenta publicado desde `sinceIso` (con 5
+ * minutos de margen), o null. Sirve cuando una pasada se cortó justo después
+ * de publicar: el contenedor dice PUBLISHED, pero no trae el id de la
+ * publicación, y sin él no se puede anotar ni enlazar.
+ */
+export async function findRecentReel(
+  conn: Pick<MetaConnection, 'igUserId' | 'pageToken'>,
+  creds: MetaCredentials,
+  sinceIso: string,
+  deps: PublishDeps = {}
+): Promise<{ mediaId: string; permalink: string | null } | null> {
+  const body = await graphGet(
+    `${conn.igUserId}/media`,
+    { fields: 'id,permalink,timestamp,media_product_type', limit: '5', ...pageAuth(conn, creds) },
+    deps.fetchImpl ?? fetch
+  );
+  const since = new Date(sinceIso).getTime() - 5 * 60_000;
+  const list = Array.isArray(body.data) ? (body.data as Record<string, unknown>[]) : [];
+  for (const m of list) {
+    const at = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : NaN;
+    if (m.media_product_type !== 'REELS' || !Number.isFinite(at) || at < since) continue;
+    const id = typeof m.id === 'string' ? m.id : typeof m.id === 'number' ? String(m.id) : '';
+    if (id) return { mediaId: id, permalink: typeof m.permalink === 'string' ? m.permalink : null };
+  }
+  return null;
+}
+
 const RUPLOAD_HOST = 'rupload.facebook.com';
 
 /**

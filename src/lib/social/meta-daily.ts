@@ -7,6 +7,7 @@ import { metaCredentials, metaErrorMessage, readMetaConnection, redactTokens, ty
 import {
   PublishError,
   createInstagramReel,
+  findRecentReel,
   instagramContainerStatus,
   publishFacebookReel,
   publishInstagramContainer,
@@ -152,7 +153,16 @@ async function advanceInstagram(
       const done = await publishInstagramContainer(conn, creds, containerId, deps);
       return { status: 'publicado', containerId, id: done.mediaId, permalink: done.permalink, at: new Date(now()).toISOString() };
     }
-    if (code === 'PUBLISHED') return { ...ig, status: 'publicado', at: new Date(now()).toISOString() };
+    if (code === 'PUBLISHED') {
+      // Lo publicó una pasada que se cortó antes de anotarlo: se busca su id para anotarlo y enlazarlo.
+      const found = await findRecentReel(conn, creds, ig.at, deps).catch(() => null);
+      return {
+        ...ig,
+        status: 'publicado',
+        ...(found ? { id: found.mediaId, permalink: found.permalink } : {}),
+        at: new Date(now()).toISOString(),
+      };
+    }
     if (code === 'ERROR' || code === 'EXPIRED') {
       return { ...ig, status: 'error', error: `Instagram no pudo procesar el reel (${code}).`, at: new Date(now()).toISOString() };
     }
@@ -196,7 +206,7 @@ export async function runMetaDaily(admin: SupabaseClient, at: Date, deps: DailyD
     }
     await writeState(admin, state);
     await logResult(admin, state, 'instagram');
-    if (state.instagram.status === 'publicado' && state.instagram.id) await markPosted(admin, state, 'instagram', state.instagram.id);
+    await markInstagram(admin, state);
     return { ok: state.instagram.status !== 'error' && state.instagram.status !== 'incierto', state };
   }
 
@@ -248,10 +258,22 @@ export async function runMetaDaily(admin: SupabaseClient, at: Date, deps: DailyD
   }
   await writeState(admin, state);
   if (state.instagram.status !== 'procesando') await logResult(admin, state, 'instagram');
-  if (state.instagram.status === 'publicado' && state.instagram.id) await markPosted(admin, state, 'instagram', state.instagram.id);
+  await markInstagram(admin, state);
 
   const bad = (s: NetworkStatus) => s === 'error' || s === 'incierto';
   return { ok: !bad(state.facebook.status) || !bad(state.instagram.status), state };
+}
+
+/**
+ * Anota el reel de Instagram si salió. Sin el id de la publicación (se cortó
+ * una pasada y no se encontró), se anota con el del contenedor: lo que
+ * importa es que quede marcado, para que no se pida subirlo de nuevo.
+ */
+async function markInstagram(admin: SupabaseClient, state: DailyState) {
+  const ig = state.instagram;
+  if (ig.status !== 'publicado') return;
+  const id = ig.id ?? (ig.containerId ? `contenedor:${ig.containerId}` : null);
+  if (id) await markPosted(admin, state, 'instagram', id);
 }
 
 async function logResult(admin: SupabaseClient, state: DailyState, network: 'instagram' | 'facebook') {

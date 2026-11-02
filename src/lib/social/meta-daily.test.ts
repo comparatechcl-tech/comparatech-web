@@ -219,6 +219,73 @@ describe('runMetaDaily', () => {
     expect(store.posts.filter((p) => p.channel === 'instagram')).toHaveLength(1);
   });
 
+  it('si una pasada se cortó justo después de publicar en Instagram, la siguiente lo encuentra y lo anota (27 y 31-10)', async () => {
+    const { runMetaDaily } = await import('./meta-daily');
+    // Así quedó el estado cuando Vercel cortó la primera pasada: Instagram "procesando", aunque ya había salido.
+    store.settings.meta_daily = {
+      day: 20261025,
+      productId: 'c',
+      name: 'Producto c',
+      price: 100_000,
+      videoUrl: 'https://x.supabase.co/v.mp4',
+      facebook: { status: 'publicado', id: '555', at: '2026-10-25T13:35:10.000Z' },
+      instagram: { status: 'procesando', containerId: 'cont1', at: '2026-10-25T13:35:20.000Z' },
+    };
+    const calls: string[] = [];
+    const fetchImpl = async (input: string) => {
+      const url = new URL(input);
+      const path = url.pathname.replace('/v26.0/', '');
+      calls.push(path);
+      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
+      if (path === 'cont1') return json({ status_code: 'PUBLISHED' });
+      if (path === '1784/media') {
+        return json({
+          data: [
+            { id: 'reel77', permalink: 'https://www.instagram.com/reel/xyz/', timestamp: '2026-10-25T13:36:00+0000', media_product_type: 'REELS' },
+            { id: 'viejo', permalink: 'https://www.instagram.com/reel/old/', timestamp: '2026-10-24T13:36:00+0000', media_product_type: 'REELS' },
+          ],
+        });
+      }
+      return json({ error: { message: `inesperado ${path}`, code: 100 } });
+    };
+    const two = await runMetaDaily(fakeAdmin(), new Date('2026-10-25T16:20:00Z'), {
+      readBoard: async () => board([]),
+      liveCheck: async () => ({}),
+      fetchImpl,
+      sleep: async () => {},
+    });
+    expect(two.state?.instagram).toMatchObject({ status: 'publicado', id: 'reel77', permalink: 'https://www.instagram.com/reel/xyz/' });
+    // No se vuelve a publicar: solo se mira el contenedor y la lista de la cuenta.
+    expect(calls).not.toContain('1784/media_publish');
+    expect(store.posts.filter((p) => p.channel === 'instagram').map((p) => p.external_id)).toEqual(['reel77']);
+  });
+
+  it('si no encuentra el reel publicado, lo anota igual con el contenedor', async () => {
+    const { runMetaDaily } = await import('./meta-daily');
+    store.settings.meta_daily = {
+      day: 20261025,
+      productId: 'c',
+      name: 'Producto c',
+      price: 100_000,
+      videoUrl: 'https://x.supabase.co/v.mp4',
+      facebook: { status: 'publicado', id: '555', at: '2026-10-25T13:35:10.000Z' },
+      instagram: { status: 'procesando', containerId: 'cont1', at: '2026-10-25T13:35:20.000Z' },
+    };
+    const fetchImpl = async (input: string) => {
+      const path = new URL(input).pathname.replace('/v26.0/', '');
+      if (path === 'cont1') return new Response(JSON.stringify({ status_code: 'PUBLISHED' }), { status: 200 });
+      return new Response(JSON.stringify({ error: { message: 'caída', code: 2 } }), { status: 500 });
+    };
+    const two = await runMetaDaily(fakeAdmin(), new Date('2026-10-25T16:20:00Z'), {
+      readBoard: async () => board([]),
+      liveCheck: async () => ({}),
+      fetchImpl,
+      sleep: async () => {},
+    });
+    expect(two.state?.instagram.status).toBe('publicado');
+    expect(store.posts.filter((p) => p.channel === 'instagram').map((p) => p.external_id)).toEqual(['contenedor:cont1']);
+  });
+
   it('al otro día elige de nuevo', async () => {
     const { runMetaDaily } = await import('./meta-daily');
     await runMetaDaily(fakeAdmin(), day1, { readBoard: async () => board([video('c')]), liveCheck: async () => ({ c: same }), fetchImpl: graph(['FINISHED']).fetchImpl, sleep: async () => {} });

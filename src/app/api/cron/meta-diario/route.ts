@@ -17,7 +17,9 @@ import { readVideoBoard } from '@/lib/social/videos';
  * deben publicar nada.
  */
 
-export const maxDuration = 60;
+// 120 s: la primera pasada sube a Facebook y espera a Instagram, y con 60 s se cortó dos veces (27 y 31-10).
+// Esperar a Meta casi no gasta CPU.
+export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
