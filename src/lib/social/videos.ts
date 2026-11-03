@@ -62,6 +62,12 @@ export const VIDEO_RULES: PickRules & { repeatAfterDays: number } = {
   ...NETWORK_RULES,
   /** Se suben a mano, uno por uno y a cuatro redes: más que esto al día no se alcanza a subir. */
   maxPosts: 4,
+  /**
+   * Un producto ya subido como video no vuelve en 30 días (antes 14): con un
+   * reel al día, el mismo producto a las dos semanas se veía repetido
+   * (la tablet del 15 y el 31-10).
+   */
+  repeatAfterDays: 30,
 };
 
 /** Cuántos videos puede pedir el generador de una vez. */
@@ -697,6 +703,8 @@ export interface ReadyVideo {
   listPrice: number | null;
   discount: number;
   checkedAt: string | null;
+  /** El tipo de Mercado Libre (ml_domain_id): el reel diario no repite el de ayer. */
+  domain?: string | null;
   template: string;
   videoUrl: string;
   coverUrl: string;
@@ -945,6 +953,7 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
       listPrice: claims.precio_lista,
       discount: claims.descuento,
       checkedAt: p.price_checked_at,
+      domain: p.ml_domain_id ?? null,
       template: video.template,
       videoUrl: videoPublicUrl(`${video.file}.mp4`),
       coverUrl: videoPublicUrl(`${video.file}.jpg`),

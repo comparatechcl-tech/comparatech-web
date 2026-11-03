@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nameNeedsHelp, socialProductName } from './social-name';
+import { nameNeedsHelp, socialProductName, tidySocialName } from './social-name';
 
 /** Nombres, marcas, tipos y especificaciones del catálogo real (18-10-2026). */
 describe('socialProductName', () => {
@@ -47,18 +47,18 @@ describe('socialProductName', () => {
   it('deja como están los nombres que ya se entienden', () => {
     const cases = [
       { name: 'Parlante JBL Go 4 Color Negro', brand: 'JBL', ml_domain_id: 'MLC-SPEAKERS', want: 'Parlante JBL Go 4' },
-      { name: 'Tp-link Router Wifi Doble Banda Ac750 Archer C24', brand: 'TP-Link', ml_domain_id: 'MLC-ROUTERS_AND_WIRELESS_SYSTEMS', want: 'Tp-link Router Wifi Doble Banda Ac750 Archer C24' },
+      { name: 'Tp-link Router WiFi Doble Banda Ac750 Archer C24', brand: 'TP-Link', ml_domain_id: 'MLC-ROUTERS_AND_WIRELESS_SYSTEMS', want: 'Tp-link Router WiFi Doble Banda Ac750 Archer C24' },
       { name: '2 Pack Radios Walkie Talkie BF-888S', brand: 'Baofeng', ml_domain_id: 'MLC-WALKIE_TALKIES', want: '2 Pack Radios Walkie Talkie BF-888S' },
-      { name: 'E-reader Amazon Kindle 6 2024 16gb', brand: 'Kindle', ml_domain_id: 'MLC-E_READERS', want: 'E-reader Amazon Kindle 6 2024 16gb' },
+      { name: 'E-reader Amazon Kindle 6 2024 16GB', brand: 'Kindle', ml_domain_id: 'MLC-E_READERS', want: 'E-reader Amazon Kindle 6 2024 16GB' },
       // "Ampolletas" también reúne tubos LED: mejor el nombre tal cual que un tipo equivocado.
-      { name: 'X5 Tubos Led 120cm Canaleta', brand: 'EOLAND', ml_domain_id: 'MLC-LIGHT_BULBS', want: 'X5 Tubos Led 120cm Canaleta' },
+      { name: 'X5 Tubos Led 120cm Canaleta', brand: 'EOLAND', ml_domain_id: 'MLC-LIGHT_BULBS', want: 'X5 Tubos LED 120cm Canaleta' },
     ];
     for (const { want, ...p } of cases) expect(socialProductName(p)).toBe(want);
   });
 
   it('saca la basura del comienzo', () => {
     expect(socialProductName({ name: '!!! Parlante Genius Mini Soundbar 100 Usb', brand: 'Genius', ml_domain_id: 'MLC-SPEAKERS' })).toBe(
-      'Parlante Genius Mini Soundbar 100 Usb',
+      'Parlante Genius Mini Soundbar 100 USB',
     );
     expect(socialProductName({ name: 'Y Alexa Echo Dot De Quinta Generación', brand: 'Amazon', ml_domain_id: 'MLC-SMART_SPEAKERS' })).toBe(
       'Alexa Echo Dot De Quinta Generación',
@@ -92,5 +92,17 @@ describe('nameNeedsHelp', () => {
     expect(nameNeedsHelp({ name: 'FA607NUQ-RL060W AMD Ryzen 7', brand: 'Asus', ml_domain_id: 'MLC-NOTEBOOKS' })).toBe(false);
     expect(nameNeedsHelp({ name: 'FA607NUQ-RL060W AMD Ryzen 7', brand: 'Asus', ml_domain_id: null })).toBe(true);
     expect(nameNeedsHelp({ name: 'Parlante JBL Go 4', brand: 'JBL', ml_domain_id: 'MLC-SPEAKERS' })).toBe(false);
+  });
+});
+
+describe('tidySocialName', () => {
+  it('saca el voltaje y "Procesador", escribe bien las pulgadas y las siglas (plan del 02-11-2026)', () => {
+    expect(tidySocialName('Samsung Smart Tv 100-240 V 55in Procesador Crystal Uhd 4k')).toBe('Samsung Smart TV 55" Crystal UHD 4K');
+    expect(tidySocialName('Lenovo Ideapad Slim 3 8gb Ram 512gb Ssd')).toBe('Lenovo Ideapad Slim 3 8GB RAM 512GB SSD');
+    expect(tidySocialName('Smart TV TCL 50 Pulgadas QLED 120hz')).toBe('Smart TV TCL 50" QLED 120Hz');
+    // Un procesador se llama así; "2 in 1" no son pulgadas; las marcas no se tocan.
+    expect(tidySocialName('Procesador AMD Ryzen 5 5600')).toBe('Procesador AMD Ryzen 5 5600');
+    expect(tidySocialName('Cargador Usb 220v 2 in 1')).toBe('Cargador USB 2 in 1');
+    expect(tidySocialName('Parlante LG XBoom')).toBe('Parlante LG XBoom');
   });
 });

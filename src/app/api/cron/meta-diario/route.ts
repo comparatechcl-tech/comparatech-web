@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { startCronRun } from '@/lib/cron-runs';
 import { liveCheckOffers } from '@/lib/social/live-check-server';
-import { DAILY_ACTOR, runMetaDaily } from '@/lib/social/meta-daily';
+import { DAILY_ACTOR, readLastReelDomain, runMetaDaily } from '@/lib/social/meta-daily';
 import { readVideoBoard } from '@/lib/social/videos';
 
 /**
@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
   try {
     const summary = await runMetaDaily(admin, new Date(), {
       readBoard: readVideoBoard,
+      lastDomain: readLastReelDomain,
       liveCheck: (items) => liveCheckOffers(admin, items, DAILY_ACTOR),
     });
     await run.finish(summary.ok, summary, summary.ok ? undefined : summary.skipped ?? 'falló una red');

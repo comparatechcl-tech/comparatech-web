@@ -337,3 +337,39 @@ describe('runMetaDaily', () => {
     expect(retry.state).toMatchObject({ facebook: { status: 'publicado' }, instagram: { status: 'publicado' } });
   });
 });
+
+describe('dailyCandidates', () => {
+  beforeEach(() => {
+    vi.stubEnv('META_APP_ID', '1234');
+    vi.stubEnv('META_APP_SECRET', 'secreto');
+    store.settings = {
+      meta_connection: { pageId: '111', pageName: 'ComparaTech Chile', pageToken: TOKEN, igUserId: '1784', igUsername: 'comparatech.cl', scopes: [] },
+    };
+    store.posts = [];
+    store.events = [];
+  });
+
+  it('el mismo tipo que el reel anterior va al final, pero sale si no hay otro (plan del 02-11-2026)', async () => {
+    const { dailyCandidates } = await import('./meta-daily');
+    const tabletA = video('a', { domain: 'MLC-TABLETS' });
+    const tabletB = video('b', { domain: 'MLC-TABLETS' });
+    const tv = video('c', { domain: 'MLC-TELEVISIONS' });
+    expect(dailyCandidates([tabletA, tabletB, tv], 'MLC-TABLETS').map((v) => v.id)).toEqual(['c', 'a', 'b']);
+    expect(dailyCandidates([tabletA, tabletB], 'MLC-TABLETS').map((v) => v.id)).toEqual(['a', 'b']);
+    expect(dailyCandidates([tabletA, tv]).map((v) => v.id)).toEqual(['a', 'c']);
+  });
+
+  it('la primera pasada usa el tipo del último reel', async () => {
+    const { runMetaDaily } = await import('./meta-daily');
+    const { fetchImpl } = graph(['FINISHED']);
+    const liveCheck = vi.fn(async () => ({ a: same, c: same }));
+    const summary = await runMetaDaily(fakeAdmin(), new Date('2026-10-26T14:05:00Z'), {
+      readBoard: async () => board([video('a', { domain: 'MLC-TABLETS' }), video('c', { domain: 'MLC-TELEVISIONS' })]),
+      lastDomain: async () => 'MLC-TABLETS',
+      liveCheck,
+      fetchImpl,
+      sleep: async () => {},
+    });
+    expect(summary.state?.productId).toBe('c');
+  });
+});

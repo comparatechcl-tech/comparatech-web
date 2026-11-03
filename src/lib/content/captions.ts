@@ -12,6 +12,7 @@
 
 import { normalizeName } from '@/lib/text';
 import { socialProductName } from '@/lib/content/social-name';
+import { domainLabel } from '@/lib/product-types';
 import { FORBIDDEN_WORDS } from '@/lib/social/interest-tables';
 
 export type CaptionChannel = 'instagram' | 'tiktok' | 'whatsapp' | 'telegram' | 'facebook';
@@ -368,6 +369,78 @@ function withLinkLine(text: string, line: string): string {
 }
 
 /**
+ * Hashtags de cada tipo de producto en los reels: 3 del tipo, que es lo que
+ * busca la gente ("#smarttv", no "#tecnologia"). Un tipo que no está usa el
+ * de la categoría.
+ */
+const REEL_TYPE_TAGS: Readonly<Record<string, readonly string[]>> = {
+  Televisores: ['#smarttv', '#televisor', '#tv'],
+  Notebooks: ['#notebook', '#laptop', '#computador'],
+  Tablets: ['#tablet', '#tablets', '#android'],
+  Celulares: ['#celular', '#smartphone', '#celulares'],
+  Audífonos: ['#audifonos', '#audifonosbluetooth', '#musica'],
+  Parlantes: ['#parlante', '#parlantebluetooth', '#musica'],
+  'Parlantes inteligentes': ['#alexa', '#casainteligente', '#parlante'],
+  'Home theater': ['#hometheater', '#cine', '#audio'],
+  Monitores: ['#monitor', '#monitorgamer', '#setup'],
+  Smartwatch: ['#smartwatch', '#relojinteligente', '#reloj'],
+  Consolas: ['#consola', '#gaming', '#videojuegos'],
+  Juegos: ['#videojuegos', '#gaming', '#gamer'],
+  Controles: ['#gaming', '#gamer', '#videojuegos'],
+  Teclados: ['#teclado', '#setup', '#gamer'],
+  Mouse: ['#mouse', '#setup', '#gamer'],
+  Sillas: ['#sillagamer', '#setup', '#homeoffice'],
+  Escritorios: ['#escritorio', '#setup', '#homeoffice'],
+  Impresoras: ['#impresora', '#oficina', '#homeoffice'],
+  Routers: ['#wifi', '#internet', '#router'],
+  'Antenas y adaptadores': ['#internet', '#wifi', '#conectividad'],
+  'Discos y SSD': ['#ssd', '#almacenamiento', '#pc'],
+  'Memorias RAM': ['#pc', '#gamer', '#setup'],
+  Cámaras: ['#camara', '#fotografia', '#video'],
+  'Cámaras de seguridad': ['#camaradeseguridad', '#seguridad', '#hogar'],
+  'Lectores de e-books': ['#kindle', '#lectura', '#libros'],
+  Proyectores: ['#proyector', '#cine', '#peliculas'],
+  Drones: ['#drone', '#dron', '#fotografia'],
+  Aspiradoras: ['#aspiradora', '#hogar', '#limpieza'],
+  Microondas: ['#electrodomesticos', '#cocina', '#hogar'],
+  Refrigeradores: ['#refrigerador', '#electrodomesticos', '#hogar'],
+  Lavadoras: ['#lavadora', '#electrodomesticos', '#hogar'],
+  Hornos: ['#cocina', '#electrodomesticos', '#hogar'],
+  Ventiladores: ['#ventilador', '#verano', '#hogar'],
+};
+
+/** Los hashtags de un reel: el de ofertas en Chile (o #chile, sin descuento) y 3 del tipo. Instagram admite 5. */
+export function reelHashtags(p: CaptionProduct): string {
+  const typeTags = REEL_TYPE_TAGS[domainLabel(p.ml_domain_id)] ?? ['#tecnologia', categoryTag(p.category)];
+  const tags = [captionDiscount(p) > 0 ? '#ofertaschile' : '#chile', ...typeTags].filter((t): t is string => Boolean(t));
+  return [...new Set(tags)].slice(0, 4).join(' ');
+}
+
+/** Pide que lo manden o lo guarden: es lo que hace que Instagram y TikTok se lo muestren a quien no sigue la cuenta. */
+export const REEL_SHARE_LINE = '📩 Mándaselo a quien lo esté buscando.';
+
+/**
+ * El texto de un reel. La primera línea es lo que se lee sin tocar "más":
+ * qué es, cuánto cuesta y el descuento ("Smart TV TCL 55\" a $299.990, 25%
+ * de descuento"). Después la cifra tachada como "sin descuento $X", el envío,
+ * la hora del precio, el pedido de mandarlo, dónde comprar y 4 hashtags.
+ */
+export function buildReelCaption(product: CaptionProduct, channel: 'instagram' | 'tiktok', opts: Pick<CaptionOptions, 'siteUrl'>): string {
+  const discount = captionDiscount(product);
+  const lead = discount >= OFFER_HOOK_MIN_DISCOUNT ? '🔥' : '👀';
+  const lines = [`${lead} ${socialProductName(product)} a ${formatPrice(product.price)}${discount > 0 ? `, ${discountPhrase(discount)}` : ''}`];
+  if (discount > 0 && product.original_price) lines.push(`💰 Sin descuento ${formatPrice(product.original_price)}`);
+  if (product.offer_info?.free_shipping === true) lines.push('🚚 Envío gratis');
+  lines.push(priceCheckedLine(product.price_checked_at));
+  lines.push('');
+  lines.push(REEL_SHARE_LINE);
+  lines.push(buyLine(opts.siteUrl, channel));
+  lines.push('');
+  lines.push(reelHashtags(product));
+  return lines.join('\n');
+}
+
+/**
  * Los textos de un reel para cada red.
  *
  * Ninguno lleva un link para tocar: en la descripción de un reel no se puede,
@@ -375,11 +448,9 @@ function withLinkLine(text: string, line: string): string {
  * link. Todos dicen dónde está el link en el perfil y, con `siteUrl`, el
  * nombre del sitio, y conservan la hora en que se revisó el precio.
  */
-export function buildVideoTexts(product: CaptionProduct, now: Date, siteUrl = ''): VideoTexts {
-  // Con estos dos canales buildCaption no escribe ni el link de compra ni el de la ficha.
-  const opts: CaptionOptions = { now, siteUrl, link: '' };
-  const instagram = buildCaption(product, 'instagram', opts);
-  const tiktok = buildCaption(product, 'tiktok', opts);
+export function buildVideoTexts(product: CaptionProduct, _now: Date, siteUrl = ''): VideoTexts {
+  const instagram = buildReelCaption(product, 'instagram', { siteUrl });
+  const tiktok = buildReelCaption(product, 'tiktok', { siteUrl });
   return {
     instagram,
     tiktok,

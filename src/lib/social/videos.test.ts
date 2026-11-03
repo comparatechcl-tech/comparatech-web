@@ -727,7 +727,7 @@ describe('VIDEO_RULES', () => {
       minDrop: 5,
       maxPriceAgeMs: 6 * HOUR,
       cleanOnly: true,
-      repeatAfterDays: 14,
+      repeatAfterDays: 30,
     });
     expect(VIDEO_RULES.minDiscount).toBe(NETWORK_RULES.minDiscount);
     expect(VIDEO_NETWORKS).toEqual(['instagram', 'tiktok', 'youtube', 'facebook']);
@@ -853,7 +853,7 @@ describe('readVideoPicks', () => {
     expect(plan.picks[0].file).toBe(fileOf('2026-10-13', p));
   });
 
-  it('no vuelve lo que ya se subió como video a cualquier red en los últimos 14 días', async () => {
+  it('no vuelve lo que ya se subió como video a cualquier red en los últimos 30 días', async () => {
     const uploaded = strong({ category: 'audio' });
     const longAgo = strong({ category: 'gaming' });
     const undone = strong({ category: 'hogar' });
@@ -864,8 +864,8 @@ describe('readVideoPicks', () => {
     const { admin } = fakeSite({
       posts: [
         // Basta una red.
-        videoMark(uploaded.id, 'youtube', daysAgo(13)),
-        videoMark(longAgo.id, 'instagram', daysAgo(15)),
+        videoMark(uploaded.id, 'youtube', daysAgo(29)),
+        videoMark(longAgo.id, 'instagram', daysAgo(31)),
         videoMark(undone.id, 'tiktok', daysAgo(1), { status: 'error', error: 'Marcada por error' }),
         // Las historias y el feed llevan otra cuenta: no le quitan productos a los videos.
         { product_id: onlyStory.id, channel: 'instagram', caption: STORY_MARK, posted_at: daysAgo(1) },
@@ -1300,7 +1300,7 @@ describe('readVideoBoard', () => {
     expect(video.name).toBe('Samsung Smartwatch Galaxy Fit 3');
     expect(video.texts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $60.000 con 40% de descuento');
     for (const text of [video.texts.instagram, video.texts.tiktok, video.texts.facebook, video.texts.youtubeDescription]) {
-      expect(text.split('\n')).toContain('Samsung Smartwatch Galaxy Fit 3');
+      expect(text.split('\n')[0]).toBe('🔥 Samsung Smartwatch Galaxy Fit 3 a $60.000, 40% de descuento');
       expect(text).not.toContain('Asm-r390nidalta');
     }
   });
@@ -1533,7 +1533,7 @@ describe('readVideoBoard', () => {
         videoMark(p.id, 'instagram', hoursAgo(5)), // id 1
         videoMark(p.id, 'youtube', hoursAgo(4)), // id 2
         videoMark(p.id, 'tiktok', hoursAgo(3), { status: 'error', error: 'Marcada por error' }), // id 3: deshecha
-        videoMark(p.id, 'facebook', daysAgo(20)), // id 4: de otra vez, hace más de 14 días
+        videoMark(p.id, 'facebook', daysAgo(32)), // id 4: de otra vez, hace más de 30 días
         videoMark(p.id, 'youtube', hoursAgo(1)), // id 5: marcada de nuevo
         { product_id: p.id, channel: 'instagram', caption: STORY_MARK, posted_at: hoursAgo(1) }, // id 6: una historia
         { product_id: other.id, channel: 'tiktok', caption: 'Texto del post', external_id: 'u-1', posted_at: hoursAgo(1) }, // id 7: el feed

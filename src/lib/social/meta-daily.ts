@@ -75,6 +75,8 @@ export interface DailySummary {
 
 export interface DailyDeps extends PublishDeps {
   readBoard(admin: SupabaseClient, now: Date): Promise<VideoBoard>;
+  /** El tipo del último reel publicado (readLastReelDomain): sin esto no se mira. */
+  lastDomain?(admin: SupabaseClient): Promise<string | null>;
   liveCheck(items: { productId: string; shown: ShownOffer }[]): Promise<Record<string, LiveCheck>>;
   /** Cuánto esperar en esta pasada a que Instagram procese el reel. */
   igWaitMs?: number;
@@ -86,9 +88,14 @@ function shownOf(video: ReadyVideo): ShownOffer {
   return { price: video.price, listPrice: video.listPrice, freeShipping: video.freeShipping, full: video.full };
 }
 
-/** Los videos que se pueden publicar solos hoy, en el orden de la página (más puntos primero). Puro. */
-export function dailyCandidates(videos: ReadyVideo[]): ReadyVideo[] {
-  return videos.filter(
+/**
+ * Los videos que se pueden publicar solos hoy, en el orden de la página (más
+ * puntos primero). Los del mismo tipo que el reel anterior (`lastDomain`) van
+ * al final: así no salen tres tablets seguidas (27 al 29-10), pero si no hay
+ * otra cosa, sale igual. Puro.
+ */
+export function dailyCandidates(videos: ReadyVideo[], lastDomain: string | null = null): ReadyVideo[] {
+  const ok = videos.filter(
     (v) =>
       !v.posted.instagram &&
       !v.posted.facebook &&
@@ -96,6 +103,23 @@ export function dailyCandidates(videos: ReadyVideo[]): ReadyVideo[] {
       v.price > 0 &&
       v.videoUrl.startsWith('https://')
   );
+  if (!lastDomain) return ok;
+  return [...ok.filter((v) => v.domain !== lastDomain), ...ok.filter((v) => v.domain === lastDomain)];
+}
+
+/** El tipo del último reel subido a Instagram o Facebook, o null si no se sabe. */
+export async function readLastReelDomain(admin: SupabaseClient): Promise<string | null> {
+  const { data, error } = await admin
+    .from('social_posts')
+    .select('posted_at, products(ml_domain_id)')
+    .eq('caption', VIDEO_MARK)
+    .in('channel', ['instagram', 'facebook'])
+    .order('posted_at', { ascending: false })
+    .limit(1);
+  if (error || !data?.[0]) return null;
+  const product = (data[0] as { products?: { ml_domain_id?: string | null } | { ml_domain_id?: string | null }[] | null }).products;
+  const row = Array.isArray(product) ? product[0] : product;
+  return row?.ml_domain_id ?? null;
 }
 
 async function readState(admin: SupabaseClient): Promise<{ ok: true; state: DailyState | null } | { ok: false; error: string }> {
@@ -212,7 +236,8 @@ export async function runMetaDaily(admin: SupabaseClient, at: Date, deps: DailyD
 
   // Primera pasada del día: elegir el video.
   const board = await deps.readBoard(admin, at);
-  const candidates = dailyCandidates(board.videos).slice(0, DAILY_CANDIDATES);
+  const lastDomain = deps.lastDomain ? await deps.lastDomain(admin) : null;
+  const candidates = dailyCandidates(board.videos, lastDomain).slice(0, DAILY_CANDIDATES);
   if (candidates.length === 0) return { ok: true, skipped: 'No hay un video listo que cumpla las reglas hoy.' };
   const checks = await deps.liveCheck(candidates.map((v) => ({ productId: v.id, shown: shownOf(v) })));
   const video = candidates.find((v) => checks[v.id]?.status === 'same');

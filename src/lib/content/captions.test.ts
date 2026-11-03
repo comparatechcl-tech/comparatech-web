@@ -164,10 +164,34 @@ describe('buildVideoTexts', () => {
   const all = [texts.instagram, texts.tiktok, texts.facebook, texts.youtubeTitle, texts.youtubeDescription];
   const WEB_ADDRESS = /https?:|www\.|\.(cl|com|la|app|net|org)\b/i;
 
-  it('Instagram y TikTok llevan el texto de siempre', () => {
-    const withSite = buildVideoTexts(base, opts.now, opts.siteUrl);
-    expect(withSite.instagram).toBe(buildCaption(base, 'instagram', opts));
-    expect(withSite.tiktok).toBe(buildCaption(base, 'tiktok', opts));
+  it('Instagram parte con qué es, cuánto cuesta y el descuento, y pide mandarlo (plan del 02-11-2026)', () => {
+    const withSite = buildVideoTexts(base, opts.now, 'https://www.comparatech.cl');
+    expect(withSite.instagram.split('\n')).toEqual([
+      '🔥 Audífonos Bluetooth Inalámbricos Xyz Pro a $27.990, 60% de descuento',
+      '💰 Sin descuento $69.990',
+      '🚚 Envío gratis',
+      'Precio revisado el 04/10 a las 14:30 (hora de Chile); puede cambiar.',
+      '',
+      '📩 Mándaselo a quien lo esté buscando.',
+      '🛒 Link de compra en nuestra bio, o búscalo en comparatech.cl',
+      '',
+      '#ofertaschile #tecnologia #audio',
+    ]);
+    expect(withSite.tiktok).toContain('🛒 Para comprarlo, búscalo en comparatech.cl');
+    for (const text of [withSite.instagram, withSite.tiktok]) {
+      expect(text).not.toMatch(/antes|precio de lista|precio normal|rebajad|mejor precio|imperdible|solo hoy/i);
+      expect(hasForbiddenWord(text)).toBe(false);
+    }
+  });
+
+  it('los hashtags del reel son 4: ofertas en Chile y 3 del tipo de producto', () => {
+    const tv = buildVideoTexts({ ...base, ml_domain_id: 'MLC-TELEVISIONS' }, opts.now);
+    expect(tv.instagram.split('\n').at(-1)).toBe('#ofertaschile #smarttv #televisor #tv');
+    const plain = buildVideoTexts({ ...base, original_price: null, ml_domain_id: 'MLC-TABLETS' }, opts.now);
+    expect(plain.instagram.split('\n').at(-1)).toBe('#chile #tablet #tablets #android');
+    // Sin descuento no hay "sin descuento" ni porcentaje, y el gancho no es el de oferta.
+    expect(plain.instagram.split('\n')[0]).toBe('👀 Audífonos Bluetooth Inalámbricos Xyz Pro a $27.990');
+    expect(plain.instagram).not.toContain('Sin descuento');
   });
 
   it('Facebook dice lo mismo que Instagram, mandando al perfil, sin link para tocar', () => {
@@ -287,7 +311,7 @@ describe('buildVideoTexts', () => {
     const watchTexts = buildVideoTexts(watch, opts.now);
     expect(watchTexts.youtubeTitle).toBe('Samsung Smartwatch Galaxy Fit 3 a $27.990 con 60% de descuento');
     for (const text of [watchTexts.instagram, watchTexts.tiktok, watchTexts.facebook, watchTexts.youtubeDescription]) {
-      expect(text.split('\n')).toContain('Samsung Smartwatch Galaxy Fit 3');
+      expect(text.split('\n')[0]).toBe('🔥 Samsung Smartwatch Galaxy Fit 3 a $27.990, 60% de descuento');
       expect(text).not.toContain('Asm-r390nidalta');
     }
     // El código que dice con qué calza un repuesto se queda también en el título.

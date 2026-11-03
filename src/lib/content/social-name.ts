@@ -166,6 +166,59 @@ function withoutPhrase(tokens: string[], phrase: string): string[] {
   return tokens;
 }
 
+/** Siglas que Mercado Libre trae en minúsculas ("Smart Tv", "8gb Ram 512gb Ssd") y que se leen mejor en mayúsculas. */
+const UPPER_WORDS: Readonly<Record<string, string>> = {
+  tv: 'TV',
+  uhd: 'UHD',
+  fhd: 'FHD',
+  hd: 'HD',
+  qled: 'QLED',
+  oled: 'OLED',
+  amoled: 'AMOLED',
+  led: 'LED',
+  ips: 'IPS',
+  ssd: 'SSD',
+  hdd: 'HDD',
+  ram: 'RAM',
+  usb: 'USB',
+  hdmi: 'HDMI',
+  anc: 'ANC',
+  lte: 'LTE',
+  nfc: 'NFC',
+  wifi: 'WiFi',
+};
+
+/** Una palabra con la sigla o la unidad bien escrita ("8gb" → "8GB", "120hz" → "120Hz", "4k" → "4K"). Lo demás queda igual. */
+function tidyToken(token: string): string {
+  const lower = token.toLowerCase();
+  const capitalized = lower.charAt(0).toUpperCase() + lower.slice(1);
+  if (UPPER_WORDS[lower] && (token === lower || token === capitalized)) return UPPER_WORDS[lower];
+  const unit = /^(\d+(?:[.,]\d+)?)(gb|tb|mb|k|hz|mah)$/i.exec(token);
+  if (!unit) return token;
+  const name = unit[2].toLowerCase();
+  const fixed = name === 'hz' ? 'Hz' : name === 'mah' ? 'mAh' : name.toUpperCase();
+  return unit[1] + fixed;
+}
+
+/**
+ * Lo que en un nombre de redes sobra o se lee mal: el voltaje ("100-240 V",
+ * "220v"), "Procesador" en el medio ("…55in Procesador Crystal"), las
+ * pulgadas escritas "55in" o "55 pulgadas" (pasan a 55") y las siglas en
+ * minúsculas. Un nombre que parte con "Procesador" es un procesador: ahí se queda.
+ */
+export function tidySocialName(name: string): string {
+  const text = name
+    .replace(/\b(?:100|110|120|127|220|230|240)\s*(?:[-–/]\s*(?:220|230|240|250)\s*)?v(?:ac)?\b/gi, ' ')
+    .replace(/\b(\d{2,3}(?:[.,]\d)?)(?:\s?(?:pulgadas|pulg)\b\.?|in\b)/gi, '$1"')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text
+    .split(' ')
+    .filter((token, i) => i === 0 || fold(token) !== 'procesador')
+    .map(tidyToken)
+    .join(' ');
+}
+
 /**
  * El nombre para redes, de `max` caracteres o menos. `withBrand: false`
  * cuando la pieza ya muestra la marca aparte (la historia la lleva arriba
@@ -177,9 +230,11 @@ export function socialProductName(
 ): string {
   // Lo de siempre en redes: sin color, sin "Distribuidor Autorizado" y sin
   // códigos largos de fábrica en el medio. Basura al comienzo ("!!! ", un "Y" suelto) fuera.
-  const base = reelProductName(product.name, 400)
-    .replace(/^[^\p{L}\p{N}"']+/u, '')
-    .replace(/^(?:y|e|o|de|con|para)\s+/i, '');
+  const base = tidySocialName(
+    reelProductName(product.name, 400)
+      .replace(/^[^\p{L}\p{N}"']+/u, '')
+      .replace(/^(?:y|e|o|de|con|para)\s+/i, ''),
+  );
   const tokens = base.split(' ').filter(Boolean);
   const first = tokens[0] ?? '';
   const brand = displayBrand(product.brand);
