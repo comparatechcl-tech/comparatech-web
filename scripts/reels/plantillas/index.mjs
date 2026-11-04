@@ -6,6 +6,7 @@
 const PLANTILLAS = {
   estudio: () => import('./estudio/index.mjs'),
   bloques: () => import('./bloques/index.mjs'),
+  impacto: () => import('./impacto/index.mjs'),
 };
 
 export const PLANTILLA_POR_DEFECTO = 'estudio';

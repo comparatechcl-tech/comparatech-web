@@ -349,7 +349,7 @@ function printOf(p: SocialProduct, drop: number | null = null, price: number = p
 }
 
 /** El nombre del video de un producto en el almacén, sin extensión. */
-const fileOf = (date: string, p: SocialProduct, price: number = p.price, template = 'estudio', drop: number | null = null) =>
+const fileOf = (date: string, p: SocialProduct, price: number = p.price, template = 'impacto', drop: number | null = null) =>
   `${date}/${p.id}-${price}-${template}-${printOf(p, drop, price)}`;
 
 /**
@@ -425,11 +425,11 @@ afterEach(() => {
 
 describe('nombre de los archivos', () => {
   const ID = '6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60';
-  const video = { date: '2026-10-13', productId: ID, price: 27_990, template: 'estudio', fingerprint: '0a1b2c3d' };
+  const video = { date: '2026-10-13', productId: ID, price: 27_990, template: 'impacto', fingerprint: '0a1b2c3d' };
 
   it('arma "AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>" y lo lee de vuelta', () => {
     const name = videoObjectName(video);
-    expect(name).toBe(`2026-10-13/${ID}-27990-estudio-0a1b2c3d`);
+    expect(name).toBe(`2026-10-13/${ID}-27990-impacto-0a1b2c3d`);
     expect(parseVideoObjectName(name!)).toEqual(video);
 
     for (const other of [
@@ -461,7 +461,7 @@ describe('nombre de los archivos', () => {
       { ...video, price: 3_000_000_000 },
       { ...video, template: '' },
       { ...video, template: 'Estudio' },
-      { ...video, template: 'estudio-2' },
+      { ...video, template: 'impacto-2' },
       { ...video, template: 'a/b' },
       { ...video, template: 'x'.repeat(25) },
       // La huella son exactamente 8 caracteres en hexadecimal, en minúsculas.
@@ -480,7 +480,7 @@ describe('nombre de los archivos', () => {
   });
 
   it('al leer rechaza todo lo que no calce exacto', () => {
-    const good = `2026-10-13/${ID}-27990-estudio-0a1b2c3d`;
+    const good = `2026-10-13/${ID}-27990-impacto-0a1b2c3d`;
     expect(parseVideoObjectName(good)).not.toBeNull();
     for (const bad of [
       '',
@@ -491,31 +491,31 @@ describe('nombre de los archivos', () => {
       `reels/${good}`,
       `${good}/otro`,
       // Los nombres de antes de la huella: no se sabe qué dice ese video.
-      `2026-10-13/${ID}-27990-estudio`,
+      `2026-10-13/${ID}-27990-impacto`,
       `2026-10-13/${ID}-27990`,
-      `2026-10-13/${ID}-estudio`,
-      `2026-10-13/${ID}-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-impacto`,
+      `2026-10-13/${ID}-impacto-0a1b2c3d`,
       `2026-10-13/${ID}-27990-0a1b2c3d`,
-      `2026-10-13/${ID}-027990-estudio-0a1b2c3d`,
-      `2026-10-13/${ID}-0-estudio-0a1b2c3d`,
-      `2026-10-13/${ID}--27990-estudio-0a1b2c3d`,
-      `2026-10-13/${ID}-27.990-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-027990-impacto-0a1b2c3d`,
+      `2026-10-13/${ID}-0-impacto-0a1b2c3d`,
+      `2026-10-13/${ID}--27990-impacto-0a1b2c3d`,
+      `2026-10-13/${ID}-27.990-impacto-0a1b2c3d`,
       `2026-10-13/${ID}-27990-Estudio-0a1b2c3d`,
-      `2026-10-13/${ID}-27990-estudio-v2-0a1b2c3d`,
-      `2026-10-13/${ID}-27990-estudio-0a1b2c3`,
-      `2026-10-13/${ID}-27990-estudio-0a1b2c3d4`,
-      `2026-10-13/${ID}-27990-estudio-0A1B2C3D`,
-      `2026-10-13/${ID}-27990-estudio-0a1b2c3g`,
-      `2026-10-13/${ID}-27990-estudio-0a1b2c3d-0a1b2c3d`,
-      `2026-10-13/${ID}-27990-estudio-`,
-      `2026-10-13/${ID}-99999999999-estudio-0a1b2c3d`,
-      `2026-10-13/${ID}-3000000000-estudio-0a1b2c3d`,
-      `2026-10-13/${ID.toUpperCase()}-27990-estudio-0a1b2c3d`,
-      `2026-10-13/${ID.slice(1)}-27990-estudio-0a1b2c3d`,
-      `2026-02-31/${ID}-27990-estudio-0a1b2c3d`,
-      `2026-1-3/${ID}-27990-estudio-0a1b2c3d`,
-      `2026-10-13\\${ID}-27990-estudio-0a1b2c3d`,
-      `../2026-10-13/${ID}-27990-estudio-0a1b2c3d`,
+      `2026-10-13/${ID}-27990-impacto-v2-0a1b2c3d`,
+      `2026-10-13/${ID}-27990-impacto-0a1b2c3`,
+      `2026-10-13/${ID}-27990-impacto-0a1b2c3d4`,
+      `2026-10-13/${ID}-27990-impacto-0A1B2C3D`,
+      `2026-10-13/${ID}-27990-impacto-0a1b2c3g`,
+      `2026-10-13/${ID}-27990-impacto-0a1b2c3d-0a1b2c3d`,
+      `2026-10-13/${ID}-27990-impacto-`,
+      `2026-10-13/${ID}-99999999999-impacto-0a1b2c3d`,
+      `2026-10-13/${ID}-3000000000-impacto-0a1b2c3d`,
+      `2026-10-13/${ID.toUpperCase()}-27990-impacto-0a1b2c3d`,
+      `2026-10-13/${ID.slice(1)}-27990-impacto-0a1b2c3d`,
+      `2026-02-31/${ID}-27990-impacto-0a1b2c3d`,
+      `2026-1-3/${ID}-27990-impacto-0a1b2c3d`,
+      `2026-10-13\\${ID}-27990-impacto-0a1b2c3d`,
+      `../2026-10-13/${ID}-27990-impacto-0a1b2c3d`,
     ]) {
       expect(parseVideoObjectName(bad)).toBeNull();
     }
@@ -524,8 +524,8 @@ describe('nombre de los archivos', () => {
 
   it('la dirección pública es la del bucket público del proyecto', () => {
     expect(VIDEO_BUCKET).toBe('reels');
-    expect(videoPublicUrl(`2026-10-13/${ID}-27990-estudio-0a1b2c3d.mp4`)).toBe(
-      `${STORAGE_URL}/storage/v1/object/public/reels/2026-10-13/${ID}-27990-estudio-0a1b2c3d.mp4`
+    expect(videoPublicUrl(`2026-10-13/${ID}-27990-impacto-0a1b2c3d.mp4`)).toBe(
+      `${STORAGE_URL}/storage/v1/object/public/reels/2026-10-13/${ID}-27990-impacto-0a1b2c3d.mp4`
     );
     expect(videoPublicUrl('a.jpg', 'https://otro.test/')).toBe('https://otro.test/storage/v1/object/public/reels/a.jpg');
   });
@@ -646,8 +646,8 @@ describe('lo que el video dice y su huella', () => {
     expect(fingerprint).toBe('b4779f68');
     // La cuenta hecha a mano en este archivo da lo mismo que la del sitio.
     expect(printOf(p)).toBe(fingerprint);
-    const name = videoObjectName({ date: TODAY, productId: p.id, price: p.price, template: 'estudio', fingerprint });
-    expect(name).toBe(`${TODAY}/${p.id}-60000-estudio-b4779f68`);
+    const name = videoObjectName({ date: TODAY, productId: p.id, price: p.price, template: 'impacto', fingerprint });
+    expect(name).toBe(`${TODAY}/${p.id}-60000-impacto-b4779f68`);
     expect(name).toBe(fileOf(TODAY, p));
   });
 });
@@ -655,22 +655,28 @@ describe('lo que el video dice y su huella', () => {
 describe('plantillas', () => {
   const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
 
-  it('hoy son dos, "estudio" y "bloques", y de cada cuatro videos tres salen con "estudio"', () => {
-    expect(VIDEO_TEMPLATES).toEqual(['estudio', 'bloques']);
-    expect(VIDEO_TEMPLATE_WEIGHTS).toEqual({ estudio: 3, bloques: 1 });
+  it('hoy es una sola, "impacto": todos los videos del día salen con ella', () => {
+    expect(VIDEO_TEMPLATES).toEqual(['impacto']);
+    expect(VIDEO_TEMPLATE_WEIGHTS).toEqual({ impacto: 1 });
     for (const template of VIDEO_TEMPLATES) expect(template).toMatch(/^[a-z0-9]+$/);
     expect(assignVideoTemplates([], TODAY)).toEqual([]);
+    expect(assignVideoTemplates(['a', 'b', 'c', 'd'], TODAY)).toEqual(['impacto', 'impacto', 'impacto', 'impacto']);
+  });
+
+  it('con dos plantillas de pesos 3 y 1, de cada cuatro videos tres salen con la primera', () => {
+    const weights = { estudio: 3, bloques: 1 };
+    const pair = ['estudio', 'bloques'];
     for (let day = 1; day <= 28; day++) {
       const date = `2026-10-${String(day).padStart(2, '0')}`;
-      const four = assignVideoTemplates(['a', 'b', 'c', 'd'], date);
+      const four = assignVideoTemplates(['a', 'b', 'c', 'd'], date, new Map(), pair, weights);
       expect(four.filter((t) => t === 'estudio')).toHaveLength(3);
       expect(four.filter((t) => t === 'bloques')).toHaveLength(1);
       // Con uno o dos videos en el día, todos son de "estudio": "bloques" no le gana el turno.
-      expect(assignVideoTemplates(['a'], date)).toEqual(['estudio']);
-      expect(assignVideoTemplates(['a', 'b'], date)).toEqual(['estudio', 'estudio']);
+      expect(assignVideoTemplates(['a'], date, new Map(), pair, weights)).toEqual(['estudio']);
+      expect(assignVideoTemplates(['a', 'b'], date, new Map(), pair, weights)).toEqual(['estudio', 'estudio']);
     }
     // Ocho videos: seis y dos.
-    const eight = assignVideoTemplates(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], TODAY);
+    const eight = assignVideoTemplates(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], TODAY, new Map(), pair, weights);
     expect(eight.filter((t) => t === 'bloques')).toHaveLength(2);
   });
 
@@ -681,12 +687,12 @@ describe('plantillas', () => {
   });
 
   it('con pesos iguales se reparten parejo, y el mismo día con los mismos productos da siempre lo mismo', () => {
-    const two = ['estudio', 'ficha'];
+    const two = ['impacto', 'ficha'];
     const even = {};
     for (const date of ['2026-10-13', '2026-10-14', '2026-10-15', '2026-11-01']) {
       const assigned = assignVideoTemplates(ids, date, new Map(), two, even);
       expect(assigned).toEqual(assignVideoTemplates(ids, date, new Map(), two, even));
-      expect(assigned.filter((t) => t === 'estudio')).toHaveLength(3);
+      expect(assigned.filter((t) => t === 'impacto')).toHaveLength(3);
       expect(assigned.filter((t) => t === 'ficha')).toHaveLength(3);
     }
     // Con una cantidad que no calza, ninguna se usa dos veces más que otra.
@@ -698,13 +704,13 @@ describe('plantillas', () => {
   it('por cuál se empieza cambia con el día: el primero de la lista no sale siempre igual', () => {
     const first = new Set<string>();
     for (let day = 1; day <= 28; day++) {
-      first.add(assignVideoTemplates(['a'], `2026-10-${String(day).padStart(2, '0')}`, new Map(), ['estudio', 'ficha'], {})[0]);
+      first.add(assignVideoTemplates(['a'], `2026-10-${String(day).padStart(2, '0')}`, new Map(), ['impacto', 'ficha'], {})[0]);
     }
     expect(first.size).toBe(2);
   });
 
   it('un producto que ya tiene su video de hoy conserva la plantilla', () => {
-    const two = ['estudio', 'ficha'];
+    const two = ['impacto', 'ficha'];
     const already = new Map([
       ['a', 'ficha'],
       ['b', 'ficha'],
@@ -714,7 +720,7 @@ describe('plantillas', () => {
     const assigned = assignVideoTemplates(['a', 'b', 'c', 'd'], TODAY, already, two, {});
     expect(assigned.slice(0, 2)).toEqual(['ficha', 'ficha']);
     // Los que faltan compensan: quedan dos y dos.
-    expect(assigned.slice(2)).toEqual(['estudio', 'estudio']);
+    expect(assigned.slice(2)).toEqual(['impacto', 'impacto']);
   });
 });
 
@@ -799,8 +805,8 @@ describe('readVideoPicks', () => {
     expect(plan.date).toBe(TODAY);
     expect(plan.unreadHistory).toBe(0);
     expect(plan.picks).toHaveLength(4);
-    // De cada cuatro, tres con "estudio" y uno con "bloques".
-    expect(plan.picks.map((pick) => pick.template).sort()).toEqual(['bloques', 'estudio', 'estudio', 'estudio']);
+    // Hoy hay una sola plantilla: los cuatro con "impacto".
+    expect(plan.picks.map((pick) => pick.template)).toEqual(['impacto', 'impacto', 'impacto', 'impacto']);
     for (const pick of plan.picks) {
       // Las cuatro ofertas dicen lo mismo, así que llevan la misma huella.
       expect(pick.file).toBe(`${TODAY}/${pick.product.id}-60000-${pick.template}-884cc75c`);
@@ -966,7 +972,7 @@ describe('readVideoPicks', () => {
     // El de ayer no cuenta: hoy se arma de nuevo, con la hora de revisión de hoy.
     expect(exists.get(yesterdayOnly.id)).toBe(false);
     expect(exists.get(missing.id)).toBe(false);
-    // La plantilla la reparte el plan (3 de estudio por 1 de bloques): se lee de la respuesta.
+    // La plantilla la reparte el plan (hoy, todos con impacto): se lee de la respuesta.
     const repricedPick = plan.picks.find((pick) => pick.product.id === repriced.id);
     expect(repricedPick?.file).toBe(fileOf(TODAY, repriced, repriced.price, repricedPick?.template));
     // Una sola lectura del almacén: la carpeta de hoy.
@@ -991,7 +997,7 @@ describe('readVideoPicks', () => {
       fileOf(TODAY, withFull),
       fileOf(TODAY, { ...relisted, original_price: 120_000 }),
       fileOf(TODAY, dropped),
-      `${TODAY}/${legacy.id}-60000-estudio`,
+      `${TODAY}/${legacy.id}-60000-impacto`,
     ];
     const { admin } = fakeSite({ objects: stored(made) });
 
@@ -1027,7 +1033,7 @@ describe('readVideoPicks', () => {
     const plan = await readVideoPicks(fake.admin, NOW);
     expect(plan.picks).toHaveLength(1);
     expect(plan.picks[0].claims.descuento).toBe(40);
-    expect(plan.picks[0]).toMatchObject({ exists: false, file: `${TODAY}/${p.id}-60200-estudio-${printOf(p)}` });
+    expect(plan.picks[0]).toMatchObject({ exists: false, file: `${TODAY}/${p.id}-60200-impacto-${printOf(p)}` });
     expect(plan.picks[0].file).not.toBe(old);
 
     // Lo mismo por la ruta que lee el generador: no lo da por hecho y trae dónde subir el nuevo.
@@ -1047,7 +1053,7 @@ describe('readVideoPicks', () => {
   });
 
   it('la plantilla de un video de hoy se conserva solo si ese video dice lo mismo que diría ahora', async () => {
-    const two = ['estudio', 'ficha'];
+    const two = ['impacto', 'ficha'];
     const p = strong();
     // La que le tocaría hoy a este producto si no tuviera video, y la otra.
     const fresh = assignVideoTemplates([p.id], TODAY, new Map(), two)[0];
@@ -1156,7 +1162,7 @@ describe('el almacén', () => {
 
   it('firma la subida del video y de su portada, con reemplazo', async () => {
     const { admin, signed } = fakeSite();
-    const file = `${TODAY}/6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60-27990-estudio-0a1b2c3d`;
+    const file = `${TODAY}/6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60-27990-impacto-0a1b2c3d`;
     const uploads = await signVideoUploads(admin, file);
     expect(uploads.video).toBe(`${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.mp4?token=firma-1`);
     expect(uploads.cover).toBe(`${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.jpg?token=firma-2`);
@@ -1173,11 +1179,11 @@ describe('el almacén', () => {
     const id = '6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60';
     const { admin, objects } = fakeSite({
       objects: {
-        ...stored([`2026-10-13/${id}-1000-estudio`, `2026-10-12/${id}-1000-estudio`, `2026-10-11/${id}-1000-estudio`]),
+        ...stored([`2026-10-13/${id}-1000-impacto`, `2026-10-12/${id}-1000-impacto`, `2026-10-11/${id}-1000-impacto`]),
         // Justo tres días: se queda.
-        ...stored([`2026-10-10/${id}-1000-estudio`]),
+        ...stored([`2026-10-10/${id}-1000-impacto`]),
         // Cuatro días o más: se van, con todo lo que tengan adentro.
-        ...stored([`2026-10-09/${id}-1000-estudio`, `2026-10-09/${id}-2000-estudio`, `2026-09-30/${id}-1000-estudio`]),
+        ...stored([`2026-10-09/${id}-1000-impacto`, `2026-10-09/${id}-2000-impacto`, `2026-09-30/${id}-1000-impacto`]),
         '2026-10-09/suelto.txt': hoursAgo(100),
         // Lo que no es una carpeta con fecha no es de acá.
         'logo.png': hoursAgo(900),
@@ -1191,8 +1197,8 @@ describe('el almacén', () => {
     expect(await removeOldVideos(admin, NOW)).toBe(7);
     expect([...objects.keys()].sort()).toEqual(
       [
-        ...Object.keys(stored([`2026-10-13/${id}-1000-estudio`, `2026-10-12/${id}-1000-estudio`, `2026-10-11/${id}-1000-estudio`])),
-        ...Object.keys(stored([`2026-10-10/${id}-1000-estudio`])),
+        ...Object.keys(stored([`2026-10-13/${id}-1000-impacto`, `2026-10-12/${id}-1000-impacto`, `2026-10-11/${id}-1000-impacto`])),
+        ...Object.keys(stored([`2026-10-10/${id}-1000-impacto`])),
         'logo.png',
         'otros/2020-01-01.mp4',
         '2026-13-45/raro.mp4',
@@ -1206,7 +1212,7 @@ describe('el almacén', () => {
   it('si no se puede limpiar no lanza: el plan sale igual', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const id = '6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60';
-    const objects = stored([`2026-10-01/${id}-1000-estudio`]);
+    const objects = stored([`2026-10-01/${id}-1000-impacto`]);
 
     const noList = fakeSite({ objects, storageErrors: { list: { message: 'se cayó' } } });
     expect(await removeOldVideos(noList.admin, NOW)).toBe(0);
@@ -1271,9 +1277,9 @@ describe('readVideoBoard', () => {
       listPrice: 100_000,
       discount: 40,
       checkedAt: p.price_checked_at,
-      template: 'estudio',
-      videoUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio-b4779f68.mp4`,
-      coverUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-estudio-b4779f68.jpg`,
+      template: 'impacto',
+      videoUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-impacto-b4779f68.mp4`,
+      coverUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-impacto-b4779f68.jpg`,
       fileName: 'comparatech-audifonos-jbl-tune-520bt-reel.mp4',
       renderedAt: uploadedAt,
       // El mismo destino que el botón de compra del sitio.
@@ -1308,7 +1314,7 @@ describe('readVideoBoard', () => {
   it('un video armado con el nombre de antes, con el código de fábrica, ya no es el de hoy', async () => {
     const p = strong({ name: 'Samsung Asm-r390nidalta Smartwatch Galaxy Fit 3', brand: 'Samsung' });
     const before = sha256(JSON.stringify([VIDEO_LOOK_VERSION, shortProductName(p.name), 'Samsung', 100_000, 40, null, true, false])).slice(0, 8);
-    const { admin } = fakeSite({ products: [p], objects: stored([`${TODAY}/${p.id}-60000-estudio-${before}`]) });
+    const { admin } = fakeSite({ products: [p], objects: stored([`${TODAY}/${p.id}-60000-impacto-${before}`]) });
     const board = await readVideoBoard(admin, NOW);
     expect(board.videos).toEqual([]);
     expect(board.stale).toBe(1);
@@ -1318,8 +1324,8 @@ describe('readVideoBoard', () => {
     const p = strong({ name: 'Audífonos Bluetooth JBL Tune 520BT - Color Negro' });
     // Las mismas cifras, con la cuenta de antes: sin la versión adelante.
     const said = [reelProductName(p.name), 'JBL', 100_000, 40, null, true, false];
-    const old = `${TODAY}/${p.id}-60000-estudio-${sha256(JSON.stringify(said)).slice(0, 8)}`;
-    expect(old).toBe(`${TODAY}/${p.id}-60000-estudio-7b6ff293`);
+    const old = `${TODAY}/${p.id}-60000-impacto-${sha256(JSON.stringify(said)).slice(0, 8)}`;
+    expect(old).toBe(`${TODAY}/${p.id}-60000-impacto-7b6ff293`);
     expect(fileOf(TODAY, p)).not.toBe(old);
     catalog([p]);
     const fake = fakeSite({ products: [p], objects: stored([old]) });
@@ -1408,12 +1414,12 @@ describe('readVideoBoard', () => {
     const board = await readVideoBoard(admin, NOW);
     const byId = new Map(board.videos.map((video) => [video.id, video]));
     expect(board.videos).toHaveLength(3);
-    expect(byId.get(twice.id)?.videoUrl).toContain(`/${TODAY}/${twice.id}-60000-estudio-`);
+    expect(byId.get(twice.id)?.videoUrl).toContain(`/${TODAY}/${twice.id}-60000-impacto-`);
     expect(byId.get(twice.id)?.videoUrl).toContain(`/${fileOf(TODAY, twice)}.mp4`);
     expect(byId.get(twice.id)?.renderedAt).toBe(hoursAgo(3));
-    expect(byId.get(cheaper.id)?.videoUrl).toContain(`/${TODAY}/${cheaper.id}-55000-estudio-`);
+    expect(byId.get(cheaper.id)?.videoUrl).toContain(`/${TODAY}/${cheaper.id}-55000-impacto-`);
     expect(byId.get(cheaper.id)?.videoUrl).toContain(`/${fileOf(TODAY, cheaper)}.mp4`);
-    expect(byId.get(back.id)?.videoUrl).toContain(`/${YESTERDAY}/${back.id}-60000-estudio-`);
+    expect(byId.get(back.id)?.videoUrl).toContain(`/${YESTERDAY}/${back.id}-60000-impacto-`);
     expect(byId.get(back.id)?.videoUrl).toContain(`/${fileOf(YESTERDAY, back)}.mp4`);
     // Ninguno quedó fuera: cada producto tiene un video que sirve.
     expect(board.stale).toBe(0);
@@ -1451,7 +1457,7 @@ describe('readVideoBoard', () => {
     });
 
     const board = await readVideoBoard(admin, NOW);
-    expect(board.videos.map((video) => [video.id, video.template, video.renderedAt])).toEqual([[both.id, 'estudio', hoursAgo(4)]]);
+    expect(board.videos.map((video) => [video.id, video.template, video.renderedAt])).toEqual([[both.id, 'impacto', hoursAgo(4)]]);
     expect(board.stale).toBe(1);
     // Mientras esa plantilla se armaba, el mismo archivo sí se mostraba.
     const before = await withTemplates(['retirada'], () => readVideoBoard(admin, NOW));
@@ -1473,13 +1479,13 @@ describe('readVideoBoard', () => {
         [`${TODAY}/notas.txt`]: hoursAgo(1),
         [`${TODAY}/video.mp4`]: hoursAgo(1),
         [`${TODAY}/video.jpg`]: hoursAgo(1),
-        [`${TODAY}/${fine.id}-060000-estudio-${printOf(fine)}.mp4`]: hoursAgo(1),
-        [`${TODAY}/${fine.id}-060000-estudio-${printOf(fine)}.jpg`]: hoursAgo(1),
+        [`${TODAY}/${fine.id}-060000-impacto-${printOf(fine)}.mp4`]: hoursAgo(1),
+        [`${TODAY}/${fine.id}-060000-impacto-${printOf(fine)}.jpg`]: hoursAgo(1),
         [`${TODAY}/sub/${fileOf(TODAY, fine).split('/')[1]}.mp4`]: hoursAgo(1),
         // Un video completo con un nombre de antes de la huella: no se sabe qué dice, así que no es de acá.
-        ...stored([`${TODAY}/${coverOnly.id}-60000-estudio`], hoursAgo(1)),
+        ...stored([`${TODAY}/${coverOnly.id}-60000-impacto`], hoursAgo(1)),
         // Y uno con la huella mal escrita.
-        ...stored([`${TODAY}/${half.id}-60000-estudio-${printOf(half).toUpperCase()}x`], hoursAgo(1)),
+        ...stored([`${TODAY}/${half.id}-60000-impacto-${printOf(half).toUpperCase()}x`], hoursAgo(1)),
       },
     });
 
@@ -1657,7 +1663,7 @@ describe('readVideoBoard', () => {
   it('un video que el historial ya no respalda (decía una baja que hoy no consta) queda fuera y cuenta como viejo', async () => {
     const p = strong();
     // Se armó cuando el historial confirmaba una baja de 25%.
-    const { admin } = fakeSite({ products: [p], objects: stored([fileOf(TODAY, p, p.price, 'estudio', 25)]) });
+    const { admin } = fakeSite({ products: [p], objects: stored([fileOf(TODAY, p, p.price, 'impacto', 25)]) });
 
     vi.mocked(getPriceStatsMany).mockResolvedValue(new Map([[p.id, droppedFrom(60_000, 80_000)]]));
     expect((await readVideoBoard(admin, NOW)).videos.map((video) => video.id)).toEqual([p.id]);
@@ -1855,7 +1861,7 @@ describe('/api/social/videos/plan', () => {
     );
     // Con Full: no es la huella de las demás ofertas de este archivo.
     const file = fileOf(TODAY, p);
-    expect(file).not.toBe(`${TODAY}/${p.id}-60000-estudio-b4779f68`);
+    expect(file).not.toBe(`${TODAY}/${p.id}-60000-impacto-b4779f68`);
     expect(row).toEqual({
       id: p.id,
       slug: p.slug,
@@ -1873,7 +1879,7 @@ describe('/api/social/videos/plan', () => {
       puntos: expect.any(Number),
       motivo: expect.stringContaining('40% de descuento'),
       foto: 'https://http2.mlstatic.com/D_NQ_NP_123-F.jpg',
-      plantilla: 'estudio',
+      plantilla: 'impacto',
       archivo: file,
       ya_existe: false,
       subir: {
@@ -1956,8 +1962,8 @@ describe('/api/social/videos/plan', () => {
     catalog([p]);
     const fake = fakeSite({
       objects: {
-        ...stored([`2026-10-08/${p.id}-60000-estudio`, `2026-10-09/${p.id}-60000-estudio`]),
-        ...stored([`2026-10-10/${p.id}-60000-estudio`, `${YESTERDAY}/${p.id}-60000-estudio`]),
+        ...stored([`2026-10-08/${p.id}-60000-impacto`, `2026-10-09/${p.id}-60000-impacto`]),
+        ...stored([`2026-10-10/${p.id}-60000-impacto`, `${YESTERDAY}/${p.id}-60000-impacto`]),
       },
     });
     site.admin = fake.admin;
@@ -2057,7 +2063,7 @@ describe('/api/social/videos/plan', () => {
     // Cuatro ofertas que dicen cosas distintas: cuatro huellas.
     expect(new Set(rows.map((row) => row.archivo.slice(-8))).size).toBe(4);
     const byId = new Map(rows.map((row) => [row.id, row]));
-    // La plantilla la reparte assignVideoTemplates (3 de "estudio" por 1 de "bloques"): acá importa la huella.
+    // La plantilla la reparte assignVideoTemplates (hoy, todos con "impacto"): acá importa la huella.
     expect(byId.get(plain.id)?.archivo).toBe(`${TODAY}/${plain.id}-60000-${byId.get(plain.id)?.plantilla}-b4779f68`);
     expect(byId.get(full.id)).toMatchObject({ envio_gratis: true, full: true });
     expect(byId.get(dropped.id)).toMatchObject({

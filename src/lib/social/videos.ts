@@ -81,18 +81,16 @@ export const VIDEO_BOARD_MAX = 8;
  * que no esté allá no se arma, así que se agregan en los dos lados. Solo
  * letras minúsculas y números: el nombre viaja dentro del nombre del archivo.
  *
- * "estudio" ya da dos formatos según la foto del producto (alta o cuadrada,
- * como un celular; apaisada, como un televisor). "bloques" la aprobó el dueño
- * el 14-10-2026 para variar el diseño; assignVideoTemplates las reparte sola
- * entre los videos del día según VIDEO_TEMPLATE_WEIGHTS.
+ * Desde el 05-11-2026 es una sola, "impacto" (la de "estudio" con un gancho
+ * de precio arriba, letras más grandes y un cierre más corto): el dueño la
+ * aprobó el 04-11-2026 para todos los días. "estudio" y "bloques" siguen en
+ * scripts/reels/plantillas por si se vuelve a variar; con más de una,
+ * assignVideoTemplates las reparte sola según VIDEO_TEMPLATE_WEIGHTS.
  */
-export const VIDEO_TEMPLATES = ['estudio', 'bloques'] as const;
+export const VIDEO_TEMPLATES = ['impacto'] as const;
 
-/**
- * Cuántos videos de cada plantilla por vuelta: el dueño quiere "estudio" más
- * seguido que "bloques" (3 de cada 4). Una plantilla que no está acá pesa 1.
- */
-export const VIDEO_TEMPLATE_WEIGHTS: Readonly<Record<string, number>> = { estudio: 3, bloques: 1 };
+/** Cuántos videos de cada plantilla por vuelta. Una plantilla que no está acá pesa 1. */
+export const VIDEO_TEMPLATE_WEIGHTS: Readonly<Record<string, number>> = { impacto: 1 };
 
 /** ¿Es una plantilla que el generador arma hoy? Un video de una que se retiró ya no es el que saldría ahora. */
 function isCurrentTemplate(template: string): boolean {

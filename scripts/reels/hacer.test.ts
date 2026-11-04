@@ -59,7 +59,7 @@ const prohibidasEn = (texto: string) => PROHIBIDAS.filter((re) => re.test(sinTil
 
 describe('plantillas: "bloques"', () => {
   it('está registrada al lado de "estudio" y entrega lo mismo que ella', async () => {
-    expect(nombresDePlantillas()).toEqual(['estudio', 'bloques']);
+    expect(nombresDePlantillas()).toEqual(['estudio', 'bloques', 'impacto']);
     expect(existePlantilla('bloques')).toBe(true);
     const estudio = await cargarPlantilla('estudio');
     const bloques = await cargarPlantilla('bloques');
@@ -117,6 +117,60 @@ describe('plantillas: "bloques"', () => {
   }, SLOW);
 });
 
+describe('plantillas: "impacto" (la de todos los días desde el 05-11-2026)', () => {
+  it('entrega lo mismo que "estudio" y dura 9 segundos con gancho', async () => {
+    const estudio = await cargarPlantilla('estudio');
+    const impacto = await cargarPlantilla('impacto');
+    expect(Object.keys(impacto).sort()).toEqual(Object.keys(estudio).sort());
+    expect(impacto.CTA_POR_DEFECTO).toBe('Mándaselo a quien lo esté buscando');
+    const withHook = impacto.tiempos({ A: {} });
+    const withoutHook = impacto.tiempos({ A: null });
+    expect(withHook.fin).toBeCloseTo(9, 5);
+    expect(withoutHook.fin).toBeLessThan(withHook.fin);
+    for (const T of [withHook, withoutHook]) {
+      expect(T.portada).toBeLessThan(T.cierre);
+      expect(T.portada).toBeGreaterThan(T.pie + 0.4);
+      expect(impacto.momentos(T)).toHaveLength(8);
+    }
+  });
+
+  it('la frase del gancho redondea el precio hacia arriba, así siempre es cierta', async () => {
+    const { fraseDePrecio } = await import('./plantillas/impacto/escena.mjs');
+    expect(fraseDePrecio(299_990)).toBe('Por menos de $300 mil');
+    expect(fraseDePrecio(25_990)).toBe('Por menos de $26 mil');
+    expect(fraseDePrecio(709_990)).toBe('Por menos de $710 mil');
+    expect(fraseDePrecio(300_000)).toBe('Por menos de $310 mil');
+    expect(fraseDePrecio(999_990)).toBe('Por menos de $1 millón');
+    expect(fraseDePrecio(1_249_990)).toBe('Por menos de $1,3 millones');
+    expect(fraseDePrecio(9_990)).toBe('Por menos de $10 mil');
+    expect(fraseDePrecio(990)).toBeNull();
+    expect(fraseDePrecio(0)).toBeNull();
+  });
+
+  it('dice solo lo que trae el dato, con la letra chica en un renglón y nada que la marca no diga', async () => {
+    const antes = globalThis.fetch;
+    globalThis.fetch = () => Promise.reject(new Error('Sin red'));
+    try {
+      const P = await cargarPlantilla('impacto');
+      const dicho: Record<number, string[]> = {};
+      for (const n of [1, 5, 6]) {
+        const escena = await P.preparar(leerProducto(DATA, n), P.CTA_POR_DEFECTO);
+        dicho[n] = escena.dicho.map((d: string | { texto: string }) => (typeof d === 'string' ? d : d.texto));
+        expect(prohibidasEn(dicho[n].join(' | ')), `producto ${n}`).toEqual([]);
+        expect(dicho[n][0]).toBe('ComparaTech');
+        expect(dicho[n][dicho[n].length - 1]).toBe('Mándaselo a quien lo esté buscando');
+      }
+      expect(dicho[1].slice(1, 4)).toEqual(['Por menos de $220 mil', '45%', 'de descuento']);
+      expect(dicho[1]).toEqual(expect.arrayContaining(['$219.990', '−45%', 'sin descuento', '$399.990', 'Envío gratis', 'Full', 'Precio revisado en Mercado Libre 13/10 09:30']));
+      expect(dicho[5].slice(1, 4)).toEqual(['Por menos de $330 mil', 'Bajó 12%', 'según nuestro historial']);
+      expect(dicho[5].join(' | ')).not.toMatch(/descuento/);
+      expect(dicho[6]).toEqual(['ComparaTech', 'Parlante Bluetooth portátil', '$29.990', 'Precio en Mercado Libre', 'Mándaselo a quien lo esté buscando']);
+    } finally {
+      globalThis.fetch = antes;
+    }
+  }, SLOW);
+});
+
 function hacer(...args: string[]) {
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/reels/hacer.mjs'), ...args], { cwd: DIR, encoding: 'utf8' });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
@@ -154,7 +208,7 @@ describe('hacer.mjs: cuando no se puede armar', () => {
   it('una plantilla que no existe se dice antes de armar nada', () => {
     const r = hacer(DATA, '1', 'salida.mp4', '--plantilla', 'neon');
     expect(r.code).toBe(1);
-    expect(r.out).toContain('No existe la plantilla "neon". Las que hay: estudio, bloques.');
+    expect(r.out).toContain('No existe la plantilla "neon". Las que hay: estudio, bloques, impacto.');
     expect(leftovers()).toEqual([]);
   }, SLOW);
 
