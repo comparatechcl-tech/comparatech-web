@@ -163,14 +163,14 @@ export function CouponsView({ metaReady }: { metaReady: boolean }) {
             <li key={i} className="rounded-lg border border-border bg-bg p-3">
               <div className="grid grid-cols-2 gap-2">
                 <label className="col-span-2 text-xs text-muted">
-                  Código
+                  Código (vacío si el aviso no trae código)
                   <input
                     value={r.code}
                     onChange={(e) => edit(i, { code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
                     autoCapitalize="characters"
                     autoComplete="off"
                     maxLength={20}
-                    placeholder="ORBITA45"
+                    placeholder="Sin código"
                     className={`${INPUT} mt-1 font-semibold tracking-wide`}
                   />
                 </label>

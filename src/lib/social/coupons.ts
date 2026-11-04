@@ -17,7 +17,11 @@ export type CouponKind = 'monto' | 'porcentaje';
 export type MinWord = 'desde' | 'sobre';
 
 export interface Coupon {
-  /** El código tal como se ingresa al pagar: mayúsculas y números. */
+  /**
+   * El código tal como se ingresa al pagar: mayúsculas y números. Vacío en
+   * un cupón sin código, que Mercado Libre aplica solo al pagar ("cupón de
+   * $30.000 OFF en notebooks reacondicionados", aviso del 03-11-2026).
+   */
   code: string;
   kind: CouponKind;
   /** Pesos de descuento (monto) o el porcentaje (porcentaje). */
@@ -43,8 +47,8 @@ const isPesos = (n: unknown): n is number => typeof n === 'number' && Number.isS
 
 /** Por qué un cupón no sirve, o null si está bien. Los mensajes son para el dueño. */
 export function couponProblem(c: Coupon): string | null {
-  const name = c.code || 'Un cupón';
-  if (!CODE_RE.test(c.code)) return `${name}: el código va con letras mayúsculas y números, sin espacios (de 3 a 20).`;
+  const name = c.code || 'El cupón sin código';
+  if (c.code !== '' && !CODE_RE.test(c.code)) return `${name}: el código va con letras mayúsculas y números, sin espacios (de 3 a 20).`;
   if (c.kind !== 'monto' && c.kind !== 'porcentaje') return `${name}: falta si es en pesos o en porcentaje.`;
   if (c.kind === 'monto' && (!isPesos(c.value) || c.value < 100)) return `${name}: falta cuántos pesos de descuento da.`;
   if (c.kind === 'porcentaje' && (!Number.isInteger(c.value) || c.value < 1 || c.value > 90)) {
@@ -70,7 +74,7 @@ export function couponsProblem(coupons: Coupon[]): string | null {
   for (const c of coupons) {
     const problem = couponProblem(c);
     if (problem) return problem;
-    if (seen.has(c.code)) return `${c.code} está dos veces.`;
+    if (seen.has(c.code)) return c.code ? `${c.code} está dos veces.` : 'Va un solo cupón sin código.';
     seen.add(c.code);
   }
   return null;
@@ -129,12 +133,24 @@ export function couponDayLabel(day: number): string {
 }
 
 export const COUPON_FOOTER = 'Aplican a productos seleccionados por Mercado Libre. El código se ingresa al pagar.';
+/** Con algún cupón sin código, el pie dice dónde aparece el descuento. */
+export const COUPON_FOOTER_NO_CODE = 'Aplican a productos seleccionados por Mercado Libre. El descuento aparece al pagar.';
+
+/** Lo que va en el lugar del código: el código, o "Sin código" si se aplica solo. */
+export function couponCodeLabel(c: Pick<Coupon, 'code'>): string {
+  return c.code || 'Sin código';
+}
+
+/** El pie de la imagen, según si todos los cupones traen código. */
+export function couponFooter(coupons: Pick<Coupon, 'code'>[]): string {
+  return coupons.every((c) => c.code) ? COUPON_FOOTER : COUPON_FOOTER_NO_CODE;
+}
 
 /** El texto de cada red, igual al de los cupones del 26-10-2026. Facebook lleva el link; Instagram, "link en el perfil". */
 export function couponCaptions(coupons: Coupon[], day: number, siteUrl: string): { instagram: string; facebook: string } {
   const lines = coupons.map((c) => {
     const condition = couponConditionText(c);
-    return `${c.code}: ${couponDiscountText(c)}${condition ? ` ${condition}` : ''}`;
+    return `${couponCodeLabel(c)}: ${couponDiscountText(c)}${condition ? ` ${condition}` : ''}`;
   });
   const head = `🎟️ Cupones de Mercado Libre para hoy, ${couponDayLabel(day)}:\n\n${lines.join('\n')}\n\nAplican a productos seleccionados por Mercado Libre: el descuento aparece al pagar si tu producto entra.`;
   const tags = '#mercadolibre #cupones #chile #tecnologia';
@@ -209,7 +225,34 @@ export function parseCouponText(text: string): Coupon[] {
     // Sin ningún número cerca no es un cupón: es una palabra en mayúsculas del aviso.
     if (coupon.value) out.push(coupon);
   }
+  if (out.length === 0) {
+    const noCode = readNoCodeCoupon(src);
+    if (noCode) out.push(noCode);
+  }
   return out;
+}
+
+/**
+ * Un aviso sin código: "Se activó un cupón de $30.000 OFF en notebooks
+ * reacondicionados seleccionados". Se lee el monto (o el porcentaje) que va
+ * junto a "cupón" y, como aclaración, a qué productos aplica.
+ */
+const NO_CODE_RE =
+  /cupon(?:es)?\s+de\s+\*?\s*(\$\s?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:\s?(?:mil|k)\b)?|\d{1,2}\s?%)\*?(?:\s*(?:off|de descuento|de dcto\.?))?([^\n.!:]*)/i;
+/** "en notebooks reacondicionados seleccionados, ideal…" → "notebooks reacondicionados". */
+const WHERE_RE = /^\s*en\s+([a-z0-9 ]+?)(?:\s+seleccionad[oa]s?\b|\s*,|\s*$)/i;
+
+function readNoCodeCoupon(src: string): Coupon | null {
+  const m = NO_CODE_RE.exec(src);
+  if (!m) return null;
+  const coupon = readTerms('', `${m[1]}${m[2]}`);
+  if (!coupon.value) return null;
+  const where = WHERE_RE.exec(m[2].replace(/[*_~]/g, ''));
+  if (where && !coupon.note) {
+    const note = `en ${where[1].trim().replace(/\s+/g, ' ')}`.toLowerCase();
+    if (note.length <= COUPON_NOTE_MAX && !/compras?\s+(?:desde|sobre)/.test(note)) coupon.note = note;
+  }
+  return coupon;
 }
 
 function readTerms(code: string, segment: string): Coupon {
@@ -251,7 +294,7 @@ function readTerms(code: string, segment: string): Coupon {
 
 /** Con qué se anota en la actividad: los mismos cupones el mismo día dan siempre lo mismo. */
 export function couponPublishTarget(day: number, coupons: Pick<Coupon, 'code'>[]): string {
-  return `cupones:${day}:${coupons.map((c) => c.code).join('.')}`;
+  return `cupones:${day}:${coupons.map((c) => c.code || 'SINCODIGO').join('.')}`;
 }
 
 /** Dónde se publican los cupones: el feed de Instagram, una historia de Instagram y la página de Facebook. */

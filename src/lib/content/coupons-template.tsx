@@ -12,7 +12,7 @@
  * Necesita Inter en 400, 600 y 800 (lib/content/og-fonts).
  */
 import { LOGO_PNG, W600, W800, textWidth } from '@/lib/content/offer-template';
-import { COUPON_FOOTER, couponConditionText, couponDayLabel, couponDiscountText, type Coupon } from '@/lib/social/coupons';
+import { couponCodeLabel, couponFooter, couponConditionText, couponDayLabel, couponDiscountText, type Coupon } from '@/lib/social/coupons';
 import type { CouponFormat } from '@/lib/social/coupons-url';
 
 export const COUPON_SIZES: Record<CouponFormat, { width: number; height: number }> = {
@@ -133,10 +133,10 @@ export function CouponPiece({ coupons, day, format }: { coupons: Coupon[]; day: 
         {coupons.map((c, i) => {
           const condition = couponConditionText(c);
           // Un código muy largo se achica para que no se salga de la tarjeta.
-          const codeSize = Math.min(l.code, Math.floor((l.code * CARD_TEXT_W) / textWidth(c.code, W800, l.code, 2)));
+          const codeSize = Math.min(l.code, Math.floor((l.code * CARD_TEXT_W) / textWidth(couponCodeLabel(c), W800, l.code, 2)));
           return (
             <div
-              key={c.code}
+              key={c.code || `sin-codigo-${i}`}
               style={{
                 ...fix,
                 flexDirection: 'column',
@@ -148,7 +148,7 @@ export function CouponPiece({ coupons, day, format }: { coupons: Coupon[]; day: 
                 padding: `${l.cardPadY}px ${CARD_PAD_X}px`,
               }}
             >
-              <div style={{ display: 'flex', fontSize: codeSize, lineHeight: 1.2, fontWeight: 800, color: C.cyan, letterSpacing: 2 }}>{c.code}</div>
+              <div style={{ display: 'flex', fontSize: codeSize, lineHeight: 1.2, fontWeight: 800, color: C.cyan, letterSpacing: 2 }}>{couponCodeLabel(c)}</div>
               <div style={{ display: 'flex', marginTop: 8, fontSize: l.discount, lineHeight: 1.25, fontWeight: 600 }}>{couponDiscountText(c)}</div>
               {condition && (
                 <div style={{ display: 'flex', marginTop: 4, fontSize: l.condition, lineHeight: 1.3, color: C.muted }}>{condition}</div>
@@ -158,7 +158,7 @@ export function CouponPiece({ coupons, day, format }: { coupons: Coupon[]; day: 
         })}
       </div>
       <div style={{ display: 'flex', flexGrow: 1, minHeight: 32 }} />
-      <div style={{ ...fix, fontSize: 31, lineHeight: 1.35, color: C.muted }}>{COUPON_FOOTER}</div>
+      <div style={{ ...fix, fontSize: 31, lineHeight: 1.35, color: C.muted }}>{couponFooter(coupons)}</div>
     </div>
   );
 }

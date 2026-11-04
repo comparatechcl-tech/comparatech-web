@@ -30,17 +30,20 @@ export default async function CuponesPage() {
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         <li>
-          En WhatsApp, mantén apretado el aviso de cupones del canal y toca <strong>Copiar</strong>.
+          En WhatsApp, mantén apretado el aviso de cupones del canal y toca <strong>Copiar</strong>. Sirven los de
+          tecnología; los de belleza, ropa o fechas se saltan.
         </li>
         <li>
           Pégalo abajo y toca <strong>Leer cupones</strong>. Revisa que cada código, monto y compra mínima calce con el
-          aviso. Si no los leyó bien, corrígelos a mano.
+          aviso. Si no los leyó bien, corrígelos a mano. Si el cupón no trae código (se aplica solo al pagar), deja el
+          código vacío.
         </li>
         <li>
           Toca <strong>Armar imágenes</strong> y mira cómo quedaron.
         </li>
         <li>
           Toca <strong>Publicar</strong>. No hace falta sticker ni link: el código se ingresa al pagar en Mercado Libre.
+          Los links tinyurl del aviso son de Mercado Libre, no tuyos: no los compartas.
         </li>
       </ol>
 

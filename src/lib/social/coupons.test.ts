@@ -4,6 +4,7 @@ import {
   couponCaptions,
   couponConditionText,
   couponDiscountText,
+  couponFooter,
   couponProblem,
   couponPublishTarget,
   couponsProblem,
@@ -163,5 +164,42 @@ describe('destinos y registro', () => {
 
   it('el mismo día y los mismos códigos dan siempre el mismo registro', () => {
     expect(couponPublishTarget(20261026, [coupon(), coupon({ code: 'GALAXIA20' })])).toBe('cupones:20261026:ORBITA45.GALAXIA20');
+  });
+});
+
+describe('cupones sin código (aviso del 03-11-2026)', () => {
+  const aviso = [
+    'Les dejamos un datazo fuerte en computación para compartir hoy con su comunidad:',
+    '',
+    'Se activó un cupón de *$30.000 OFF* en notebooks reacondicionados seleccionados, ideal para quienes buscan renovar equipo de trabajo o estudio con un ahorro real:',
+    '',
+    '💻 *Computación Reacondicionada*',
+    '💻 *HP Elite Dragonfly G2 2-en-1 Convertible (i5 / Win 11 Pro)*',
+    '🔥 *57% OFF*',
+    '💰 De ~$1.104.393~ a *$473.471*',
+    '🏷️ Con cupón en checkout: queda en *$443.471* (¡más de *$650.000 de ahorro total*!)',
+    '👉 https://tinyurl.com/tb4v9e7t',
+  ].join('\n');
+
+  it('lee el monto y a qué productos aplica', () => {
+    expect(parseCouponText(aviso)).toEqual([
+      coupon({ code: '', value: 30000, min: 0, minWord: 'desde', note: 'en notebooks reacondicionados' }),
+    ]);
+  });
+
+  it('se acepta sin código, solo uno, y los textos dicen "Sin código"', () => {
+    const c = coupon({ code: '', value: 30000, min: 0, note: 'en notebooks reacondicionados' });
+    expect(couponProblem(c)).toBeNull();
+    expect(couponsProblem([c, { ...c }])).toMatch(/un solo cupón sin código/);
+    expect(couponsProblem([c, coupon()])).toBeNull();
+    const { instagram } = couponCaptions([c], 20261103, 'https://www.comparatech.cl/');
+    expect(instagram).toContain('Sin código: $30.000 de descuento en notebooks reacondicionados');
+    expect(couponPublishTarget(20261103, [c])).toBe('cupones:20261103:SINCODIGO');
+    expect(couponFooter([c])).toMatch(/aparece al pagar/);
+    expect(couponFooter([coupon()])).toMatch(/código se ingresa al pagar/);
+  });
+
+  it('un aviso con código sigue leyendo el código', () => {
+    expect(parseCouponText('Con cupón BELLEZA (10% extra): queda en $89.991').map((c) => c.code)).toEqual(['BELLEZA']);
   });
 });
