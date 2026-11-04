@@ -146,6 +146,22 @@ async function armarNombre(producto, apaisada, dicho) {
   dicho.push(nombre.filas.join(' '));
   const ultima = B.nombre[B.nombre.length - 1];
   B.alto = Math.round(ultima.y + lineaBase(nombre.tam, nombre.alto) + 0.22 * nombre.tam);
+  // impacto: "Envío gratis" y "Full" van aquí, bajo el nombre, y no en la escena del precio (el dueño, 04-11-2026:
+  // "se ve muy junto"). Cada momento dice poco y se lee de un vistazo.
+  B.etiquetas = [];
+  const lista = [];
+  if (producto.envioGratis) lista.push(await capas.etiquetaEnvio(false));
+  if (producto.full) lista.push(await capas.etiquetaFull(false));
+  if (lista.length) {
+    let xe = 0;
+    const ye = B.alto + 40;
+    for (const capa of lista) {
+      B.etiquetas.push({ capa, x: xe, y: ye });
+      dicho.push(capa.texto);
+      xe += capa.w + 18;
+    }
+    B.alto = ye + lista[0].h;
+  }
   B.relleno = Math.round(40 - (B.kicker ? arribaDeLetra(B.kicker.capa.tam, 44) : arribaDeLetra(nombre.tam, nombre.alto)));
   return B;
 }
@@ -153,21 +169,15 @@ async function armarNombre(producto, apaisada, dicho) {
 // --- C. El precio -------------------------------------------------------------------------------------------
 async function armarPrecio(producto, dicho) {
   const C = { nombre: [], pastilla: null, lista: [], tachado: null, etiquetas: [], pie: [] };
-  // Nombre, más chico que en B: aquí manda el precio.
-  const pasos = [52, 48, 44, 40, 37].map((tam) => ({ tam, alto: tam + 8, espaciado: -0.014 * tam }));
-  const nombre = await capas.bloque(producto.nombre, { anchoMax: ANCHO_TEXTO, peso: 600, pasos });
-  C.nombre = nombre.capas.map((capa, i) => ({ capa, y: i * nombre.alto }));
-  if (!dicho.includes(nombre.filas.join(' '))) dicho.push(nombre.filas.join(' '));
-  // Con aire entre cada cosa (el dueño, 20-10-2026: "se ve todo pegado"); la foto se achica lo que haga falta.
-  // impacto: más aire todavía (el dueño, 04-11-2026: "se ve todo muy saturado y junto"). La hoja sube lo que
-  // haga falta en esta escena y la foto se achica.
-  let y = nombre.capas.length * nombre.alto + 34;
+  // impacto: aquí van solo el precio, el descuento y una línea de letra chica, con harto aire (el dueño,
+  // 04-11-2026: "se ve todo muy saturado y junto"). El nombre y las etiquetas ya salieron en B.
+  let y = 0;
 
   // El precio, en unos 170 px. Cae desde más grande: el tamaño más grande con que cabe sin pasar de x=924.
   const precio = await capas.capaPrecio(producto.precio, { anchoMax: ANCHO_TEXTO, tamMax: 196 });
   C.precio = { capa: precio, y, desde: limitar((ANCHO_TEXTO - 2) / (precio.tinta.x1 + 1), 1, 1.36) };
   dicho.push(precio.texto);
-  y += precio.h + 40;
+  y += precio.h + 44;
 
   // La fila del descuento: pastilla grande ("−45%"), al lado "sin descuento" sobre "$399.990" (la cifra tachada
   // que pone el vendedor, que se tacha). Las etiquetas van en su propio renglón, debajo: apiladas al lado se veía
@@ -178,7 +188,7 @@ async function armarPrecio(producto, dicho) {
     if (producto.full) lista.push(await capas.etiquetaFull(chicas));
     return lista;
   };
-  const hayEtiquetas = producto.envioGratis || producto.full;
+  const hayEtiquetas = false; // impacto: las etiquetas van en B
   const conLista = Boolean(producto.descuento);
   const textoPastilla = conLista ? `${MENOS}${producto.descuento}%` : producto.bajaHistorial ? `Bajó ${producto.bajaHistorial}%` : null;
   let etiquetasAbajo = hayEtiquetas;
@@ -229,7 +239,7 @@ async function armarPrecio(producto, dicho) {
         ye += 54;
       }
     }
-    y += altoFila + 40;
+    y += altoFila + 60;
   }
   if (etiquetasAbajo) {
     // Sin fila de descuento (o si al lado no cabían): las etiquetas van en su propio renglón.
@@ -255,7 +265,7 @@ async function armarPrecio(producto, dicho) {
     dicho.push(nota);
   }
   C.alto = Math.round(y + (notas.length - 1) * 48 + lineaBase(34, 42) + 2);
-  C.relleno = Math.round(56 - arribaDeLetra(nombre.tam, nombre.alto));
+  C.relleno = Math.round(64 - precio.tinta.y0);
   return C;
 }
 
@@ -392,7 +402,7 @@ export function tiempos(conGancho) {
   T.ganchoSale = conGancho ? 1.4 : null; // el gancho se va (termina de irse a los 1,68)
   T.cambio = conGancho ? [1.5, 2.0] : null; // la hoja y la foto se acomodan para el nombre
   T.nombre = conGancho ? 1.78 : -1; // entran la marca y el nombre
-  T.sube = conGancho ? 2.9 : 2.2; // la hoja sube para el precio
+  T.sube = conGancho ? 3.2 : 2.5; // la hoja sube para el precio (impacto: el nombre lleva también las etiquetas)
   T.nombreSale = T.sube - 0.08;
   T.subida = [T.sube, T.sube + 0.32]; // rápido: cuando el precio empieza a caer la hoja ya casi llegó
   T.precio = T.sube + 0.22; // el precio empieza a caer...
@@ -415,7 +425,7 @@ export function momentos(T) {
   return [
     { t: 0, rotulo: 'cuadro 0 (portada)' },
     g ? { t: 0.9, rotulo: 'gancho' } : { t: 1.2, rotulo: 'nombre y marca' },
-    g ? { t: 2.5, rotulo: 'nombre y marca' } : { t: T.precio + 0.1, rotulo: 'el precio cae' },
+    g ? { t: 2.8, rotulo: 'nombre y etiquetas' } : { t: T.precio + 0.1, rotulo: 'el precio cae' },
     { t: T.golpe + 0.04, rotulo: 'golpe del precio' },
     { t: T.golpe + 0.62, rotulo: 'después del golpe' },
     { t: T.portada, rotulo: 'precio completo' },
@@ -528,6 +538,7 @@ export function pintor(escena, T) {
         const yy = o + y;
         poner(dst, capa, x, yy + (1 - e) * capa.h * 0.85, Math.min(1, entra * 3.5) * (1 - saleB), [x, yy, x + capa.w, yy + capa.h]);
       });
+      B.etiquetas.forEach((e, i) => asomar(dst, e.capa, x + e.x, o + e.y, fase(t, T.nombre + 0.4 + 0.1 * i, T.nombre + 0.7 + 0.1 * i), 14, 1 - saleB));
     }
 
     // C. El precio. Se apaga cuando la hoja sube al cierre.

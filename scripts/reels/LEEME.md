@@ -113,8 +113,8 @@ Hay tres: `estudio` (la primera, más tranquila), `bloques` (más enérgica, ver
 decide cuál usa cada video del día (`VIDEO_TEMPLATES` en `src/lib/social/videos.ts`): desde el 05-11-2026 solo
 `impacto`, que el dueño aprobó el 04-11 para todos los días. `impacto` es `estudio` con más fuerza: arriba del
 descuento "Por menos de $300 mil" (el precio redondeado hacia arriba a dos cifras, así siempre es cierto),
-números y letras más grandes, más aire en la escena del precio (el dueño: "se ve todo muy saturado y junto"; ahí
-la hoja sube y la foto se achica), la letra chica en un renglón ("Precio revisado en Mercado Libre 04/11 09:00"),
+números y letras más grandes y la información repartida (el dueño: "se ve todo muy saturado y junto"): el nombre
+va con "Envío gratis" y "Full" debajo, y la escena del precio lleva solo el precio, el descuento y la letra chica en un renglón ("Precio revisado en Mercado Libre 04/11 09:00"),
 la llamada "Mándaselo a quien lo esté buscando" y un cierre más corto: 9 segundos con gancho. Las otras dos se
 arman a mano con `--plantilla` y vuelven a la lista si el dueño quiere variar.
 
