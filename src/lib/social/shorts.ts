@@ -45,6 +45,8 @@ export interface ShortsPost {
 
 export interface ShortsPlan {
   listo: boolean;
+  /** A qué hora programar (ahora más 15 minutos), como lo pide Metricool. */
+  programar_para?: { date: string; publicationDate: { dateTime: string; timezone: 'America/Santiago' } };
   /** Por qué no hay nada que programar (si listo es false). */
   motivo?: string;
   producto?: { id: string; nombre: string; precio: number };
@@ -147,10 +149,36 @@ const empty = (motivo: string, monthCount: number | null): ShortsPlan => ({
   cupo_mes: METRICOOL_MONTHLY_FREE,
 });
 
+/** Las publicaciones se programan desde las 9:00 y hasta antes de las 22:00 de Chile. */
+export const SHORTS_HOURS = { from: 9, to: 22 } as const;
+/** Cuánto después de ahora se programa: Metricool no acepta una hora pasada. */
+export const SHORTS_DELAY_MS = 15 * 60_000;
+
+/** Un instante en hora de Chile: '2026-11-05T13:15:00-03:00' y la hora del día. */
+export function chileLocal(at: Date): { iso: string; local: string; hour: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Santiago',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'longOffset',
+  }).formatToParts(at);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  const local = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
+  const offset = get('timeZoneName').replace('GMT', '') || '+00:00';
+  return { iso: `${local}${offset}`, local, hour: Number(get('hour')) };
+}
+
 /** Qué programar hoy, con lo ya leído. Puro. */
 export function planShorts(input: ShortsInput): ShortsPlan {
   const { now, state, product, marks, monthCount } = input;
   const today = chileDay(now);
+  const { hour } = chileLocal(now);
+  if (hour < SHORTS_HOURS.from || hour >= SHORTS_HOURS.to) return empty('Fuera de horario: se programa entre las 9:00 y las 22:00.', monthCount);
   if (!state || state.day !== today) return empty('Hoy todavía no sale el reel diario en Instagram ni Facebook.', monthCount);
   if (state.instagram?.status !== 'publicado' && state.facebook?.status !== 'publicado') {
     return empty('El reel de hoy todavía no está publicado en Instagram ni en Facebook.', monthCount);
@@ -203,6 +231,10 @@ export function planShorts(input: ShortsInput): ShortsPlan {
   }
   plan.listo = plan.publicaciones.length > 0;
   if (!plan.listo) plan.motivo = 'Hoy no queda ninguna red en la que se pueda programar.';
+  else {
+    const at = chileLocal(new Date(now.getTime() + SHORTS_DELAY_MS));
+    plan.programar_para = { date: at.iso, publicationDate: { dateTime: at.local, timezone: 'America/Santiago' } };
+  }
   return plan;
 }
 

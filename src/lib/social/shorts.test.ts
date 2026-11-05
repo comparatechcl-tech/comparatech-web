@@ -6,7 +6,7 @@ vi.mock('react', async (importOriginal) => ({
 }));
 
 import type { DailyState } from './meta-daily';
-import { METRICOOL_MONTHLY_FREE, chileMonthStart, planShorts, shortsMetricoolInfo, type ShortsInput } from './shorts';
+import { METRICOOL_MONTHLY_FREE, chileLocal, chileMonthStart, planShorts, shortsMetricoolInfo, type ShortsInput } from './shorts';
 import type { SocialProduct } from './telegram';
 
 /**
@@ -75,6 +75,11 @@ describe('planShorts', () => {
     const plan = planShorts(input());
     expect(plan.listo).toBe(true);
     expect(plan.video).toBe(VIDEO);
+    // 13:00 de Chile más 15 minutos, con el desfase del horario de verano.
+    expect(plan.programar_para).toEqual({
+      date: '2026-11-05T13:15:00-03:00',
+      publicationDate: { dateTime: '2026-11-05T13:15:00', timezone: 'America/Santiago' },
+    });
     expect(plan.publicaciones.map((p) => p.red)).toEqual(['tiktok', 'youtube']);
     const [tiktok, youtube] = plan.publicaciones;
     expect(tiktok.metricool.media).toEqual([VIDEO]);
@@ -128,6 +133,19 @@ describe('planShorts', () => {
     expect(one.omitidas[0].motivo).toMatch(/cupo/);
     expect(planShorts(input({ monthCount: METRICOOL_MONTHLY_FREE })).listo).toBe(false);
     expect(planShorts(input({ monthCount: null })).motivo).toMatch(/contar/);
+  });
+});
+
+describe('horario', () => {
+  it('fuera de las 9:00 a 22:00 de Chile no programa', () => {
+    expect(planShorts(input({ now: new Date('2026-11-05T11:30:00Z') })).motivo).toMatch(/Fuera de horario/);
+    expect(planShorts(input({ now: new Date('2026-11-06T01:10:00Z') })).motivo).toMatch(/Fuera de horario/);
+    expect(planShorts(input({ now: new Date('2026-11-05T12:05:00Z') })).listo).toBe(true);
+  });
+
+  it('chileLocal da la hora de Chile con su desfase, en verano y en invierno', () => {
+    expect(chileLocal(new Date('2026-11-05T16:00:00Z'))).toEqual({ iso: '2026-11-05T13:00:00-03:00', local: '2026-11-05T13:00:00', hour: 13 });
+    expect(chileLocal(new Date('2026-07-15T16:00:00Z')).iso).toBe('2026-07-15T12:00:00-04:00');
   });
 });
 
