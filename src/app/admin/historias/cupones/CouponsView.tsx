@@ -8,6 +8,7 @@ import {
   COUPON_NOTE_MAX,
   COUPON_TARGETS,
   COUPON_TARGET_LABEL,
+  isCouponNotice,
   parseCouponText,
   type Coupon,
   type CouponTarget,
@@ -81,6 +82,11 @@ export function CouponsView({ metaReady }: { metaReady: boolean }) {
   const edit = (i: number, patch: Partial<Row>) => change(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   function readText() {
+    if (text.trim() && !isCouponNotice(text)) {
+      change([{ ...EMPTY }]);
+      setReadNote('Este aviso no es de cupones: no dice "cupón" ni "código". Los avisos de productos en oferta no van aquí.');
+      return;
+    }
     const found = parseCouponText(text);
     if (found.length === 0) {
       setReadNote('No encontré códigos en el texto. Escríbelos abajo, uno por cupón.');

@@ -8,6 +8,7 @@ import {
   couponProblem,
   couponPublishTarget,
   couponsProblem,
+  isCouponNotice,
   parseCouponTargets,
   parseCouponText,
   toCoupons,
@@ -47,10 +48,10 @@ describe('parseCouponText', () => {
   });
 
   it('entiende "mil" y "k", y la compra mínima escrita de varias formas', () => {
-    expect(parseCouponText('CYBER15 15 mil de descuento por compras mayores a $150.000')).toEqual([
+    expect(parseCouponText('Cupón CYBER15: 15 mil de descuento por compras mayores a $150.000')).toEqual([
       coupon({ code: 'CYBER15', value: 15000, min: 150000, minWord: 'sobre' }),
     ]);
-    expect(parseCouponText('Usa TECNO5 y ahorra $5k con compra mínima de $50.000')).toEqual([
+    expect(parseCouponText('Usa el código TECNO5 y ahorra $5k con compra mínima de $50.000')).toEqual([
       coupon({ code: 'TECNO5', value: 5000, min: 50000, minWord: 'desde' }),
     ]);
   });
@@ -72,7 +73,7 @@ describe('parseCouponText', () => {
   });
 
   it('el código en una línea y lo que da en la siguiente', () => {
-    expect(parseCouponText('ORBITA45\n$45.000 OFF en compras sobre $500.000\nVálidos hasta agotar stock')).toEqual([coupon()]);
+    expect(parseCouponText('Cupón ORBITA45\n$45.000 OFF en compras sobre $500.000\nVálidos hasta agotar stock')).toEqual([coupon()]);
   });
 
   it('no toma por código las palabras comunes en mayúsculas ni lo que no trae montos', () => {
@@ -82,7 +83,7 @@ describe('parseCouponText', () => {
   });
 
   it('no repite un código y deja a lo más COUPON_MAX', () => {
-    const text = ['A1A $1.000', 'B2B $2.000', 'C3C $3.000', 'D4D $4.000', 'E5E $5.000', 'A1A $1.000'].join('\n');
+    const text = ['Cupones de hoy', 'A1A $1.000', 'B2B $2.000', 'C3C $3.000', 'D4D $4.000', 'E5E $5.000', 'A1A $1.000'].join('\n');
     expect(parseCouponText(text).map((c) => c.code)).toEqual(['A1A', 'B2B', 'C3C', 'D4D'].slice(0, COUPON_MAX));
   });
 });
@@ -201,5 +202,40 @@ describe('cupones sin código (aviso del 03-11-2026)', () => {
 
   it('un aviso con código sigue leyendo el código', () => {
     expect(parseCouponText('Con cupón BELLEZA (10% extra): queda en $89.991').map((c) => c.code)).toEqual(['BELLEZA']);
+  });
+});
+
+describe('avisos que no son de cupones (05-11-2026)', () => {
+  // El aviso del canal que salió publicado como cupón: dos televisores en oferta.
+  const deals = [
+    'Buen dia, Afiliados! Les dejamos dos datazos en televisores con rebajas fuertisimas para que compartan hoy con su comunidad:',
+    'Samsung 55" Mini LED M70H 4K Vision AI Smart TV 2026',
+    '48% OFF',
+    'De $629.990 a $329.990',
+    'https://tinyurl.com/5947na3n',
+    'Smart TV LED 43" Google TV Full HD Bluetooth MG43FFK5 Master-G 2026',
+    '37% OFF',
+    'De $299.990 a $189.990',
+    'https://tinyurl.com/23ve9ehy',
+    'Tip para afiliados: Armar una encuesta en historias.',
+  ].join('\n');
+
+  it('un aviso de productos en oferta no trae cupones', () => {
+    expect(isCouponNotice(deals)).toBe(false);
+    expect(parseCouponText(deals)).toEqual([]);
+  });
+
+  it('se reconoce un aviso de cupones con o sin tilde', () => {
+    expect(isCouponNotice('Nuevos cupones de Mercado Libre')).toBe(true);
+    expect(isCouponNotice('Usa el código ORBITA45')).toBe(true);
+    expect(isCouponNotice('CODIGO: ORBITA45')).toBe(true);
+    expect(isCouponNotice('Se activó un cupón de $30.000 OFF')).toBe(true);
+    expect(isCouponNotice('Recuperar la cuponera')).toBe(false);
+  });
+
+  it('"4K" no es plata: solo "$5k" o "15 mil"', () => {
+    expect(parseCouponText('Código TELE10: 10% de descuento en televisores 4K')).toEqual([
+      coupon({ code: 'TELE10', kind: 'porcentaje', value: 10, cap: 0, min: 0, minWord: 'desde' }),
+    ]);
   });
 });

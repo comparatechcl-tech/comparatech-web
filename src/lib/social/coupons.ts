@@ -174,7 +174,8 @@ const NOT_CODES = new Set([
 
 /** Fin de línea, o punto seguido de mayúscula, número o $ ("$500.000. GALAXIA20"; no "dcto. en"). */
 const SENTENCE_RE = /\n|[.!?;](?=\s+[A-Z0-9$])/;
-const HAS_AMOUNT_RE = /\$\s?\d|\d\s?%|\d\s?(mil|k)\b/i;
+// "k" solo con "$" adelante ("$5k"): sin él, "4K" es la resolución de un televisor.
+const HAS_AMOUNT_RE = /\$\s?\d|\d\s?%|\d\s?mil\b/i;
 
 const strip = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 
@@ -186,12 +187,24 @@ function readPesos(num: string, unit: string | undefined): number {
 }
 
 /**
- * Los cupones que se reconocen en el texto pegado, en orden. Un código es una
+ * ¿El aviso habla de cupones? Tiene que decir "cupón" o "código" en alguna
+ * parte. El canal también manda avisos de productos en oferta ("Samsung 55"
+ * Mini LED M70H 4K… 48% OFF"): ahí el modelo parece un código y el 4K un
+ * monto, y el 05-11-2026 eso salió publicado como cupón.
+ */
+export function isCouponNotice(text: string): boolean {
+  return /(^|[^a-z])(cupon|cupones|codigo|codigos)([^a-z]|$)/i.test(strip(String(text ?? '')));
+}
+
+/**
+ * Los cupones que se reconocen en el texto pegado, en orden. Solo si el aviso
+ * habla de cupones (isCouponNotice). Un código es una
  * palabra en mayúsculas con algún número (ORBITA45), o de 6 letras o más que
  * no sea una palabra común. Lo que dice cada uno se lee del pedazo de texto
  * que va desde su código hasta el siguiente.
  */
 export function parseCouponText(text: string): Coupon[] {
+  if (!isCouponNotice(text)) return [];
   const src = strip(String(text ?? '')).slice(0, 4000);
   const codeRe = /(^|[^A-Za-z0-9])([A-Z][A-Z0-9]{2,19})(?![A-Za-z0-9])/g;
   const found: { code: string; at: number; end: number }[] = [];
@@ -260,8 +273,9 @@ function readTerms(code: string, segment: string): Coupon {
   const coupon: Coupon = { code, kind: 'monto', value: 0, cap: 0, min: 0, minWord: 'desde', note: '' };
 
   const pct = /(\d{1,2})\s?%/.exec(segment);
-  // Montos: con $ adelante, o con "mil"/"k" detrás.
-  const amountRe = /\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(\s?(?:mil|k)\b)?|(\d{1,3})\s?(mil|k)\b/gi;
+  // Montos: con $ adelante ("$45.000", "$45 mil", "$5k"), o con "mil" detrás
+  // ("15 mil"). Un número con "k" y sin "$" no es plata: "4K" es la resolución.
+  const amountRe = /\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(\s?(?:mil|k)\b)?|(\d{1,3})\s?(mil)\b/gi;
   const amounts: { value: number; before: string; at: number }[] = [];
   let a: RegExpExecArray | null;
   while ((a = amountRe.exec(segment)) !== null) {
