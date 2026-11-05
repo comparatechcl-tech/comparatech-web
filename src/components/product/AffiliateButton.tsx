@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   SRC_STORAGE_KEY,
   clickDedupKey,
+  hrefForSource,
   linkModeFromHref,
   placementFromPath,
   type Placement,
@@ -88,10 +89,31 @@ export function AffiliateButton({
     }
   }
 
+  /**
+   * Desde ChatGPT, el link lleva la etiqueta de ChatGPT (hrefForSource). Se
+   * cambia justo antes de abrirlo: la página guardada es la misma para todos.
+   */
+  function retag(e: MouseEvent<HTMLAnchorElement>) {
+    try {
+      const next = hrefForSource(href, sessionStorage.getItem(SRC_STORAGE_KEY));
+      if (next !== href) e.currentTarget.href = next;
+    } catch {
+      // Sin sessionStorage: sale con la etiqueta de siempre.
+    }
+  }
+
+  function handleClick(e: MouseEvent<HTMLAnchorElement>) {
+    retag(e);
+    track();
+  }
+
   function handleAuxClick(e: MouseEvent<HTMLAnchorElement>) {
     // Clic con la rueda (abre en otra pestaña). El clic derecho también
     // dispara auxclick y no abre nada: ese no se cuenta.
-    if (e.button === 1) track();
+    if (e.button === 1) {
+      retag(e);
+      track();
+    }
   }
 
   return (
@@ -104,7 +126,7 @@ export function AffiliateButton({
           ? `Ver ${productName} en Mercado Libre (se abre en otra pestaña)`
           : 'Ver en Mercado Libre (se abre en otra pestaña)'
       }
-      onClick={track}
+      onClick={handleClick}
       onAuxClick={handleAuxClick}
       className={`inline-flex items-center justify-center gap-1.5 rounded-xl bg-mlYellow px-5 py-3 font-heading font-semibold text-[#1a1400] transition hover:brightness-95 ${className}`}
     >

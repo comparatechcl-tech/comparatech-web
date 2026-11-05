@@ -117,6 +117,37 @@ const GUIDE_PLACEMENTS = new Map<string, Placement>([
   ['notebook-para-la-universidad', 'guia-notebook'],
 ]);
 
+/**
+ * La etiqueta de Mercado Libre (matt_word) para las visitas que llegan desde
+ * ChatGPT. El dueño la creó el 05-11-2026 en el Administrador de etiquetas
+ * (letra A del plan): así la Central dice cuántas ventas vienen de ahí. La
+ * etiqueta "en uso" del panel sigue siendo comparatech. Para volver atrás,
+ * basta con dejar esto en null.
+ */
+export const CHATGPT_MATT_WORD: string | null = 'ctchatgpt';
+
+/** Los orígenes guardados (normalizeSrc) que son ChatGPT. */
+const CHATGPT_SOURCES = new Set(['chatgpt.com', 'chatgpt', 'chat.openai.com']);
+
+/**
+ * El link de compra según de dónde llegó la visita: desde ChatGPT, un link
+ * directo a Mercado Libre lleva la etiqueta de ChatGPT. Solo se cambia el
+ * valor de matt_word, con texto, sin rearmar el link: lo demás llega a
+ * Mercado Libre exactamente igual. Un link corto (meli.la) no se puede
+ * cambiar y queda como está.
+ */
+export function hrefForSource(href: string, src: string | null, word: string | null = CHATGPT_MATT_WORD): string {
+  if (!word || !src || !CHATGPT_SOURCES.has(src.toLowerCase())) return href;
+  let host: string;
+  try {
+    host = new URL(href).hostname.toLowerCase();
+  } catch {
+    return href;
+  }
+  if (host !== 'mercadolibre.cl' && !host.endsWith('.mercadolibre.cl')) return href;
+  return href.replace(/([?&]matt_word=)[^&#]*/, `$1${word}`);
+}
+
 /** Qué tipo de link abrió el comprador: el acortador o la ficha directa. */
 export function linkModeFromHref(href: string): LinkMode {
   let url: URL;

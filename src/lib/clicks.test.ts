@@ -5,6 +5,7 @@ import {
   chileDateKey,
   chileDayStart,
   isBotUserAgent,
+  hrefForSource,
   linkModeFromHref,
   normalizeSrc,
   parseClickBody,
@@ -351,5 +352,34 @@ describe('clickClientKey', () => {
 
   it('sin secreto no arma llave (un hash sin sal de una IP se puede revertir)', () => {
     expect(clickClientKey(headers('200.1.2.3'), day, '')).toBeNull();
+  });
+});
+
+describe('hrefForSource (etiqueta de ChatGPT)', () => {
+  const direct =
+    'https://www.mercadolibre.cl/p/MLC123?matt_word=comparatech&matt_tool=12345678&forceInApp=true#origin=share';
+
+  it('desde ChatGPT, un link directo lleva la etiqueta ctchatgpt y lo demás queda igual', () => {
+    expect(hrefForSource(direct, 'chatgpt.com')).toBe(
+      'https://www.mercadolibre.cl/p/MLC123?matt_word=ctchatgpt&matt_tool=12345678&forceInApp=true#origin=share'
+    );
+    expect(hrefForSource('https://articulo.mercadolibre.cl/MLC-1?a=1&matt_word=comparatech', 'chatgpt')).toBe(
+      'https://articulo.mercadolibre.cl/MLC-1?a=1&matt_word=ctchatgpt'
+    );
+  });
+
+  it('de cualquier otro origen, o sin origen, el link no cambia', () => {
+    for (const src of [null, 'instagram', 'telegram', 'google', 'chatgpt.com.evil']) expect(hrefForSource(direct, src)).toBe(direct);
+  });
+
+  it('no toca links cortos, otros dominios ni links sin etiqueta', () => {
+    expect(hrefForSource('https://meli.la/2abcd', 'chatgpt.com')).toBe('https://meli.la/2abcd');
+    expect(hrefForSource('https://evil.example/?matt_word=comparatech', 'chatgpt.com')).toBe('https://evil.example/?matt_word=comparatech');
+    expect(hrefForSource('https://www.mercadolibre.cl/p/MLC123', 'chatgpt.com')).toBe('https://www.mercadolibre.cl/p/MLC123');
+    expect(hrefForSource('no es un link', 'chatgpt.com')).toBe('no es un link');
+  });
+
+  it('con la etiqueta apagada (null) nunca cambia', () => {
+    expect(hrefForSource(direct, 'chatgpt.com', null)).toBe(direct);
   });
 });
