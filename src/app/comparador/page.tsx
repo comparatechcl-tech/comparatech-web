@@ -13,7 +13,12 @@ export const metadata: Metadata = {
 
 // La página es estática: ?a= y ?b= los lee el comparador en el navegador
 // (ver CompareClient), así una visita no cuesta una consulta a Supabase.
-export const revalidate = 300;
+// Cada hora (antes cada 5 minutos), como los datos que lee: el catálogo se
+// guarda 1 hora y la revisión de precios purga todo el sitio cuando algo
+// visible cambia. El 05-11-2026 el sitio iba en 155% de la CPU gratis de
+// Vercel y 140% de las escrituras de páginas: armar cada 5 minutos lo mismo
+// era la mayor parte.
+export const revalidate = 3600;
 
 export default async function ComparadorPage() {
   const catalog = await getCatalogProducts();

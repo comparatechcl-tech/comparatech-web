@@ -65,13 +65,13 @@ export async function generateStaticParams() {
     .map((p) => ({ slug: p.slug }));
 }
 
-// Se vuelve a armar a lo más cada hora, y apenas cambia un precio: el
+// Se vuelve a armar a lo más cada 2 horas, y apenas cambia un precio: el
 // refresco (cada 2 horas) invalida todo el sitio cuando algo visible cambió.
-// Antes era cada 5 minutos, y con los robots recorriendo las 1.300 fichas
-// era CPU de Vercel gastada en armar lo mismo (el plan gratuito llegó a su
-// límite el 26-10-2026). Los productos nuevos, agregados después del build,
+// Antes era cada 5 minutos y después cada hora; con los robots recorriendo
+// las fichas era CPU de Vercel gastada en armar lo mismo (155% de la CPU
+// gratis el 05-11-2026). Los productos nuevos, agregados después del build,
 // se arman al vuelo la primera vez que alguien entra (dynamicParams).
-export const revalidate = 3600;
+export const revalidate = 7200;
 
 /** Lo que ve el comprador según por qué el producto salió de venta. */
 const INACTIVE_MESSAGES: Record<InactiveReason, string> = {

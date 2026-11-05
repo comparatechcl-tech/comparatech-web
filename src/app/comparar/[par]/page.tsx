@@ -42,7 +42,12 @@ export function generateStaticParams() {
 export const dynamicParams = false;
 
 // Como las páginas de modelo: los precios se revisan cada 30 minutos.
-export const revalidate = 300;
+// Cada hora (antes cada 5 minutos), como los datos que lee: el catálogo se
+// guarda 1 hora y la revisión de precios purga todo el sitio cuando algo
+// visible cambia. El 05-11-2026 el sitio iba en 155% de la CPU gratis de
+// Vercel y 140% de las escrituras de páginas: armar cada 5 minutos lo mismo
+// era la mayor parte.
+export const revalidate = 3600;
 
 const day = (t: number) => formatDayMonth(new Date(t).toISOString());
 

@@ -37,9 +37,12 @@ export async function generateStaticParams() {
   return (await getSiteCategoriesWithCounts(1)).map((c) => ({ categoria: c.slug }));
 }
 
-// Revalida cada 5 minutos para que el catálogo se actualice solo cuando
-// cambien los productos en Supabase, sin necesitar un redeploy manual.
-export const revalidate = 300;
+// Cada hora (antes cada 5 minutos), como los datos que lee: el catálogo se
+// guarda 1 hora y la revisión de precios purga todo el sitio cuando algo
+// visible cambia. El 05-11-2026 el sitio iba en 155% de la CPU gratis de
+// Vercel y 140% de las escrituras de páginas: armar cada 5 minutos lo mismo
+// era la mayor parte.
+export const revalidate = 3600;
 
 /** La categoría si tiene al menos un producto visible; si no, undefined. */
 async function findCategory(slug: string) {

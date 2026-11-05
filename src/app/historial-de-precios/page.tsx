@@ -21,7 +21,12 @@ export const metadata: Metadata = {
 };
 
 // Las bajas y los precios más bajos salen del historial y de las ofertas del día: se rearman cada 5 minutos.
-export const revalidate = 300;
+// Cada hora (antes cada 5 minutos), como los datos que lee: el catálogo se
+// guarda 1 hora y la revisión de precios purga todo el sitio cuando algo
+// visible cambia. El 05-11-2026 el sitio iba en 155% de la CPU gratis de
+// Vercel y 140% de las escrituras de páginas: armar cada 5 minutos lo mismo
+// era la mayor parte.
+export const revalidate = 3600;
 
 /**
  * "Historial de precios de Mercado Libre" (SEO etapa 2, punto 2): responde

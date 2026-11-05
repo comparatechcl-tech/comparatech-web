@@ -36,10 +36,13 @@ const WEBSITE_JSON_LD = jsonLdString({
 });
 
 // Revalida sola: así el catálogo se actualiza (sin tener que hacer un
-// redeploy manual) cuando se cargan productos nuevos en Supabase. En la
-// práctica se regenera cada minuto y no cada 5: manda el caché más corto de
-// lo que la página lee (el catálogo, 60 segundos, en lib/queries/products).
-export const revalidate = 300;
+// redeploy manual) cuando se cargan productos nuevos en Supabase.
+// Cada hora (antes cada 5 minutos), como los datos que lee: el catálogo se
+// guarda 1 hora y la revisión de precios purga todo el sitio cuando algo
+// visible cambia. El 05-11-2026 el sitio iba en 155% de la CPU gratis de
+// Vercel y 140% de las escrituras de páginas: armar cada 5 minutos lo mismo
+// era la mayor parte.
+export const revalidate = 3600;
 
 const BENEFITS = [
   'Comparación lado a lado',
