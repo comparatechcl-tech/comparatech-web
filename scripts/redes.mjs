@@ -5,6 +5,7 @@
  *   node scripts/redes.mjs plan [cantidad]      → qué publicar (JSON)
  *   node scripts/redes.mjs plan --producto <id> → el plan de ese producto (su historia, o volver a publicarlo)
  *   node scripts/redes.mjs registrar <archivo>  → anota lo programado en Metricool
+ *   node scripts/redes.mjs shorts               → el reel de hoy para TikTok y YouTube (JSON)
  *
  * El archivo de `registrar` es { "publicaciones": [{ "product_id", "canal",
  * "programado_para" (con zona horaria), "metricool_id" (el uuid de la
@@ -139,6 +140,38 @@ async function plan(site, secret, count, productId) {
   return data;
 }
 
+/**
+ * ¿Se puede bajar el video? Metricool no avisa si no pudo bajarlo, así que
+ * se pide el comienzo del archivo y se mira que sea un video.
+ */
+async function checkVideo(url) {
+  try {
+    const res = await fetch(url, { headers: { Range: 'bytes=0-1023' }, redirect: 'error', signal: AbortSignal.timeout(40_000) });
+    if (res.status !== 200 && res.status !== 206) return `respondió ${res.status}`;
+    const type = res.headers.get('content-type') ?? '';
+    if (!type.startsWith('video/')) return `no es un video (${type || 'sin tipo'})`;
+    await res.body?.cancel();
+    return null;
+  } catch (err) {
+    return `no se pudo bajar (${err instanceof Error ? err.message : 'error'})`;
+  }
+}
+
+async function shorts(site, secret) {
+  const data = JSON.parse(await call(site, secret, '/api/social/videos/hoy'));
+  data.se_puede_programar = site === PRODUCTION && data.listo === true;
+  if (site !== PRODUCTION) data.aviso = `Plan solo para mirar: se pidió a ${site}, no a ${PRODUCTION}.`;
+  if (data.listo && data.video) {
+    const problem = await checkVideo(data.video);
+    data.video_ok = problem === null;
+    if (problem) {
+      data.video_problema = problem;
+      data.se_puede_programar = false;
+    }
+  }
+  return data;
+}
+
 const args = process.argv.slice(2);
 const siteFlag = args.indexOf('--sitio');
 const siteOverride = siteFlag >= 0 ? args.splice(siteFlag, 2)[1] : null;
@@ -153,6 +186,8 @@ const site = resolveSite(siteOverride);
 
 if (command === 'plan') {
   console.log(JSON.stringify(await plan(site, secret, value, productId), null, 2));
+} else if (command === 'shorts') {
+  console.log(JSON.stringify(await shorts(site, secret), null, 2));
 } else if (command === 'registrar' && value) {
   let body;
   try {
@@ -169,5 +204,5 @@ if (command === 'plan') {
     })
   );
 } else {
-  fail('Uso: node scripts/redes.mjs plan [cantidad]  |  node scripts/redes.mjs registrar <archivo.json>');
+  fail('Uso: node scripts/redes.mjs plan [cantidad]  |  node scripts/redes.mjs shorts  |  node scripts/redes.mjs registrar <archivo.json>');
 }
