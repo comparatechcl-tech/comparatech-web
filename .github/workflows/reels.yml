@@ -58,7 +58,7 @@ permissions:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,10 +73,20 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      # El 05-11-2026 apt se quedó pegado 15 minutos y la corrida se canceló
+      # sin videos: ese día no salió el reel a su hora. Cada intento tiene su
+      # tope, y si uno se pega se prueba otra vez.
       - name: Instalar ffmpeg
+        timeout-minutes: 12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          for i in 1 2 3; do
+            if timeout 120 sudo apt-get update -o Acquire::Retries=3 \
+              && timeout 180 sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 ffmpeg; then
+              break
+            fi
+            echo "::warning::No se pudo instalar ffmpeg (intento $i de 3)"
+            sleep 15
+          done
           ffmpeg -version | head -n 1
 
       - name: Armar y subir los videos
