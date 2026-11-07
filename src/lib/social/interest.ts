@@ -935,6 +935,8 @@ export function pickVaried<
     minPoints?: number;
     /** Otro orden en vez del de interés. Tiene que desempatar siempre (por id al final). */
     order?: (a: T, b: T) => number;
+    /** Un cupo distinto para algunas categorías (por ejemplo, más gaming en historias). */
+    perCategoryFor?: Readonly<Record<string, number>>;
   }
 ): T[] {
   const floor = limits.minPoints ?? MIN_INTEREST_POINTS;
@@ -957,7 +959,8 @@ export function pickVaried<
       if (picked.size >= limits.max) break;
       if (picked.has(item.id)) continue;
       if (item.familyId && families.has(item.familyId)) continue;
-      if ((perCategory.get(item.category) ?? 0) >= limits.perCategory) continue;
+      const categoryCap = limits.perCategoryFor?.[item.category] ?? limits.perCategory;
+      if ((perCategory.get(item.category) ?? 0) >= categoryCap) continue;
       const typeKey = item.score.typeKey;
       const brandKey = item.score.brandKey;
       if (strict && typeKey && (perType.get(typeKey) ?? 0) >= limits.perType) continue;

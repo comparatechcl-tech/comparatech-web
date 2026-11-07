@@ -325,7 +325,7 @@ function filteringAdmin(tables: Record<string, Row[]>) {
   return admin;
 }
 
-describe('las marcas de video no cuentan como historias', () => {
+describe('las marcas de video y las historias', () => {
   const mark = (id: number, productId: string, channel: string, caption: string | null, hoursAgo: number, price = 60_000): Row => ({
     id,
     product_id: productId,
@@ -349,22 +349,28 @@ describe('las marcas de video no cuentan como historias', () => {
     expect([...history.keys()]).toEqual(['con-historia']);
   });
 
-  it('la oferta de un video ya subido se sigue proponiendo como historia', async () => {
+  it('lo ya subido como video o en el carrusel no se propone como historia, salvo que haya vuelto a bajar (07-11-2026)', async () => {
     const withVideo = strong({ category: 'audio' });
+    const inCarousel = strong({ category: 'hogar' });
+    const droppedAgain = strong({ category: 'celulares' });
     const withStory = strong({ category: 'gaming' });
-    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [withVideo, withStory], error: null });
+    const untouched = strong({ category: 'computacion' });
+    vi.mocked(readFreshSocialProducts).mockResolvedValue({ rows: [withVideo, inCarousel, droppedAgain, withStory, untouched], error: null });
     const admin = filteringAdmin({
       social_posts: [
-        mark(1, withVideo.id, 'instagram', VIDEO_MARK, 2),
-        mark(2, withVideo.id, 'facebook', VIDEO_MARK, 2),
-        mark(3, withStory.id, 'instagram', STORY_MARK, 2),
+        mark(1, withVideo.id, 'instagram', VIDEO_MARK, 2, withVideo.price),
+        mark(2, withVideo.id, 'facebook', VIDEO_MARK, 2, withVideo.price),
+        mark(3, inCarousel.id, 'instagram', 'carrusel', 30, inCarousel.price),
+        // Salió en video a un precio 10% más alto: hoy es noticia otra vez.
+        mark(4, droppedAgain.id, 'instagram', VIDEO_MARK, 48, Math.round(droppedAgain.price / 0.9)),
+        mark(5, withStory.id, 'instagram', STORY_MARK, 2, withStory.price),
       ],
     });
 
     const items = await readStoryPicks(admin, NOW, KEY);
-    expect(items.map((item) => item.id)).toEqual([withVideo.id]);
+    expect(items.map((item) => item.id).sort()).toEqual([droppedAgain.id, untouched.id].sort());
     // Y no vuelve como "ya la subiste a tanto": nunca se subió como historia.
-    expect(items[0].again).toBeNull();
+    expect(items.every((item) => item.again === null)).toBe(true);
   });
 
   it('la lista de historias de las últimas 24 horas no muestra los videos', async () => {
@@ -614,7 +620,8 @@ describe('readStoryPicks', () => {
       const category = rows.find((p) => p.id === item.id)!.category;
       perCategory.set(category, (perCategory.get(category) ?? 0) + 1);
     }
-    expect(Math.max(...perCategory.values())).toBe(2);
+    // Gaming puede llevar 3 (pedido del dueño, 07-11-2026); el resto, 2.
+    for (const [category, count] of perCategory) expect(count).toBeLessThanOrEqual(category === 'gaming' ? 3 : 2);
     // Las otras 17 califican igual y esperan su turno.
     expect(items.waiting).toBe(17);
   });

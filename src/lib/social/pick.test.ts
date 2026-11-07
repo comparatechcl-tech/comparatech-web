@@ -438,7 +438,7 @@ describe('las reglas de cada canal', () => {
 
     it.each(CHANNELS)('en %s, 39 puntos con la señal máxima no entran; 41 sí, y la señal lo sube en el orden', (_channel, rules) => {
       const below = lifted(MIN_INTEREST_POINTS - 1, 6, { category: 'audio' });
-      const above = lifted(MIN_INTEREST_POINTS + 1, 6, { category: 'gaming' });
+      const above = lifted(MIN_INTEREST_POINTS + 1, 6, { category: 'computacion' });
       const rival = scored(MIN_INTEREST_POINTS + 4, { category: 'hogar' });
 
       // El de 39 suma 45 con las señales, más que el rival, y aun así no entra.
@@ -449,7 +449,7 @@ describe('las reglas de cada canal', () => {
       expect(pickByRules([below], opts(), rules)).toEqual([]);
 
       // El mismo de 41 sin la señal va después del rival: la señal ordena.
-      const plain = scored(MIN_INTEREST_POINTS + 1, { category: 'gaming' });
+      const plain = scored(MIN_INTEREST_POINTS + 1, { category: 'computacion' });
       expect(ids(pickByRules([plain, rival], opts(), rules))).toEqual([rival.id, plain.id]);
     });
 
@@ -583,5 +583,27 @@ describe('pickByRules con el puntaje de verdad', () => {
       expect(pick.score.warning).toBeNull();
       expect(pick.drop).toBe(25);
     }
+  });
+});
+
+describe('más gaming en historias y videos (pedido del dueño, 07-11-2026)', () => {
+  it('gaming sube 8 puntos en el orden, sin cambiar su puntaje ni el piso', () => {
+    const consola = scored(MIN_INTEREST_POINTS + 10, { category: 'gaming' });
+    const speaker = scored(MIN_INTEREST_POINTS + 15, { category: 'audio' });
+    for (const rules of [STORY_RULES, VIDEO_RULES]) {
+      const picks = pickByRules([speaker, consola], opts(), rules);
+      expect(ids(picks)).toEqual([consola.id, speaker.id]);
+      expect(picks[0].score.points).toBe(MIN_INTEREST_POINTS + 10);
+    }
+    // En el feed y en Telegram el orden sigue siendo el de los puntos.
+    expect(ids(pickByRules([speaker, consola], opts(), NETWORK_RULES))).toEqual([speaker.id, consola.id]);
+    // Bajo el piso no entra aunque sea gaming.
+    expect(pickByRules([scored(MIN_INTEREST_POINTS - 1, { category: 'gaming' })], opts(), STORY_RULES)).toEqual([]);
+  });
+
+  it('gaming puede ocupar 3 cupos; las demás categorías, 2', () => {
+    const games = Array.from({ length: 5 }, (_, i) => scored(MIN_INTEREST_POINTS + 20 - i, { category: 'gaming', brand: `Marca ${i}` }));
+    const picks = pickByRules(games, opts(), { ...STORY_RULES, perType: 99 });
+    expect(picks).toHaveLength(3);
   });
 });

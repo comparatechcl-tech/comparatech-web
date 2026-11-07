@@ -9,8 +9,10 @@ import { readSocialEvidence } from '@/lib/social/drops';
 import type { InterestScore } from '@/lib/social/interest';
 import { mlCheckUrl } from '@/lib/social/live-price';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
+import { ANY_FORMAT_REPEAT_DAYS, readPublishedAnyFormat, stillPublished } from '@/lib/social/published-any';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
 import {
+  GAMING_EMPHASIS,
   isOnSale,
   pickByRules,
   readFreshSocialProducts,
@@ -41,6 +43,7 @@ export const STORY_RULES: PickRules & { repeatAfterDays: number } = {
   maxPosts: 8,
   /** El dueño ve el aviso en la tarjeta antes de subirla: decide él. */
   cleanOnly: false,
+  ...GAMING_EMPHASIS,
 };
 
 /**
@@ -216,6 +219,7 @@ const ALL_THAT_QUALIFY = {
   perCategory: Number.MAX_SAFE_INTEGER,
   perType: Number.MAX_SAFE_INTEGER,
   perBrand: Number.MAX_SAFE_INTEGER,
+  perCategoryFor: undefined,
 };
 
 /**
@@ -238,6 +242,11 @@ export async function readStoryPicks(admin: SupabaseClient, now: Date, key: Buff
   for (const p of read.rows) {
     if (history.has(p.id) && !droppedSinceStory(history.get(p.id), p.price)) alreadyPosted.add(p.id);
   }
+  // Lo que salió como reel o en el carrusel tampoco se sugiere, salvo que haya
+  // vuelto a bajar (pedido del dueño, 07-11-2026). Lo ya subido como historia
+  // sigue la regla de arriba, que además avisa "Ya la subiste".
+  const published = await readPublishedAnyFormat(admin, new Date(now.getTime() - ANY_FORMAT_REPEAT_DAYS * 86_400_000));
+  for (const id of stillPublished(published, read.rows)) if (!history.has(id)) alreadyPosted.add(id);
   // Después de saber qué se subió: el historial de precios de eso no hace falta leerlo.
   const evidence = await readSocialEvidence(admin, read.rows, now, alreadyPosted);
 

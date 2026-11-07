@@ -349,7 +349,24 @@ export interface PickRules {
    * interés, la exclusión ni los avisos. La puerta de entrada sí.
    */
   anyScore?: boolean;
+  /**
+   * Puntos extra, solo para ordenar, por categoría del sitio. No cuentan para
+   * el piso de interés ni cambian el puntaje que se muestra.
+   */
+  categoryBoost?: Readonly<Record<string, number>>;
+  /** Un cupo distinto de `perCategory` para algunas categorías. */
+  perCategoryFor?: Readonly<Record<string, number>>;
 }
+
+/**
+ * Gaming primero en historias y videos: el dueño pidió el 07-11-2026 más
+ * énfasis en consolas y juegos. Ordena y deja un cupo más; el piso y el
+ * puntaje no cambian.
+ */
+export const GAMING_EMPHASIS: Pick<PickRules, 'categoryBoost' | 'perCategoryFor'> = {
+  categoryBoost: { gaming: 8 },
+  perCategoryFor: { gaming: 3 },
+};
 
 export interface PickOptions {
   now: Date;
@@ -475,12 +492,18 @@ export function pickByRules<T extends SocialProduct>(
     });
   }
 
+  const boost = rules.categoryBoost;
+  const boosted = (c: (typeof candidates)[number]) => c.score.points + (boost?.[c.category] ?? 0);
   return pickVaried(candidates, {
     max: rules.maxPosts,
     perCategory: rules.perCategory,
     perType: rules.perType ?? DEFAULT_PER_TYPE,
     perBrand: rules.perBrand ?? DEFAULT_PER_BRAND,
     minPoints: rules.anyScore ? -Infinity : undefined,
+    perCategoryFor: rules.perCategoryFor,
+    order: boost
+      ? (a, b) => boosted(b) - boosted(a) || b.commission - a.commission || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      : undefined,
   }).map((c) => c.pick);
 }
 

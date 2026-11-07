@@ -13,6 +13,7 @@ import { interestScore, type InterestEvidence } from '@/lib/social/interest';
 import { mlCheckUrl, postedPriceShift } from '@/lib/social/live-price';
 import { NETWORK_RULES, VIDEO_MARK } from '@/lib/social/networks';
 import {
+  GAMING_EMPHASIS,
   evidenceDrop,
   isOnSale,
   pickByRules,
@@ -22,6 +23,7 @@ import {
   type SocialProduct,
   type TelegramPick,
 } from '@/lib/social/telegram';
+import { ANY_FORMAT_REPEAT_DAYS, readPublishedAnyFormat, stillPublished } from '@/lib/social/published-any';
 
 /**
  * Videos cortos de oferta (reels) que se suben a mano desde /admin/videos.
@@ -68,6 +70,7 @@ export const VIDEO_RULES: PickRules & { repeatAfterDays: number } = {
    * (la tablet del 15 y el 31-10).
    */
   repeatAfterDays: 30,
+  ...GAMING_EMPHASIS,
 };
 
 /** Cuántos videos puede pedir el generador de una vez. */
@@ -652,6 +655,10 @@ export async function readVideoPicks(admin: SupabaseClient, now: Date, n: number
   // porque la selección compara cada producto con el resto de su modelo.
   const skip = new Set<string>(marks.keys());
   for (const p of read.rows) if (!videoPhoto(p.image_url)) skip.add(p.id);
+  // Lo que salió como historia o en el carrusel en los últimos 14 días
+  // tampoco, salvo que haya vuelto a bajar (pedido del dueño, 07-11-2026).
+  const published = await readPublishedAnyFormat(admin, new Date(now.getTime() - ANY_FORMAT_REPEAT_DAYS * DAY_MS));
+  for (const id of stillPublished(published, read.rows)) skip.add(id);
 
   const evidence = await readSocialEvidence(admin, read.rows, now, skip);
   const picked = pickByRules(read.rows, { now, recentlyPosted: skip, evidence }, { ...VIDEO_RULES, maxPosts: max });

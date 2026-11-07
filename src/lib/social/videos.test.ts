@@ -873,8 +873,8 @@ describe('readVideoPicks', () => {
         videoMark(uploaded.id, 'youtube', daysAgo(29)),
         videoMark(longAgo.id, 'instagram', daysAgo(31)),
         videoMark(undone.id, 'tiktok', daysAgo(1), { status: 'error', error: 'Marcada por error' }),
-        // Las historias y el feed llevan otra cuenta: no le quitan productos a los videos.
-        { product_id: onlyStory.id, channel: 'instagram', caption: STORY_MARK, posted_at: daysAgo(1) },
+        // Lo subido como historia hace poco tampoco vuelve (07-11-2026); un post del feed sí.
+        { product_id: onlyStory.id, channel: 'instagram', caption: STORY_MARK, posted_price: onlyStory.price, posted_at: daysAgo(1) },
         { product_id: onlyFeed.id, channel: 'facebook', caption: 'Texto del post', external_id: 'u-9', posted_at: daysAgo(1) },
       ],
     });
@@ -882,9 +882,9 @@ describe('readVideoPicks', () => {
     const plan = await readVideoPicks(admin, NOW, 6);
     const ids = plan.picks.map((pick) => pick.product.id);
     expect(ids).not.toContain(uploaded.id);
-    expect(ids.sort()).toEqual([longAgo.id, undone.id, onlyStory.id, onlyFeed.id, fresh.id].sort());
+    expect(ids.sort()).toEqual([longAgo.id, undone.id, onlyFeed.id, fresh.id].sort());
     // Ni se lee el historial de lo que no puede salir.
-    expect(vi.mocked(getPriceStatsMany)).toHaveBeenLastCalledWith([longAgo.id, undone.id, onlyStory.id, onlyFeed.id, fresh.id]);
+    expect(vi.mocked(getPriceStatsMany)).toHaveBeenLastCalledWith([longAgo.id, undone.id, onlyFeed.id, fresh.id]);
   });
 
   it('respeta la puerta de entrada: descuento de 20% o baja confirmada, y precio recién revisado', async () => {
@@ -1726,9 +1726,8 @@ describe('readVideoBoard', () => {
     const board = await readVideoBoard(fake.admin, NOW);
     expect(board.videos.map((video) => video.id).sort()).toEqual(shown.map((p) => p.id).sort());
     expect(board.stale).toBe(2);
-    // El dato es el de siempre.
-    expect(board.videos[0].id).toBe(shown[0].id);
-    expect(board.videos[0].reason).toContain('lleva 6 clics recientes en el sitio');
+    // El dato es el de siempre (gaming va primero desde el 07-11-2026).
+    expect(board.videos.find((video) => video.id === shown[0].id)!.reason).toContain('lleva 6 clics recientes en el sitio');
 
     // Una sola consulta de clics, por los tres productos y nada más.
     const clicks = fake.asked.filter((query) => query.table === 'outbound_clicks');
@@ -1742,7 +1741,7 @@ describe('readVideoBoard', () => {
     catalog(shown);
     const from = fake.asked.length;
     const plan = await readVideoPicks(fake.admin, NOW);
-    expect(plan.picks[0].reason).toContain('lleva 6 clics recientes en el sitio');
+    expect(plan.picks.find((pick) => pick.product.id === shown[0].id)!.reason).toContain('lleva 6 clics recientes en el sitio');
     const full = fake.asked.slice(from).filter((query) => query.table === 'outbound_clicks');
     expect(full.map((query) => query.range)).toEqual([
       [0, 999],
