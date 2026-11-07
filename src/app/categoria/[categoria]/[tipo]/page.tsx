@@ -74,7 +74,8 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { chip, products, indexable } = data;
   return {
     // El formato que aprobó el dueño el 17-10-2026, el mismo de las categorías.
-    title: `${chip.label} — Precios y ofertas en Chile`,
+    // Patrón elegido por el dueño el 06-11-2026 ("Notebooks: precios en Chile e historial").
+    title: `${chip.label}: precios en Chile e historial`,
     description: typeMetaDescription(chip.label, summarizeCategory(productsOfType(products, tipo))),
     // Sin ?orden= ni ?pagina=, como en la categoría.
     alternates: { canonical: typePath(categoria, tipo) },

@@ -56,7 +56,8 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 
   const products = await getProductsByCategory(categoria);
   return {
-    title: `${info.name} — Precios y ofertas en Chile`,
+    // Patrón elegido por el dueño el 06-11-2026 (el mismo de las páginas de modelo).
+    title: `${info.name}: precios en Chile e historial`,
     // El canonical no lleva ?orden= ni ?pagina=: son la misma lista en otro
     // orden o más larga, no páginas distintas.
     alternates: { canonical: `/categoria/${categoria}` },

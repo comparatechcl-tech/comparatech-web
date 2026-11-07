@@ -18,7 +18,11 @@ import { SITE_URL } from '@/lib/site';
 
 // El canonical va por pagina y no en el layout: ahi convertiria a todo el
 // sitio en duplicado de la home.
-export const metadata: Metadata = { alternates: { canonical: '/' } };
+// Título elegido por el dueño el 06-11-2026.
+export const metadata: Metadata = {
+  title: { absolute: 'Precios de tecnología en Chile con historial | ComparaTech' },
+  alternates: { canonical: '/' },
+};
 
 /**
  * El nombre del sitio para Google ("site name" en los resultados), en la
@@ -181,8 +185,9 @@ export default async function HomePage() {
               Compara · Elige · Ahorra
             </span>
             <h1 className="font-heading text-3xl font-extrabold leading-[1.08] tracking-tight sm:mt-5 sm:text-5xl">
-              Compara precios y <br className="hidden sm:block" />
-              especificaciones <span className="text-accent">antes de comprar</span>
+              {/* Titular elegido por el dueño el 06-11-2026. */}
+              ¿Bajó de verdad? <br className="hidden sm:block" />
+              Mira su historial <span className="text-accent">antes de comprar</span>
             </h1>
             <p className="mt-4 hidden max-w-md text-muted sm:block">
               Compara especificaciones y precios de celulares, computadores,

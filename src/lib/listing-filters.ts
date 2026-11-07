@@ -130,7 +130,8 @@ export function indexableFilters<T extends Pick<Product, 'name' | 'brand' | 'spe
   return filters.filter((f) => productsOfFilter(products, f).length >= MIN_FILTER_PAGE);
 }
 
-const TITLE_SUFFIX = ' — Precios y ofertas en Chile';
+// Patrón elegido por el dueño el 06-11-2026 (el mismo de categorías y modelos).
+const TITLE_SUFFIX = ': precios en Chile e historial';
 const SITE_SUFFIX = ' | ComparaTech';
 
 /** El <title>: el formato que aprobó el dueño para los tipos, con "| ComparaTech" solo si cabe. */

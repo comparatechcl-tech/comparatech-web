@@ -120,8 +120,8 @@ export function productsOfType(products: Product[], tipo: string): Product[] {
 // categoría, con el mismo título, el mismo H1 y el canonical de la
 // categoría: para Google no existía una página de "audífonos", y dos tercios
 // del catálogo no tenían enlace desde un listado que se indexara. Ahora cada
-// tipo tiene su página, con el título que aprobó el dueño ("Audífonos —
-// Precios y ofertas en Chile"). Se indexan solo las que tienen contenido:
+// tipo tiene su página, con el título que aprobó el dueño ("Audífonos:
+// precios en Chile e historial", 06-11-2026). Se indexan solo las que tienen contenido:
 // una página con dos productos es justo el contenido pobre que Google baja.
 
 /** Desde cuántos productos (sin variantes repetidas) se indexa la página de un tipo. */

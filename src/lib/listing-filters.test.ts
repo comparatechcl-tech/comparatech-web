@@ -48,9 +48,9 @@ describe('la lista de filtros', () => {
 
   it('el título cabe en lo que muestra Google, con "| ComparaTech" solo si cabe', () => {
     for (const f of LISTING_FILTERS) expect(filterTitle(f).length).toBeLessThanOrEqual(SEO_TITLE_MAX);
-    expect(filterTitle(getFilter('audio', 'parlantes', 'jbl')!)).toBe('Parlantes JBL — Precios y ofertas en Chile | ComparaTech');
+    expect(filterTitle(getFilter('audio', 'parlantes', 'jbl')!)).toBe('Parlantes JBL: precios en Chile e historial | ComparaTech');
     expect(filterTitle(getFilter('electronica', 'televisores', '55-pulgadas')!)).toBe(
-      'Smart TV 55 pulgadas — Precios y ofertas en Chile',
+      'Smart TV 55 pulgadas: precios en Chile e historial',
     );
   });
 
