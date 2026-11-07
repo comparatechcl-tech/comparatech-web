@@ -52,6 +52,7 @@ const CATALOG: [name: string, domain: string, model: string | null][] = [
   ['Consola PlayStation 5 Pro 2TB Digital color blanco Sony', 'MLC-GAME_CONSOLES', 'ps5'],
   // El lector de discos que se vende aparte, y los juegos y controles, no son una PS5.
   ['Unidad Lector de discos consola Ps5 Slim+ps5 pro color blanco', 'MLC-GAME_CONSOLES', null],
+  ['Reproductor remoto PlayStation Portal para consola PS5 Negro', 'MLC-GAME_CONSOLES', null],
   ['Marvels Wolverine Ps5', 'MLC-VIDEO_GAMES', null],
   ['Control Dualsense PS5 Playstation 5 Blanco', 'MLC-GAMEPADS_AND_JOYSTICKS', null],
   ['Consola Nintendo Switch 2', 'MLC-GAME_CONSOLES', null],

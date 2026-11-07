@@ -148,8 +148,10 @@ export const MODELS: ModelDef[] = [
     brand: 'Sony',
     domains: ['MLC-GAME_CONSOLES'],
     include: [/\b(ps5|ps 5|playstation 5|play station 5)\b/],
-    // El lector de discos que se vende aparte está en el mismo tipo de producto.
-    exclude: [/\b(lector|unidad|disco|discos)\b/],
+    // El lector de discos que se vende aparte está en el mismo tipo de producto,
+    // y también el PlayStation Portal (un reproductor remoto, no una PS5): el
+    // 06-11-2026 la página decía "PS5 desde $272.924" por el Portal.
+    exclude: [/\b(lector|unidad|disco|discos|portal|reproductor)\b/],
     label: 'nombre',
   },
   {
