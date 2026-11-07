@@ -1,5 +1,6 @@
-// Todo lo que toca ffmpeg: encontrarlo, comprimir el video (con silencio o con música) y sacar la hoja de
-// contactos. ffmpeg solo comprime: los cuadros llegan ya pintados. Es común a todas las plantillas.
+// Todo lo que toca ffmpeg: encontrarlo, comprimir el video (con silencio o con música), hacer la copia sin
+// música de un video ya hecho y sacar la hoja de contactos. ffmpeg solo comprime: los cuadros llegan ya
+// pintados. Es común a todas las plantillas.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -76,10 +77,53 @@ export function abrirVideo(ffmpeg, { salida, ancho, alto, fps, cuadros, musica =
     ],
     { stdio: ['pipe', 'ignore', 'pipe'] }
   );
+  ff.stdin.on('error', () => {}); // si ffmpeg muere, el motivo llega por 'close'
+  const fin = esperarFfmpeg(ff, parcial, salida);
+  return {
+    /** Entrega un cuadro y espera a que ffmpeg lo reciba (así la memoria del cuadro se puede volver a usar). */
+    escribir: (buf) => new Promise((ok) => ff.stdin.write(buf, ok)),
+    cerrar: () => ff.stdin.end(),
+    /** Corta a ffmpeg sin dejar nada: `fin` termina con error y el video a medias se borra. */
+    abortar: () => ff.kill(),
+    fin,
+  };
+}
+
+/**
+ * La copia sin música de un video ya terminado: la imagen se copia tal cual, sin comprimirla de nuevo (es el
+ * mismo video, cuadro a cuadro), y el audio queda en silencio. La pista no se quita: las redes rechazan un
+ * video sin pista (ver abrirVideo). Es la que se baja desde /admin/videos, para que el dueño le ponga su propia
+ * canción en la app de la red sin tener que bajarle el volumen a la que trae. Igual que abrirVideo, se escribe
+ * con otro nombre y solo al terminar bien toma el definitivo.
+ */
+export function quitarMusica(ffmpeg, entrada, salida) {
+  const parcial = `${salida}.parcial`;
+  const ff = spawn(
+    ffmpeg,
+    [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-i', entrada,
+      '-map', '0:v:0', '-map', '0:a:0',
+      '-c:v', 'copy',
+      // La misma pista con el volumen en cero: dura exactamente lo mismo que la del video.
+      '-af', 'volume=0',
+      '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+      '-movflags', '+faststart', '-f', 'mp4',
+      parcial,
+    ],
+    { stdio: ['ignore', 'ignore', 'pipe'] }
+  );
+  return esperarFfmpeg(ff, parcial, salida);
+}
+
+/**
+ * Espera a que termine un ffmpeg que escribe en `parcial`: si sale bien, el archivo toma el nombre definitivo
+ * (`salida`); si no, se borra y la promesa termina con el motivo. Mientras corre queda anotado en `enCurso`.
+ */
+function esperarFfmpeg(ff, parcial, salida) {
   enCurso.add(ff);
   let error = '';
   ff.stderr.on('data', (d) => (error += d));
-  ff.stdin.on('error', () => {}); // si ffmpeg muere, el motivo llega por 'close'
   const quitarParcial = () => {
     try {
       fs.unlinkSync(parcial);
@@ -110,14 +154,7 @@ export function abrirVideo(ffmpeg, { salida, ancho, alto, fps, cuadros, musica =
     });
   });
   fin.catch(() => {}); // el error se atiende donde se espera `fin`
-  return {
-    /** Entrega un cuadro y espera a que ffmpeg lo reciba (así la memoria del cuadro se puede volver a usar). */
-    escribir: (buf) => new Promise((ok) => ff.stdin.write(buf, ok)),
-    cerrar: () => ff.stdin.end(),
-    /** Corta a ffmpeg sin dejar nada: `fin` termina con error y el video a medias se borra. */
-    abortar: () => ff.kill(),
-    fin,
-  };
+  return fin;
 }
 
 /**

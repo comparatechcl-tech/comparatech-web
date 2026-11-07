@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -71,6 +71,12 @@ async function fakeRender({ video, cover }: { video: string; cover: string }) {
   return { bytes: 3_500_000, lowered: false, notes: [] as string[] };
 }
 
+/** La copia sin música de mentira: un archivo chico con otro contenido que el video. No necesita ffmpeg. */
+async function fakeMute({ output }: { video: string; output: string }) {
+  await writeFile(output, 'video sin música de mentira');
+}
+const SILENT_BYTES = Buffer.byteLength('video sin música de mentira');
+
 /** Corre generate() contra el sitio de mentira y junta lo que imprimió y a quién le habló. */
 async function run(options: Partial<NonNullable<Parameters<typeof generate>[0]>> = {}) {
   const photo = await fakePhoto();
@@ -82,6 +88,7 @@ async function run(options: Partial<NonNullable<Parameters<typeof generate>[0]>>
     fetch: offlineFetch(calls, () => jpegResponse(photo)),
     log: (line: string) => lines.push(line),
     render: fakeRender,
+    mute: fakeMute,
     retryDelayMs: 0,
     tmpRoot: TMP,
     ...options,
@@ -214,42 +221,48 @@ describe('generate: lo que arma y lo que salta', () => {
     const { result, calls, lines, printed } = await run();
 
     expect(result).toEqual({ ok: true, made: 2, existing: 1, failed: 0, pending: 0 });
-    // Subió portada y video de los dos que faltaban; del que ya existía, nada. Cada archivo queda con el
-    // nombre que mandó el sitio, huella incluida (escrita aquí a mano: es la del contrato para estos datos, con
-    // la versión 2 del aspecto).
+    // Subió portada, copia sin música y video de los dos que faltaban; del que ya existía, nada. Cada archivo
+    // queda con el nombre que mandó el sitio, huella incluida (escrita aquí a mano: es la del contrato para
+    // estos datos, con la versión 2 del aspecto).
     const stored = Array.from(site.stored.keys());
     expect(stored).toEqual([
       `2026-10-13/${items[0].id}-219990-estudio-c6280e51.jpg`,
+      `2026-10-13/${items[0].id}-219990-estudio-c6280e51-sin-musica.mp4`,
       `2026-10-13/${items[0].id}-219990-estudio-c6280e51.mp4`,
       `2026-10-13/${items[2].id}-189990-estudio-ec7645ba.jpg`,
+      `2026-10-13/${items[2].id}-189990-estudio-ec7645ba-sin-musica.mp4`,
       `2026-10-13/${items[2].id}-189990-estudio-ec7645ba.mp4`,
     ]);
-    expect(site.stored.get(stored[1])?.toString()).toBe('video de mentira');
+    expect(site.stored.get(stored[2])?.toString()).toBe('video de mentira');
+    expect(site.stored.get(stored[1])?.toString()).toBe('video sin música de mentira');
     // Tampoco bajó la foto del que ya existía.
     expect(calls.filter((call) => call.host === 'http2.mlstatic.com')).toHaveLength(2);
 
     expect(lines[0]).toBe('Videos del día 2026-10-13: el sitio sugiere 3.');
     expect(lines).toContain('2/3 Smart TV LED Caixun Roku TV 43" Full HD · $182.990 · plantilla estudio · ya estaba, no se rehace');
-    expect(printed).toMatch(/1\/3 Moto G86 power 256GB · \$219\.990 · plantilla estudio · armado y subido en \d+,\d s · 3,3 MB/);
+    expect(printed).toMatch(/1\/3 Moto G86 power 256GB · \$219\.990 · plantilla estudio · armado y subido en \d+,\d s · 3,3 MB · y su copia sin música$/m);
     expect(lines[lines.length - 1]).toBe('Resumen: 2 videos nuevos, 1 que ya estaba.');
     expectPublic(printed);
   });
 
-  it('sube como lo hace la librería de Supabase: PUT con el archivo tal cual, y la portada antes que el video', async () => {
-    site = await startFakeSite({ secret: SECRET, items: sampleItems().slice(0, 1) });
+  it('sube como lo hace la librería de Supabase: PUT con el archivo tal cual; la portada y la copia sin música antes que el video', async () => {
+    const [item] = sampleItems();
+    site = await startFakeSite({ secret: SECRET, items: [item] });
     await run();
 
     const uploads = site.requests.filter((request) => request.method === 'PUT');
-    expect(uploads.map((upload) => path.extname(upload.path))).toEqual(['.jpg', '.mp4']);
+    const base = `/storage/v1/object/upload/sign/reels/${fileName(item)}`;
+    expect(uploads.map((upload) => upload.path)).toEqual([`${base}.jpg`, `${base}-sin-musica.mp4`, `${base}.mp4`]);
     expect(uploads[0]).toMatchObject({ contentType: 'image/jpeg', cacheControl: 'max-age=3600', upsert: 'false', bytes: 18 });
-    expect(uploads[1]).toMatchObject({ contentType: 'video/mp4', cacheControl: 'max-age=3600', upsert: 'false', bytes: 16 });
+    expect(uploads[1]).toMatchObject({ contentType: 'video/mp4', cacheControl: 'max-age=3600', upsert: 'false', bytes: SILENT_BYTES });
+    expect(uploads[2]).toMatchObject({ contentType: 'video/mp4', cacheControl: 'max-age=3600', upsert: 'false', bytes: 16 });
   });
 
   it('con --n pide esa cantidad', async () => {
     site = await startFakeSite({ secret: SECRET });
     const { result } = await run({ count: 1 });
     expect(result).toMatchObject({ made: 1, existing: 0 });
-    expect(site.stored.size).toBe(2);
+    expect(site.stored.size).toBe(3);
   });
 
   it('en seco pide el plan y no baja, arma ni sube nada', async () => {
@@ -298,7 +311,14 @@ describe('generate: lo que arma y lo que salta', () => {
     expect(after).not.toBe(before);
     expect(after.slice(0, -8)).toBe(before.slice(0, -8));
     expect((await run()).result).toMatchObject({ made: 1, existing: 0 });
-    expect(Array.from(site.stored.keys())).toEqual([`${before}.jpg`, `${before}.mp4`, `${after}.jpg`, `${after}.mp4`]);
+    expect(Array.from(site.stored.keys())).toEqual([
+      `${before}.jpg`,
+      `${before}-sin-musica.mp4`,
+      `${before}.mp4`,
+      `${after}.jpg`,
+      `${after}-sin-musica.mp4`,
+      `${after}.mp4`,
+    ]);
   });
 
   it('no deja carpetas temporales, ni cuando un producto falla', async () => {
@@ -494,6 +514,163 @@ describe('generate: la música de fondo', () => {
   });
 });
 
+describe('generate: la copia sin música', () => {
+  /** Las subidas que llegaron al almacén de mentira, sin el comienzo de la dirección. */
+  const putPaths = () =>
+    site!.requests.filter((request) => request.method === 'PUT').map((request) => request.path.replace('/storage/v1/object/upload/sign/reels/', ''));
+
+  it('la hace a partir del video ya armado y la sube al lado, con el mismo nombre más "-sin-musica"', async () => {
+    const [item] = sampleItems();
+    site = await startFakeSite({ secret: SECRET, items: [item] });
+    const jobs: { video: string; output: string; videoText: string }[] = [];
+    const { result, products, printed } = await run({
+      mute: async (job: { video: string; output: string }) => {
+        jobs.push({ ...job, videoText: readFileSync(job.video, 'utf8') });
+        return fakeMute(job);
+      },
+    });
+
+    expect(result).toEqual({ ok: true, made: 1, existing: 0, failed: 0, pending: 0 });
+    // Sale del video que se va a subir, en la misma carpeta temporal.
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].videoText).toBe('video de mentira');
+    expect(path.dirname(jobs[0].output)).toBe(path.dirname(jobs[0].video));
+    expect(site.stored.get(`${fileName(item)}-sin-musica.mp4`)?.toString()).toBe('video sin música de mentira');
+    expect(site.stored.get(`${fileName(item)}.mp4`)?.toString()).toBe('video de mentira');
+    expect(products[0]).toMatch(/ · y su copia sin música$/);
+    expect(printed).not.toContain('Aviso: la copia sin música');
+    expectPublic(printed);
+  });
+
+  it('si no se puede hacer, el video del día se sube igual y queda un aviso', async () => {
+    const [item] = sampleItems();
+    site = await startFakeSite({ secret: SECRET, items: [item] });
+    const { result, lines, products, printed } = await run({
+      mute: async () => {
+        throw new Error('ffmpeg terminó con error 1: falla de prueba');
+      },
+    });
+
+    expect(result).toEqual({ ok: true, made: 1, existing: 0, failed: 0, pending: 0 });
+    expect(Array.from(site.stored.keys())).toEqual([`${fileName(item)}.jpg`, `${fileName(item)}.mp4`]);
+    expect(products[0]).not.toContain('copia sin música');
+    expect(lines).toContain(
+      '    Aviso: la copia sin música no se pudo hacer: en el admin queda el video con música (ffmpeg terminó con error 1: falla de prueba)'
+    );
+    expect(lines[lines.length - 1]).toBe('Resumen: 1 video nuevo, 0 que ya estaban.');
+    expect(openDirs()).toEqual([]);
+    expectPublic(printed);
+  });
+
+  it('si no se puede subir, el video del día se sube igual, el aviso no trae la dirección firmada y no queda nada a medias', async () => {
+    const [item] = sampleItems();
+    site = await startFakeSite({ secret: SECRET, items: [item] });
+    const photo = await fakePhoto();
+    const calls: Call[] = [];
+    const offline = offlineFetch(calls, () => jpegResponse(photo));
+    // El almacén rechaza solo la copia, y su mensaje repite la dirección firmada con el token.
+    const silentFails: typeof fetch = async (input, init) => {
+      if (init?.method === 'PUT' && String(input).includes('-sin-musica.mp4')) {
+        return new Response(JSON.stringify({ statusCode: '500', error: 'Internal', message: `no se pudo guardar ${String(input)}` }), { status: 500 });
+      }
+      return offline(input, init);
+    };
+    const { result, lines, printed } = await run({ fetch: silentFails });
+
+    expect(result).toMatchObject({ ok: true, made: 1, failed: 0 });
+    expect(Array.from(site.stored.keys())).toEqual([`${fileName(item)}.jpg`, `${fileName(item)}.mp4`]);
+    const note = lines.find((line) => line.startsWith('    Aviso: la copia sin música no se pudo subir: en el admin queda el video con música'));
+    // El motivo va entero, con la dirección firmada tapada (no cortada a la mitad, que la dejaría a la vista).
+    expect(note).toBe('    Aviso: la copia sin música no se pudo subir: en el admin queda el video con música (el almacén respondió 500 al subir: no se pudo guardar [oculto])');
+    expect(openDirs()).toEqual([]);
+    expectPublic(printed);
+  });
+
+  it('si ya estaba arriba (otra corrida alcanzó a subirla), no es un problema', async () => {
+    const [item] = sampleItems();
+    site = await startFakeSite({ secret: SECRET, items: [item] });
+    site.stored.set(`${fileName(item)}-sin-musica.mp4`, Buffer.from('copia anterior'));
+    const { result, products, printed } = await run();
+
+    expect(result).toMatchObject({ ok: true, made: 1, failed: 0 });
+    expect(site.stored.get(`${fileName(item)}-sin-musica.mp4`)?.toString()).toBe('copia anterior');
+    expect(site.stored.get(`${fileName(item)}.mp4`)?.toString()).toBe('video de mentira');
+    expect(products[0]).toMatch(/ · y su copia sin música$/);
+    expect(printed).not.toContain('Aviso: la copia sin música');
+  });
+
+  it('con el plan de un sitio anterior (sin dónde subirla) arma y sube como antes, sin copia y sin avisos', async () => {
+    const [item] = sampleItems();
+    site = await startFakeSite({ secret: SECRET, items: [item], silentCopy: false });
+    let muted = 0;
+    const { result, products, printed } = await run({
+      mute: async (job: { video: string; output: string }) => {
+        muted++;
+        return fakeMute(job);
+      },
+    });
+
+    expect(result).toEqual({ ok: true, made: 1, existing: 0, failed: 0, pending: 0 });
+    expect(muted).toBe(0);
+    expect(putPaths()).toEqual([`${fileName(item)}.jpg`, `${fileName(item)}.mp4`]);
+    expect(products[0]).not.toContain('copia sin música');
+    expect(printed).not.toContain('Aviso: la copia sin música');
+  });
+
+  it('una dirección para la copia que no es la de su archivo no se usa: el video sale igual, sin copia, y se avisa', async () => {
+    const [item] = sampleItems();
+    site = await startFakeSite({ secret: SECRET, items: [item] });
+    const photo = await fakePhoto();
+    const calls: Call[] = [];
+    const offline = offlineFetch(calls, () => jpegResponse(photo));
+    // El plan llega con la copia apuntando a otra parte: a otro servidor, o al .mp4 del propio video.
+    for (const bad of ['https://evil.example/reels/x-sin-musica.mp4?token=abcdefgh', 'mismo-video']) {
+      site.stored.clear();
+      site.requests.length = 0;
+      const altered: typeof fetch = async (input, init) => {
+        const res = await offline(input, init);
+        if (!String(input).includes('/api/social/videos/plan')) return res;
+        const body = await res.json();
+        for (const row of body.seleccion) row.subir.sinMusica = bad === 'mismo-video' ? row.subir.video : bad;
+        return new Response(JSON.stringify(body), { status: res.status, headers: { 'content-type': 'application/json' } });
+      };
+      let muted = 0;
+      const { result, lines, printed } = await run({
+        fetch: altered,
+        mute: async (job: { video: string; output: string }) => {
+          muted++;
+          return fakeMute(job);
+        },
+      });
+
+      expect(result, bad).toMatchObject({ ok: true, made: 1, failed: 0 });
+      expect(muted, bad).toBe(0);
+      expect(putPaths(), bad).toEqual([`${fileName(item)}.jpg`, `${fileName(item)}.mp4`]);
+      expect(site.stored.get(`${fileName(item)}.mp4`)?.toString(), bad).toBe('video de mentira');
+      expect(lines, bad).toContain(
+        '    Aviso: la copia sin música no se hace: en el admin queda el video con música (la dirección de subida no es la de este archivo)'
+      );
+      expectPublic(printed);
+    }
+    expect(calls.map((call) => call.host)).not.toContain('evil.example');
+  });
+
+  it('en seco no la hace ni la sube', async () => {
+    site = await startFakeSite({ secret: SECRET });
+    let muted = 0;
+    const { result } = await run({
+      dry: true,
+      mute: async (job: { video: string; output: string }) => {
+        muted++;
+        return fakeMute(job);
+      },
+    });
+    expect(result).toMatchObject({ ok: true, made: 0, pending: 3 });
+    expect(muted).toBe(0);
+    expect(site.stored.size).toBe(0);
+  });
+});
+
 describe('generate: cuando algo falla', () => {
   it('si un producto falla, sigue con los demás y avisa con ok: false', async () => {
     const items = sampleItems();
@@ -510,8 +687,12 @@ describe('generate: cuando algo falla', () => {
     expect(products[1]).toContain('NO SE PUDO: ffmpeg terminó con error 1: no se pudo comprimir');
     expect(products[2]).toMatch(/^3\/3 Tablet Lenovo Tab 128gb .* armado y subido en /);
     expect(lines[lines.length - 1]).toBe('Resumen: 1 video nuevo, 0 que ya estaban, 2 que no se pudieron.');
-    // El tercero quedó completo; del primero no quedó el video (la portada se rechazó antes).
-    expect(Array.from(site.stored.keys())).toEqual([`${fileName(items[2])}.jpg`, `${fileName(items[2])}.mp4`]);
+    // El tercero quedó completo; del primero no quedó nada (la portada se rechazó antes).
+    expect(Array.from(site.stored.keys())).toEqual([
+      `${fileName(items[2])}.jpg`,
+      `${fileName(items[2])}-sin-musica.mp4`,
+      `${fileName(items[2])}.mp4`,
+    ]);
     // El almacén de mentira repite la dirección firmada y el token en su mensaje de error: no pueden salir.
     expectPublic(printed);
   });
@@ -831,16 +1012,21 @@ describe('de punta a punta, con ffmpeg', () => {
     'baja la foto, arma el video con la plantilla y sube un MP4 y su portada',
     async () => {
       const items = sampleItems().slice(0, 1);
-      site = await startFakeSite({ secret: SECRET, items });
-      // Sin `render`: se usa el armador de verdad.
-      const { result, products, printed } = await run({ render: undefined });
+      // Una canción de verdad (un tono de 12 segundos), para ver que la copia sin música de verdad no la lleva.
+      const track = path.join(TMP, 'pista.wav');
+      const tone = spawnSync(ffmpeg!, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=12', '-ac', '2', '-ar', '44100', '-c:a', 'pcm_s16le', track]);
+      expect(tone.status).toBe(0);
+      site = await startFakeSite({ secret: SECRET, items, music: { name: 'pista-1.wav', bytes: readFileSync(track) } });
+      // Sin `render` ni `mute`: se usan el armador y ffmpeg de verdad.
+      const { result, products, printed } = await run({ render: undefined, mute: undefined });
 
       expect(result).toEqual({ ok: true, made: 1, existing: 0, failed: 0, pending: 0 });
-      expect(products[0]).toMatch(/^1\/1 Moto G86 power 256GB · \$219\.990 · plantilla estudio · armado y subido en \d+,\d s · \d,\d MB/);
+      expect(products[0]).toMatch(/^1\/1 Moto G86 power 256GB · \$219\.990 · plantilla estudio · armado y subido en \d+,\d s · \d,\d MB · con música "pista-1\.wav" · y su copia sin música$/);
+      expect(printed).not.toContain('Aviso: la copia sin música');
       expectPublic(printed);
 
       const base = fileName(items[0]);
-      expect(Array.from(site.stored.keys())).toEqual([`${base}.jpg`, `${base}.mp4`]);
+      expect(Array.from(site.stored.keys())).toEqual([`${base}.jpg`, `${base}-sin-musica.mp4`, `${base}.mp4`]);
       const cover = site.stored.get(`${base}.jpg`)!;
       expect(await sharp(cover).metadata()).toMatchObject({ format: 'jpeg', width: 1080, height: 1920 });
 
@@ -856,6 +1042,25 @@ describe('de punta a punta, con ffmpeg', () => {
       expect(probe.stderr).toMatch(/Video: h264 .*yuv420p.* 1080x1920/);
       expect(probe.stderr).toMatch(/Audio: aac/);
       expect(probe.stderr).toMatch(/frame=\s*305\b/);
+
+      // La copia sin música: la misma imagen, paquete por paquete (no se comprimió de nuevo), con una pista
+      // AAC del mismo largo, en silencio. El video del día sí lleva la canción.
+      const silentFile = path.join(TMP, 'subido-sin-musica.mp4');
+      writeFileSync(silentFile, site.stored.get(`${base}-sin-musica.mp4`)!);
+      const ff = (args: string[]) => spawnSync(ffmpeg!, ['-hide_banner', ...args], { encoding: 'utf8' });
+      const imageHash = (input: string) => ff(['-i', input, '-map', '0:v:0', '-c', 'copy', '-f', 'md5', '-']).stdout.trim();
+      expect(imageHash(silentFile)).toMatch(/^MD5=[0-9a-f]{32}$/);
+      expect(imageHash(silentFile)).toBe(imageHash(file));
+      const loudness = (input: string) => {
+        const out = ff(['-i', input, '-map', '0:a:0', '-af', 'volumedetect', '-f', 'null', '-']).stderr;
+        return Number(/max_volume: (-?[\d.]+) dB/.exec(out)?.[1]);
+      };
+      expect(loudness(file)).toBeGreaterThan(-40);
+      expect(loudness(silentFile)).toBeLessThanOrEqual(-90);
+      const silentProbe = ff(['-i', silentFile, '-map', '0:a:0', '-c', 'copy', '-f', 'null', '-']).stderr;
+      expect(silentProbe).toMatch(/Audio: aac/);
+      const duration = (text: string) => /Duration: ([\d:.]+)/.exec(text)?.[1];
+      expect(duration(silentProbe)).toBe(duration(probe.stderr));
     },
     300_000
   );

@@ -12,6 +12,7 @@ import {
   signVideoUploads,
   videoPhoto,
   type VideoPick,
+  type VideoUploads,
 } from '@/lib/social/videos';
 
 /**
@@ -34,8 +35,10 @@ import {
  * tal cual. `ya_existe` es true solo si está ese nombre exacto: si al
  * producto le cambió algo de eso, es otro archivo y se arma de nuevo.
  *
- * Las direcciones de `subir` son un permiso de escritura que dura dos horas:
- * quien llama no las imprime ni las guarda.
+ * `subir` trae tres direcciones: el video (con música), su portada y su copia
+ * sin música (`sinMusica`, "<archivo>-sin-musica.mp4"), que es la que se baja
+ * desde /admin/videos. Son un permiso de escritura que dura dos horas: quien
+ * llama no las imprime ni las guarda.
  */
 
 export const maxDuration = 60;
@@ -43,7 +46,7 @@ export const dynamic = 'force-dynamic';
 
 function describe(
   item: VideoPick,
-  uploads: { video: string; cover: string } | null,
+  uploads: VideoUploads | null,
   music: { nombre: string; url: string } | null = null
 ) {
   const p = item.product;
@@ -71,7 +74,10 @@ function describe(
     plantilla: item.template,
     archivo: item.file,
     ya_existe: item.exists,
-    subir: uploads ? { video: uploads.video, portada: uploads.cover } : null,
+    // `sinMusica`: la copia sin música, para /admin/videos (VIDEO_SILENT_SUFFIX).
+    // Un generador anterior a la copia no la usa, y uno nuevo con un plan sin
+    // ella sube como antes: se pueden publicar en cualquier orden.
+    subir: uploads ? { video: uploads.video, portada: uploads.cover, sinMusica: uploads.silent } : null,
     // La canción de fondo (lib/social/music), solo para lo que hay que armar.
     musica: music,
   };

@@ -19,15 +19,27 @@ node scripts/reels/generar.mjs --seco     pide el plan y dice qué haría, sin a
 ```
 
 1. Pide el plan al sitio (`GET /api/social/videos/plan`, con el secreto de los crons). El sitio elige los
-   productos y entrega, por cada uno, sus datos, la foto, la plantilla y dos direcciones firmadas de subida.
+   productos y entrega, por cada uno, sus datos, la foto, la plantilla, la canción de fondo y tres direcciones
+   firmadas de subida (`subir`: `video`, `portada` y `sinMusica`).
 2. Por cada producto que todavía no tiene video: baja la foto (solo por https y solo de `mlstatic.com`, hasta
-   8 MB, y tiene que ser una imagen), arma el video y su portada en una carpeta temporal del sistema y sube
-   los dos archivos. La portada se sube primero: el sitio da un video por hecho cuando existe su `.mp4`.
+   8 MB, y tiene que ser una imagen), arma el video y su portada en una carpeta temporal del sistema, hace la
+   copia sin música y sube los tres archivos. El `.mp4` del video va al final: el sitio da un video por hecho
+   cuando existe, y para entonces la portada y la copia ya están arriba.
 3. Lo que ya existe no se rehace. Si un producto falla, sigue con los demás y **termina con código 1**; si
    todo salió bien, o no había nada que hacer, con código 0.
 
-Cada video queda en el almacén `reels` como dos archivos con el mismo nombre:
-`{fecha}/{producto}-{precio}-{plantilla}-{huella}.mp4` y `.jpg` (la portada).
+Cada video queda en el almacén `reels` como tres archivos con el mismo nombre:
+`{fecha}/{producto}-{precio}-{plantilla}-{huella}.mp4` (con música), `.jpg` (la portada) y
+`-sin-musica.mp4` (la copia sin música).
+
+**La copia sin música** (desde el 07-11-2026, a pedido del dueño). El video con música es el que publican
+solas las publicaciones automáticas (Instagram y Facebook, TikTok y YouTube por Metricool). En `/admin/videos`,
+en cambio, el dueño baja el video para subirlo a mano y le pone su propia canción en la app: ahí la página
+baja, comparte y reproduce la copia, que es la misma imagen (no se comprime de nuevo) con la pista de audio en
+silencio. La pista no se quita porque las redes rechazan un video sin pista. La copia no cambia el nombre ni
+la huella del video. Si no se puede hacer o subir, el video sale igual, queda un aviso en el registro y la
+página ofrece el video con música; lo mismo con los videos armados antes de la copia. Un plan sin `sinMusica`
+(un sitio anterior) se arma como antes, sin copia y sin aviso.
 
 **La huella** son 8 signos (del 0 al 9 y de la a a la f) que resumen la versión del aspecto de los videos
 (`VIDEO_LOOK_VERSION`, hoy 2) y lo que el video dice además del precio: el nombre corto, la marca, la cifra
@@ -37,8 +49,9 @@ se arma uno nuevo. Lo mismo cuando cambia cómo lo dicen los videos con los mism
 (la 2 cambió "por debajo del precio de lista" por "de descuento" y el rótulo de la cifra tachada por "sin
 descuento"). **La calcula solo el sitio** (`src/lib/social/videos.ts`). El generador no
 la recalcula: usa el nombre tal como llega en `archivo` y solo revisa que el producto, el precio y la
-plantilla del nombre sean los de ese elemento, que la huella tenga su forma y que las dos direcciones de
-subida terminen en ese mismo nombre. Si el nombre llega sin huella, el sitio que respondió es de la versión
+plantilla del nombre sean los de ese elemento, que la huella tenga su forma y que las direcciones de
+subida terminen en ese mismo nombre (la de la copia, en ese nombre más `-sin-musica.mp4`; si no, la copia no
+se hace). Si el nombre llega sin huella, el sitio que respondió es de la versión
 anterior: ese producto falla con "el sitio y el generador no son de la misma versión" y no se sube nada con
 el nombre antiguo. Se arregla publicando la última versión del sitio.
 
@@ -220,7 +233,7 @@ Todo sale del dato del producto; no hay frases de venta escritas a mano.
 - `datos.mjs`: lee el producto y decide qué se puede decir. `foto.mjs`: prepara la foto. `capas.mjs`: dibuja
   cada texto una vez (colores, logo e íconos de la marca). `pintar.mjs`: el lienzo. `fuente.mjs`: mide el
   texto con la letra Inter del sitio (`src/lib/content/fonts`). `video.mjs`: ffmpeg (lo busca en la consola,
-  en la variable `FFMPEG` o donde lo deja WinGet).
+  en la variable `FFMPEG` o donde lo deja WinGet), también para la copia sin música (`quitarMusica`).
 - `plantillas/`: las plantillas. `plantillas/estudio/`: su escena (medidas, tiempos y el dibujo de cada
   cuadro) y sus fondos. `plantillas/bloques/`: lo mismo, más `piezas.mjs` (la etiqueta del precio, el bloque
   del descuento y la losa de la llamada).

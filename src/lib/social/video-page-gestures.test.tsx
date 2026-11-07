@@ -22,6 +22,7 @@ import {
   linkTarget,
   markWarning,
   textTargets,
+  videoFileUrl,
   type FileState,
   type GestureActions,
   type Note,
@@ -50,6 +51,7 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
     checkedAt: new Date(T0 - 20 * MINUTE).toISOString(),
     template: 'estudio',
     videoUrl: `${STORAGE}/2026-10-13/${id}-49990-estudio-0a1b2c3d.mp4`,
+    silentUrl: null,
     coverUrl: `${STORAGE}/2026-10-13/${id}-49990-estudio-0a1b2c3d.jpg`,
     fileName: `comparatech-producto-${seq}-reel.mp4`,
     renderedAt: '2026-10-13T11:05:00.000Z',
@@ -1024,6 +1026,73 @@ describe('la tarjeta, al tocar cada botón', () => {
     );
     expect(html).toContain('>TikTok</p>');
     expect(html).toMatch(/<p class="[^"]*select-all[^"]*whitespace-pre-wrap[^"]*">Parlante JBL a \$49\.990\n#ofertas<\/p>/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// La copia sin música: lo que se baja, se comparte y se ve en esta página.
+
+describe('la copia sin música (el dueño le pone su canción en la app)', () => {
+  const silentOf = (item: ReadyVideo) => item.videoUrl.replace(/\.mp4$/, '-sin-musica.mp4');
+
+  it('videoFileUrl: la copia si está; si no, el video con música', () => {
+    const plain = video();
+    expect(videoFileUrl(plain)).toBe(plain.videoUrl);
+    const withCopy = video();
+    const silentUrl = silentOf(withCopy);
+    expect(videoFileUrl({ ...withCopy, silentUrl })).toBe(silentUrl);
+    // Una lista armada antes de que existiera el campo tampoco se cae.
+    expect(videoFileUrl({ videoUrl: plain.videoUrl } as ReadyVideo)).toBe(plain.videoUrl);
+  });
+
+  it('Compartir y Guardar bajan la copia sin música, con el mismo nombre de archivo, una sola vez', async () => {
+    const { env, gestures } = setup();
+    const base = video();
+    const item = { ...base, silentUrl: silentOf(base) };
+
+    gestures.share(item);
+    await settle();
+    gestures.save(item);
+    await settle();
+    expect(env.fetchFile.mock.calls).toEqual([[item.silentUrl, item.fileName]]);
+    expect(env.download.mock.calls).toEqual([[env.createObjectURL.mock.results[0].value, item.fileName]]);
+
+    gestures.share(item);
+    expect(env.share).toHaveBeenCalledTimes(1);
+    expect(env.share.mock.calls[0][0].files.map((file) => file.name)).toEqual([item.fileName]);
+  });
+
+  it('sin copia (videos de antes, o si no se pudo hacer) baja el video con música, como siempre', async () => {
+    const { env, gestures } = setup();
+    const item = video();
+    gestures.save(item);
+    await settle();
+    expect(env.fetchFile.mock.calls).toEqual([[item.videoUrl, item.fileName]]);
+  });
+
+  it('la tarjeta reproduce y abre la copia, y dice que va sin música para agregarla', () => {
+    const { gestures } = setup();
+    const base = video({ mlUrl: null });
+    const item = { ...base, silentUrl: silentOf(base) };
+    const note: Note = { tone: 'error', text: DOWNLOAD_ERROR, openVideo: true };
+    const html = renderToStaticMarkup(drawCard({ video: item, gestures, note }) as unknown as ReactElement);
+
+    const player = /<video[^>]*>/.exec(html)?.[0] ?? '';
+    expect(player).toContain(`src="${item.silentUrl}"`);
+    expect(player).toContain(`poster="${item.coverUrl}"`);
+    const link = /<a\b[^>]*>[\s\S]*?<\/a>/.exec(html)?.[0] ?? '';
+    expect(link).toContain(`href="${item.silentUrl}"`);
+    expect(link).toContain('Abrir el video');
+    // El video con música no aparece en ninguna parte de la tarjeta.
+    expect(html).not.toContain(`"${item.videoUrl}"`);
+    expect(read(drawCard({ video: item, gestures }))).toContain('Plantilla estudio · hecho el 13/10 a las 08:05 · sin música, para agregarla tú');
+
+    // Sin copia, la tarjeta es la de siempre: el video con música y sin la frase.
+    const plain = video({ mlUrl: null });
+    const before = renderToStaticMarkup(drawCard({ video: plain, gestures, note }) as unknown as ReactElement);
+    expect(/<video[^>]*>/.exec(before)?.[0]).toContain(`src="${plain.videoUrl}"`);
+    expect(before).toContain(`href="${plain.videoUrl}"`);
+    expect(before).not.toContain('sin música');
   });
 });
 

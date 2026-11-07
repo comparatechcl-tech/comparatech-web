@@ -19,6 +19,13 @@ const OLD_FILE_NAME =
 
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
+/**
+ * La copia sin música de cada video va al lado del video, con este agregado antes del .mp4:
+ * "AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>-sin-musica.mp4". Es la misma que VIDEO_SILENT_SUFFIX en
+ * src/lib/social/videos.ts: si cambia en un lado, cambia en el otro.
+ */
+export const SILENT_SUFFIX = '-sin-musica';
+
 export function isLocalHost(hostname) {
   return LOCAL_HOSTS.includes(hostname);
 }

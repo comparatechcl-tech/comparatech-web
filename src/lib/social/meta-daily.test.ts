@@ -61,6 +61,7 @@ function video(id: string, over: Partial<ReadyVideo> = {}): ReadyVideo {
     checkedAt: '2026-10-25T12:00:00.000Z',
     template: 'estudio',
     videoUrl: `https://x.supabase.co/storage/v1/object/public/reels/2026-10-25/${id}.mp4`,
+    silentUrl: null,
     coverUrl: `https://x.supabase.co/storage/v1/object/public/reels/2026-10-25/${id}.jpg`,
     fileName: `${id}.mp4`,
     renderedAt: null,

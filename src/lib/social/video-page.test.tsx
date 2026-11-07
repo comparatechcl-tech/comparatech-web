@@ -78,6 +78,7 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
     checkedAt: new Date(NOW.getTime() - 20 * 60_000).toISOString(),
     template: 'estudio',
     videoUrl: `${STORAGE}/2026-10-13/${id}-49990-estudio-0a1b2c3d.mp4`,
+    silentUrl: null,
     coverUrl: `${STORAGE}/2026-10-13/${id}-49990-estudio-0a1b2c3d.jpg`,
     fileName: `comparatech-producto-${seq}-reel.mp4`,
     renderedAt: '2026-10-13T11:05:00.000Z',

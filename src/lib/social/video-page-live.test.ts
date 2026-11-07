@@ -64,6 +64,7 @@ function video(over: Partial<ReadyVideo> = {}): ReadyVideo {
     checkedAt: new Date(T0 - 20 * MINUTE).toISOString(),
     template: 'estudio',
     videoUrl: `https://x.supabase.co/storage/v1/object/public/reels/2026-10-17/${id}.mp4`,
+    silentUrl: null,
     coverUrl: `https://x.supabase.co/storage/v1/object/public/reels/2026-10-17/${id}.jpg`,
     fileName: `comparatech-producto-${seq}-reel.mp4`,
     renderedAt: '2026-10-17T11:05:00.000Z',

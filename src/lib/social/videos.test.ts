@@ -51,6 +51,7 @@ import {
   VIDEO_NETWORKS,
   VIDEO_PLAN_MAX,
   VIDEO_RULES,
+  VIDEO_SILENT_SUFFIX,
   VIDEO_TEMPLATES,
   VIDEO_TEMPLATE_WEIGHTS,
   VIDEO_WARNING_MARK,
@@ -1160,15 +1161,18 @@ describe('el almacén', () => {
     expect(created).toEqual([]);
   });
 
-  it('firma la subida del video y de su portada, con reemplazo', async () => {
+  it('firma la subida del video, de su portada y de su copia sin música, con reemplazo', async () => {
     const { admin, signed } = fakeSite();
     const file = `${TODAY}/6f1d1a52-6f0e-4c4b-9a43-1d2f3c4b5a60-27990-impacto-0a1b2c3d`;
     const uploads = await signVideoUploads(admin, file);
     expect(uploads.video).toBe(`${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.mp4?token=firma-1`);
     expect(uploads.cover).toBe(`${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.jpg?token=firma-2`);
+    expect(uploads.silent).toBe(`${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}-sin-musica.mp4?token=firma-3`);
+    expect(VIDEO_SILENT_SUFFIX).toBe('-sin-musica');
     expect(signed).toEqual([
       { path: `${file}.mp4`, upsert: true },
       { path: `${file}.jpg`, upsert: true },
+      { path: `${file}-sin-musica.mp4`, upsert: true },
     ]);
 
     const broken = fakeSite({ storageErrors: { sign: { message: 'se cayó' } } });
@@ -1182,9 +1186,13 @@ describe('el almacén', () => {
         ...stored([`2026-10-13/${id}-1000-impacto`, `2026-10-12/${id}-1000-impacto`, `2026-10-11/${id}-1000-impacto`]),
         // Justo tres días: se queda.
         ...stored([`2026-10-10/${id}-1000-impacto`]),
-        // Cuatro días o más: se van, con todo lo que tengan adentro.
+        // Cuatro días o más: se van, con todo lo que tengan adentro (también las copias sin música).
         ...stored([`2026-10-09/${id}-1000-impacto`, `2026-10-09/${id}-2000-impacto`, `2026-09-30/${id}-1000-impacto`]),
+        [`2026-10-09/${id}-1000-impacto-sin-musica.mp4`]: hoursAgo(100),
+        [`2026-09-30/${id}-1000-impacto-sin-musica.mp4`]: hoursAgo(300),
         '2026-10-09/suelto.txt': hoursAgo(100),
+        // La copia de un video que se queda, se queda con él.
+        [`2026-10-10/${id}-1000-impacto-sin-musica.mp4`]: hoursAgo(80),
         // Lo que no es una carpeta con fecha no es de acá.
         'logo.png': hoursAgo(900),
         'otros/2020-01-01.mp4': hoursAgo(900),
@@ -1194,11 +1202,12 @@ describe('el almacén', () => {
     });
 
     expect(VIDEO_KEEP_DAYS).toBe(3);
-    expect(await removeOldVideos(admin, NOW)).toBe(7);
+    expect(await removeOldVideos(admin, NOW)).toBe(9);
     expect([...objects.keys()].sort()).toEqual(
       [
         ...Object.keys(stored([`2026-10-13/${id}-1000-impacto`, `2026-10-12/${id}-1000-impacto`, `2026-10-11/${id}-1000-impacto`])),
         ...Object.keys(stored([`2026-10-10/${id}-1000-impacto`])),
+        `2026-10-10/${id}-1000-impacto-sin-musica.mp4`,
         'logo.png',
         'otros/2020-01-01.mp4',
         '2026-13-45/raro.mp4',
@@ -1279,6 +1288,8 @@ describe('readVideoBoard', () => {
       checkedAt: p.price_checked_at,
       template: 'impacto',
       videoUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-impacto-b4779f68.mp4`,
+      // Un video de antes de la copia sin música: la página usa el de arriba.
+      silentUrl: null,
       coverUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${TODAY}/${p.id}-60000-impacto-b4779f68.jpg`,
       fileName: 'comparatech-audifonos-jbl-tune-520bt-reel.mp4',
       renderedAt: uploadedAt,
@@ -1493,6 +1504,54 @@ describe('readVideoBoard', () => {
     expect(board.videos.map((video) => video.id)).toEqual([fine.id]);
     expect(board.stale).toBe(0);
     expect(ops).toEqual(['getBucket reels', `list reels/${TODAY}`, `list reels/${YESTERDAY}`]);
+  });
+
+  it('la copia sin música va en su video (silentUrl) y no cuenta aparte, ni como video ni como viejo', async () => {
+    const withCopy = strong({ category: 'audio' });
+    const without = strong({ category: 'gaming' });
+    const orphan = strong({ category: 'hogar' });
+    const moved = strong({ category: 'celulares', price: 55_000 });
+    const { admin } = fakeSite({
+      products: [withCopy, without, orphan, moved],
+      objects: {
+        ...stored([fileOf(TODAY, withCopy), fileOf(TODAY, without)], hoursAgo(3)),
+        // La copia se sube antes que el video: aunque sea la última en llegar, el video manda la hora.
+        [`${fileOf(TODAY, withCopy)}-sin-musica.mp4`]: hoursAgo(1),
+        // Una copia sola (se cortó la subida del video): no es un video.
+        [`${fileOf(TODAY, orphan)}-sin-musica.mp4`]: hoursAgo(1),
+        [`${fileOf(TODAY, orphan)}.jpg`]: hoursAgo(1),
+        // Un video viejo (el producto bajó de precio) con su copia: cuenta una vez.
+        ...stored([fileOf(TODAY, moved, 60_000)], hoursAgo(4)),
+        [`${fileOf(TODAY, moved, 60_000)}-sin-musica.mp4`]: hoursAgo(4),
+      },
+    });
+
+    const board = await readVideoBoard(admin, NOW);
+    const byId = new Map(board.videos.map((video) => [video.id, video]));
+    expect([...byId.keys()].sort()).toEqual([withCopy.id, without.id].sort());
+    expect(board.stale).toBe(1);
+    expect(board.lastRenderedAt).toBe(hoursAgo(3));
+    expect(byId.get(withCopy.id)).toMatchObject({
+      videoUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${fileOf(TODAY, withCopy)}.mp4`,
+      silentUrl: `${STORAGE_URL}/storage/v1/object/public/reels/${fileOf(TODAY, withCopy)}-sin-musica.mp4`,
+    });
+    expect(byId.get(without.id)?.silentUrl).toBeNull();
+  });
+
+  it('de ayer también trae su copia, y la de otro día no se le pega', async () => {
+    const p = strong();
+    const { admin } = fakeSite({
+      products: [p],
+      objects: {
+        ...stored([fileOf(YESTERDAY, p)], hoursAgo(20)),
+        [`${fileOf(YESTERDAY, p)}-sin-musica.mp4`]: hoursAgo(20),
+        // La copia del mismo producto en la carpeta de hoy, sin su video: no es la del video de ayer.
+        [`${fileOf(TODAY, p)}-sin-musica.mp4`]: hoursAgo(1),
+      },
+    });
+    const [video] = (await readVideoBoard(admin, NOW)).videos;
+    expect(video.videoUrl).toContain(`/${fileOf(YESTERDAY, p)}.mp4`);
+    expect(video.silentUrl).toBe(`${STORAGE_URL}/storage/v1/object/public/reels/${fileOf(YESTERDAY, p)}-sin-musica.mp4`);
   });
 
   it('primero los que faltan por subir a alguna red, por puntos; al final los que ya están en las cuatro', async () => {
@@ -1786,7 +1845,7 @@ describe('/api/social/videos/plan', () => {
     id: string;
     archivo: string;
     ya_existe: boolean;
-    subir: { video: string; portada: string } | null;
+    subir: { video: string; portada: string; sinMusica: string } | null;
     [key: string]: unknown;
   }
   async function call(path: string, secret: string | null = SECRET) {
@@ -1884,6 +1943,8 @@ describe('/api/social/videos/plan', () => {
       subir: {
         video: `${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.mp4?token=firma-1`,
         portada: `${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}.jpg?token=firma-2`,
+        // La copia sin música, para /admin/videos.
+        sinMusica: `${STORAGE_URL}/storage/v1/object/upload/sign/reels/${file}-sin-musica.mp4?token=firma-3`,
       },
       // Sin canciones en el bucket "musica": el video sale en silencio, como antes.
       musica: null,
@@ -1923,12 +1984,16 @@ describe('/api/social/videos/plan', () => {
     expect(fake.created).toHaveLength(1);
     expect(fake.created[0]).toMatchObject({ id: 'reels', options: { public: true } });
     expect(first.rows.map((row) => row.ya_existe)).toEqual([false, false]);
-    expect(fake.signed).toHaveLength(4);
+    expect(fake.signed).toHaveLength(6);
 
-    // El generador sube el primero (video y portada) y vuelve a preguntar.
+    // El generador sube el primero (portada, copia sin música y video) y vuelve a preguntar.
     const file = fileOf(TODAY, done);
-    fake.objects.set(`${file}.mp4`, hoursAgo(0));
     fake.objects.set(`${file}.jpg`, hoursAgo(0));
+    fake.objects.set(`${file}-sin-musica.mp4`, hoursAgo(0));
+    fake.objects.set(`${file}.mp4`, hoursAgo(0));
+    // Del otro alcanzó a subir la portada y la copia, pero no el video: no está hecho.
+    fake.objects.set(`${fileOf(TODAY, pending)}.jpg`, hoursAgo(0));
+    fake.objects.set(`${fileOf(TODAY, pending)}-sin-musica.mp4`, hoursAgo(0));
     const second = await call('/api/social/videos/plan');
     const byId = new Map(second.rows.map((row) => [row.id, row]));
     expect(byId.get(done.id)).toMatchObject({ archivo: file, ya_existe: true, subir: null });
@@ -1936,9 +2001,10 @@ describe('/api/social/videos/plan', () => {
     expect(byId.get(pending.id)?.subir).toEqual({
       video: expect.stringContaining(`/${fileOf(TODAY, pending)}.mp4?token=`),
       portada: expect.stringContaining(`/${fileOf(TODAY, pending)}.jpg?token=`),
+      sinMusica: expect.stringContaining(`/${fileOf(TODAY, pending)}-sin-musica.mp4?token=`),
     });
     // Solo se firmó lo que faltaba, y el bucket no se creó de nuevo.
-    expect(fake.signed).toHaveLength(6);
+    expect(fake.signed).toHaveLength(9);
     expect(fake.created).toHaveLength(1);
   });
 
@@ -2058,6 +2124,7 @@ describe('/api/social/videos/plan', () => {
       expect(row.archivo).toMatch(/^\d{4}-\d{2}-\d{2}\/[0-9a-f-]{36}-[1-9]\d*-[a-z0-9]+-[0-9a-f]{8}$/);
       expect(row.subir?.video).toContain(`/reels/${row.archivo}.mp4?token=`);
       expect(row.subir?.portada).toContain(`/reels/${row.archivo}.jpg?token=`);
+      expect(row.subir?.sinMusica).toContain(`/reels/${row.archivo}-sin-musica.mp4?token=`);
     }
     // Cuatro ofertas que dicen cosas distintas: cuatro huellas.
     expect(new Set(rows.map((row) => row.archivo.slice(-8))).size).toBe(4);

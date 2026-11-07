@@ -8,9 +8,14 @@
  *   node scripts/reels/generar.mjs --seco   → pide el plan y dice qué haría, sin armar ni subir
  *
  * El sitio decide qué productos van (GET /api/social/videos/plan) y entrega, por cada uno, sus datos, la
- * foto y dos direcciones firmadas para subir el video y su portada. Este proceso baja la foto, arma el video
- * con la plantilla pedida y sube los dos archivos. Lo que ya existe no se rehace. Si un producto falla, sigue
- * con los demás y termina con código 1.
+ * foto y las direcciones firmadas para subir el video, su portada y su copia sin música. Este proceso baja la
+ * foto, arma el video con la plantilla pedida y sube los archivos. Lo que ya existe no se rehace. Si un
+ * producto falla, sigue con los demás y termina con código 1.
+ *
+ * El video lleva música: es el que publican solas las publicaciones automáticas (Instagram y Facebook,
+ * TikTok y YouTube por Metricool). La copia sin música es para /admin/videos, donde el dueño baja el video
+ * para subirlo a mano y le pone su propia canción en la app (lo pidió el 07-11-2026). Si la copia no se puede
+ * hacer o subir, el video sale igual y queda un aviso: el admin ofrece entonces el video con música.
  *
  * El nombre de cada archivo también lo decide el sitio ("AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>") y
  * aquí se usa tal como llega: la huella resume lo que el video dice además del precio, y solo el sitio la
@@ -37,6 +42,7 @@ import { fileURLToPath } from 'node:url';
 import { precio as formatPrice, resolverProducto } from './datos.mjs';
 import { existePlantilla } from './plantillas/index.mjs';
 import {
+  SILENT_SUFFIX,
   isLocalHost,
   noCommands,
   oneLine,
@@ -333,6 +339,16 @@ async function renderReel({ product, template, video, cover, music = null }) {
 }
 
 /**
+ * Deja en `output` la copia sin música de `video` (quitarMusica en video.mjs: la misma imagen, sin comprimirla
+ * de nuevo). ffmpeg se carga recién aquí, igual que en renderReel.
+ */
+async function muteReel({ video, output }) {
+  const { buscarFfmpeg, cortarVideos, quitarMusica } = await import('./video.mjs');
+  stopEncoders = cortarVideos;
+  await quitarMusica(buscarFfmpeg(), video, output);
+}
+
+/**
  * Las carpetas temporales de los videos que se están armando en este momento. Cada una se borra al terminar
  * su video (el `finally` de makeOne); esta lista es para cuando cortan el proceso a la mitad y ese `finally`
  * no alcanza a correr.
@@ -390,8 +406,34 @@ async function downloadMusic(ctx, item, dir) {
   }
 }
 
-/** Un producto: baja la foto (y la canción), arma el video y su portada en una carpeta temporal y sube los dos archivos. */
-async function makeOne(ctx, item) {
+/**
+ * La copia sin música del video, para /admin/videos. Nunca lanza: si no se puede hacer o subir, el video del
+ * día sale igual (las publicaciones automáticas usan el que tiene música) y queda un aviso. Devuelve
+ * { ok, note }.
+ *
+ * El motivo va completo y al final: el error del almacén puede repetir la dirección firmada, y el aviso se
+ * tapa antes de acortarse (ver `say` en generate). Cortado aquí, quedaría media dirección sin tapar.
+ */
+async function makeSilent(ctx, url, video, output) {
+  try {
+    await ctx.mute({ video, output });
+  } catch (err) {
+    return { ok: false, note: `la copia sin música no se pudo hacer: en el admin queda el video con música (${reason(err)})` };
+  }
+  try {
+    // Si ya estaba arriba (otra corrida la subió antes de cortarse), sirve la que hay: es la misma imagen.
+    await uploadSigned(ctx.fetchFn, url, output, 'video/mp4');
+  } catch (err) {
+    return { ok: false, note: `la copia sin música no se pudo subir: en el admin queda el video con música (${reason(err)})` };
+  }
+  return { ok: true, note: null };
+}
+
+/**
+ * Un producto: baja la foto (y la canción), arma el video y su portada en una carpeta temporal, hace la copia
+ * sin música si el plan trae dónde subirla (`silentUrl`) y sube los archivos.
+ */
+async function makeOne(ctx, item, silentUrl) {
   const dir = await mkdtemp(path.join(ctx.tmpRoot, 'comparatech-reel-'));
   openDirs.add(dir);
   try {
@@ -401,13 +443,20 @@ async function makeOne(ctx, item) {
     const video = path.join(dir, 'reel.mp4');
     const cover = path.join(dir, 'portada.jpg');
     const rendered = await ctx.render({ product, template: item.plantilla, video, cover, music: music.file });
-    if (music.note) rendered.notes = [...(rendered.notes ?? []), music.note];
+    const notes = [...(rendered.notes ?? [])];
+    if (music.note) notes.push(music.note);
     if (music.file) rendered.music = music.name;
-    // La portada primero: el sitio da un video por hecho cuando existe su .mp4, así que ese archivo se sube
-    // al final, cuando la portada ya está arriba.
+    // La portada primero y el video al final: el sitio da un video por hecho cuando existe su .mp4, y para
+    // entonces la portada (y la copia sin música, si se pudo) ya tienen que estar arriba.
     await uploadSigned(ctx.fetchFn, item.subir.portada, cover, 'image/jpeg');
+    let silent = false;
+    if (silentUrl) {
+      const copy = await makeSilent(ctx, silentUrl, video, path.join(dir, `reel${SILENT_SUFFIX}.mp4`));
+      silent = copy.ok;
+      if (copy.note) notes.push(copy.note);
+    }
     const fresh = await uploadSigned(ctx.fetchFn, item.subir.video, video, 'video/mp4');
-    return { ...rendered, fresh };
+    return { ...rendered, notes, silent, fresh };
   } finally {
     // Si la carpeta temporal no se deja borrar (en Windows pasa cuando algo la tiene tomada), no es motivo
     // para dar por fallado un video que ya quedó subido.
@@ -418,9 +467,9 @@ async function makeOne(ctx, item) {
 
 /**
  * El proceso completo. Devuelve { ok, made, existing, failed, pending }: `ok` es false si no se pudo pedir el
- * plan o si algún producto falló. `fetch`, `log` y `render` se pueden reemplazar (así se prueba sin red y sin
- * ffmpeg); `site` pasa siempre por resolveSite, así que el secreto no sale a otra parte ni por error de quien
- * llame.
+ * plan o si algún producto falló (una copia sin música que no salió no cuenta como falla). `fetch`, `log`,
+ * `render` y `mute` se pueden reemplazar (así se prueba sin red y sin ffmpeg); `site` pasa siempre por
+ * resolveSite, así que el secreto no sale a otra parte ni por error de quien llame.
  *
  * @param {{
  *   site?: string | null,
@@ -430,6 +479,7 @@ async function makeOne(ctx, item) {
  *   fetch?: typeof globalThis.fetch,
  *   log?: (line: string) => void,
  *   render?: (job: { product: any, template: string, video: string, cover: string }) => Promise<{ bytes: number, lowered?: boolean, notes?: string[] }>,
+ *   mute?: (job: { video: string, output: string }) => Promise<void>,
  *   retryDelayMs?: number,
  *   tmpRoot?: string,
  * }} [options]
@@ -442,6 +492,7 @@ export async function generate({
   fetch: fetchFn = globalThis.fetch,
   log = console.log,
   render = renderReel,
+  mute = muteReel,
   retryDelayMs = 20_000,
   tmpRoot = os.tmpdir(),
 } = {}) {
@@ -486,7 +537,7 @@ export async function generate({
   if (plan.deleted) say(`El sitio borró ${plan.deleted} ${plan.deleted === 1 ? 'archivo' : 'archivos'} de días anteriores.`);
   if (plan.unreadHistory) say(`Aviso: ${plan.unreadHistory} ${plan.unreadHistory === 1 ? 'producto quedó' : 'productos quedaron'} fuera porque no se pudo leer su historial de precios.`);
 
-  const ctx = { fetchFn, render, tmpRoot, allowLocal: origin !== PRODUCTION };
+  const ctx = { fetchFn, render, mute, tmpRoot, allowLocal: origin !== PRODUCTION };
   for (let i = 0; i < total; i++) {
     const item = items[i];
     const name = oneLine(item?.nombre_corto || item?.nombre || 'producto sin nombre', 70);
@@ -519,21 +570,33 @@ export async function generate({
       fail(photoProblem ? `la foto ${photoProblem}` : uploadProblem);
       continue;
     }
+    // La copia sin música va aparte: si su dirección no sirve, el video se arma igual, sin ella, y se avisa.
+    // Un plan sin `sinMusica` es de un sitio anterior a la copia: ahí no hay nada que avisar.
+    const silentAsked = item.subir?.sinMusica !== undefined && item.subir?.sinMusica !== null;
+    const silentProblem = silentAsked
+      ? uploadUrlProblem(item.subir.sinMusica, `${item.archivo}${SILENT_SUFFIX}.mp4`, { allowLocal: origin !== PRODUCTION })
+      : null;
+    const silentUrl = silentAsked && !silentProblem ? item.subir.sinMusica : null;
+    const silentNote = silentProblem ? `la copia sin música no se hace: en el admin queda el video con música (${silentProblem})` : null;
+    // Los avisos van sin acortar: `say` tapa los secretos y recién después acorta el renglón.
+    const notice = (note) => say(`    Aviso: ${oneLine(note, 2000)}`);
     if (dry) {
       totals.pending++;
       say(`${label} · falta: se armaría y se subiría`);
+      if (silentNote) notice(silentNote);
       continue;
     }
 
     const started = Date.now();
     try {
-      const done = await makeOne(ctx, item);
+      const done = await makeOne(ctx, item, silentUrl);
       totals.made++;
       const how = done.fresh ? 'armado y subido' : 'armado; ya había uno igual arriba';
       const quality = done.lowered ? ' (con un poco menos de calidad, para no pasar de 4 MB)' : '';
       const withMusic = done.music ? ` · con música "${oneLine(done.music, 60)}"` : '';
-      say(`${label} · ${how} en ${comma((Date.now() - started) / 1000)} s · ${megabytes(done.bytes)}${quality}${withMusic}`);
-      for (const note of done.notes ?? []) say(`    Aviso: ${oneLine(note, 300)}`);
+      const withSilent = done.silent ? ' · y su copia sin música' : '';
+      say(`${label} · ${how} en ${comma((Date.now() - started) / 1000)} s · ${megabytes(done.bytes)}${quality}${withMusic}${withSilent}`);
+      for (const note of [...(done.notes ?? []), ...(silentNote ? [silentNote] : [])]) notice(note);
     } catch (err) {
       fail(reason(err));
     }

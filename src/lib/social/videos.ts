@@ -256,6 +256,18 @@ export function videoFingerprint(claims: VideoClaims): string {
   return createHash('sha256').update(JSON.stringify(said)).digest('hex').slice(0, 8);
 }
 
+/**
+ * La copia sin música de cada video va al lado del video, con este agregado
+ * antes del .mp4: "<nombre>-sin-musica.mp4". El video con música es el que
+ * publican solas las publicaciones automáticas (meta-daily, shorts); la copia
+ * es la que se baja y se comparte desde /admin/videos, para que el dueño le
+ * ponga su propia canción en la app de la red (lo pidió el 07-11-2026). Es la
+ * misma imagen: no entra en la huella ni cambia el nombre del video. El mismo
+ * agregado está en scripts/reels/plan.mjs (SILENT_SUFFIX): si cambia en un
+ * lado, cambia en el otro.
+ */
+export const VIDEO_SILENT_SUFFIX = '-sin-musica';
+
 /** Dirección pública de un archivo del almacén (el bucket es público). */
 export function videoPublicUrl(path: string, base: string | undefined = process.env.NEXT_PUBLIC_SUPABASE_URL): string {
   return `${(base ?? '').replace(/\/+$/, '')}/storage/v1/object/public/${VIDEO_BUCKET}/${path}`;
@@ -394,11 +406,17 @@ export interface StoredVideo extends VideoObject {
   file: string;
   /** Cuándo se subió el MP4. */
   renderedAt: string | null;
+  /** Está también su copia sin música ("<file>-sin-musica.mp4", ver VIDEO_SILENT_SUFFIX). */
+  silent: boolean;
 }
 
 /**
  * Los videos completos de un día: los que tienen el MP4 y su portada. Uno a
  * medias (se cortó la subida) no se muestra y el plan lo vuelve a pedir.
+ *
+ * La copia sin música no es otro video: se anota en el suyo (`silent`) y no
+ * se cuenta aparte, ni como video ni como viejo. Una copia sin su video (se
+ * cortó la subida del .mp4) no se muestra; se borra con su carpeta.
  */
 async function listVideoFolder(admin: SupabaseClient, date: string): Promise<StoredVideo[]> {
   const { data, error } = await admin.storage
@@ -408,30 +426,40 @@ async function listVideoFolder(admin: SupabaseClient, date: string): Promise<Sto
 
   const uploaded = new Map<string, string | null>();
   const covers = new Set<string>();
+  const silent = new Set<string>();
   for (const entry of data ?? []) {
     const match = /^(.+)\.(mp4|jpg)$/.exec(entry.name);
     if (!match) continue;
     const file = `${date}/${match[1]}`;
-    if (match[2] === 'mp4') uploaded.set(file, entry.updated_at ?? entry.created_at ?? null);
-    else covers.add(file);
+    if (match[2] === 'jpg') covers.add(file);
+    // Un nombre de video termina en la huella (8 caracteres en hexadecimal): nunca en "-sin-musica".
+    else if (file.endsWith(VIDEO_SILENT_SUFFIX)) silent.add(file.slice(0, -VIDEO_SILENT_SUFFIX.length));
+    else uploaded.set(file, entry.updated_at ?? entry.created_at ?? null);
   }
 
   const videos: StoredVideo[] = [];
   for (const [file, renderedAt] of uploaded) {
     const parsed = covers.has(file) ? parseVideoObjectName(file) : null;
-    if (parsed) videos.push({ ...parsed, file, renderedAt });
+    if (parsed) videos.push({ ...parsed, file, renderedAt, silent: silent.has(file) });
   }
   return videos;
 }
 
+/** Las direcciones firmadas de un video: el MP4 con música, su portada y su copia sin música. */
+export interface VideoUploads {
+  video: string;
+  cover: string;
+  silent: string;
+}
+
 /**
- * Direcciones firmadas para subir un video y su portada sin la clave del
- * sitio. Duran dos horas. Con reemplazo: si quedó un archivo a medias de una
- * corrida anterior, se pisa.
+ * Direcciones firmadas para subir un video, su portada y su copia sin música
+ * sin la clave del sitio. Duran dos horas. Con reemplazo: si quedó un archivo
+ * a medias de una corrida anterior, se pisa.
  *
  * Son un permiso de escritura: no se imprimen ni se guardan en ninguna parte.
  */
-export async function signVideoUploads(admin: SupabaseClient, file: string): Promise<{ video: string; cover: string }> {
+export async function signVideoUploads(admin: SupabaseClient, file: string): Promise<VideoUploads> {
   const sign = async (path: string): Promise<string> => {
     const { data, error } = await admin.storage.from(VIDEO_BUCKET).createSignedUploadUrl(path, { upsert: true });
     if (error || !data?.signedUrl) {
@@ -439,8 +467,12 @@ export async function signVideoUploads(admin: SupabaseClient, file: string): Pro
     }
     return data.signedUrl;
   };
-  const [video, cover] = await Promise.all([sign(`${file}.mp4`), sign(`${file}.jpg`)]);
-  return { video, cover };
+  const [video, cover, silent] = await Promise.all([
+    sign(`${file}.mp4`),
+    sign(`${file}.jpg`),
+    sign(`${file}${VIDEO_SILENT_SUFFIX}.mp4`),
+  ]);
+  return { video, cover, silent };
 }
 
 /**
@@ -711,7 +743,14 @@ export interface ReadyVideo {
   /** El tipo de Mercado Libre (ml_domain_id): el reel diario no repite el de ayer. */
   domain?: string | null;
   template: string;
+  /** El video con música: el que usan las publicaciones automáticas (meta-daily, shorts). */
   videoUrl: string;
+  /**
+   * La copia sin música (VIDEO_SILENT_SUFFIX), la que /admin/videos baja y
+   * comparte para que el dueño le ponga su canción. null si no está (videos
+   * de antes de la copia, o si no se pudo hacer): ahí se usa videoUrl.
+   */
+  silentUrl: string | null;
   coverUrl: string;
   fileName: string;
   /** Cuándo se subió el archivo al almacén. */
@@ -961,6 +1000,7 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
       domain: p.ml_domain_id ?? null,
       template: video.template,
       videoUrl: videoPublicUrl(`${video.file}.mp4`),
+      silentUrl: video.silent ? videoPublicUrl(`${video.file}${VIDEO_SILENT_SUFFIX}.mp4`) : null,
       coverUrl: videoPublicUrl(`${video.file}.jpg`),
       fileName: `comparatech-${safeSlug}-reel.mp4`,
       renderedAt: video.renderedAt,

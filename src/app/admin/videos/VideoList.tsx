@@ -14,6 +14,7 @@ import {
   linkTarget,
   markKey,
   textTargets,
+  videoFileUrl,
   type CopyTarget,
   type FileState,
   type Mark,
@@ -276,6 +277,8 @@ export function VideoCard({
   // Solo la ficha de Mercado Libre Chile y sin parámetros: nunca el link de afiliado (igual que Historias).
   const mlUrl = safeMlUrl(video.mlUrl);
   const help = warning ? explainWarning(warning) : [];
+  // Lo que se ve, se baja y se comparte acá es la copia sin música, si está (./gestures: videoFileUrl).
+  const file = videoFileUrl(video);
 
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4">
@@ -303,7 +306,7 @@ export function VideoCard({
             playsInline
             preload="none"
             poster={video.coverUrl}
-            src={video.videoUrl}
+            src={file}
             aria-label={`Video de ${video.name}`}
             className="h-full w-full object-contain"
           />
@@ -362,6 +365,7 @@ export function VideoCard({
         <p className="mt-1 text-[11px] text-muted">
           Plantilla {video.template}
           {made ? ` · hecho el ${made.date} a las ${made.time}` : ''}
+          {video.silentUrl ? ' · sin música, para agregarla tú' : ''}
         </p>
         {/* Junto al video, que es más alto que este bloque: aparece al marcar la cuarta red sin correr los botones. */}
         {everywhere && !settled && (
@@ -467,8 +471,8 @@ export function VideoCard({
           Sin el atributo download, que entre dominios no hace nada. Con un
           precio que ya no calza no se ofrece: no hay nada que subir.
         */}
-        {note?.openVideo && !off && isWebUrl(video.videoUrl) && (
-          <a href={video.videoUrl} target="_blank" rel="noopener noreferrer" className={BUTTON}>
+        {note?.openVideo && !off && isWebUrl(file) && (
+          <a href={file} target="_blank" rel="noopener noreferrer" className={BUTTON}>
             <ExternalLink size={15} className="shrink-0" aria-hidden /> Abrir el video
           </a>
         )}

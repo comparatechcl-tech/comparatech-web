@@ -70,6 +70,17 @@ export function linkTarget(video: ReadyVideo): CopyTarget {
 export const markKey = (videoId: string, network: VideoNetwork) => `${videoId}|${network}`;
 
 /**
+ * El archivo que esta página baja, comparte, reproduce y abre: la copia sin
+ * música si está, para que el dueño le ponga su canción en la app de la red
+ * sin tener que bajarle el volumen a la que trae (lo pidió el 07-11-2026).
+ * Si no está (videos de antes de la copia, o no se pudo hacer), el video con
+ * música. Las publicaciones automáticas siguen usando videoUrl. Puro.
+ */
+export function videoFileUrl(video: Pick<ReadyVideo, 'videoUrl' | 'silentUrl'>): string {
+  return video.silentUrl ?? video.videoUrl;
+}
+
+/**
  * ¿Este aparato puede mandar el archivo a las apps de las redes? Solo con
  * pantalla táctil: el computador también "comparte" archivos, pero su panel
  * no llega a Instagram ni a TikTok. Puro.
@@ -229,7 +240,7 @@ export function createVideoGestures(
 
     ui.fileState(video.id, 'cargando');
     const job = env
-      .fetchFile(video.videoUrl, video.fileName)
+      .fetchFile(videoFileUrl(video), video.fileName)
       .catch(() => null)
       .then((file) => {
         downloads.delete(video.id);

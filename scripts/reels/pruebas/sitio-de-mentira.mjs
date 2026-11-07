@@ -2,7 +2,8 @@
 //   - el sitio:   GET /api/social/videos/plan?n=4, con el secreto de los crons (lo acordado con la ruta real);
 //                 cada elemento trae su "archivo" = AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>
 //   - el almacén: PUT /storage/v1/object/upload/sign/reels/<archivo>?token=..., como las subidas firmadas de
-//                 Supabase Storage (responde { Key } y, si el archivo ya existe, el error "Duplicate")
+//                 Supabase Storage (responde { Key } y, si el archivo ya existe, el error "Duplicate"); por cada
+//                 video, el .mp4, la portada .jpg y la copia sin música (<archivo>-sin-musica.mp4)
 // Escucha solo en 127.0.0.1, en un puerto libre, y anota todo lo que le llega para que el test lo revise.
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -137,15 +138,16 @@ export function sampleItems() {
  *                 para probar que el generador no la deja pasar a lo que imprime
  *   music         { name, bytes }: la canción de fondo, servida en una dirección firmada como la del bucket
  *                 privado "musica" (va en `musica` de cada video por armar). Sin esto, el plan va sin música
+ *   silentCopy    false: el plan no trae `subir.sinMusica`, como el sitio de antes de la copia sin música
  *
  * El nombre de cada archivo lleva su huella (ver fileName), y un video "ya existe" solo si están arriba su
  * .mp4 y su .jpg con ese nombre exacto, igual que en el sitio de verdad.
  *
  * Devuelve { origin, requests, stored, tokens, musicToken, close }.
  *
- * @param {{ secret: string, items?: Record<string, any>[], date?: string, existing?: string[], planFailures?: { status: number, body?: unknown, headers?: Record<string, string> }[], rejectUploads?: string[], deleted?: number, unreadHistory?: number, music?: { name: string, bytes: Buffer } | null }} options
+ * @param {{ secret: string, items?: Record<string, any>[], date?: string, existing?: string[], planFailures?: { status: number, body?: unknown, headers?: Record<string, string> }[], rejectUploads?: string[], deleted?: number, unreadHistory?: number, music?: { name: string, bytes: Buffer } | null, silentCopy?: boolean }} options
  */
-export async function startFakeSite({ secret, items = sampleItems(), date = '2026-10-13', existing = [], planFailures = [], rejectUploads = [], deleted = 0, unreadHistory = 0, music = null }) {
+export async function startFakeSite({ secret, items = sampleItems(), date = '2026-10-13', existing = [], planFailures = [], rejectUploads = [], deleted = 0, unreadHistory = 0, music = null, silentCopy = true }) {
   /** @type {{ method: string, path: string, authorization: string | null, contentType: string | null, cacheControl: string | null, upsert: string | null, bytes: number }[]} */
   const requests = []; // todo lo que llegó
   /** @type {Map<string, Buffer>} */
@@ -166,7 +168,12 @@ export async function startFakeSite({ secret, items = sampleItems(), date = '202
   const planItem = (item) => {
     const archivo = item.archivo ?? fileName(item, date);
     const yaExiste = item.ya_existe ?? (existing.includes(item.id) || (stored.has(`${archivo}.mp4`) && stored.has(`${archivo}.jpg`)));
-    const subir = 'subir' in item ? item.subir : yaExiste ? null : { video: signedUrl(`${archivo}.mp4`), portada: signedUrl(`${archivo}.jpg`) };
+    const uploads = () => ({
+      video: signedUrl(`${archivo}.mp4`),
+      portada: signedUrl(`${archivo}.jpg`),
+      ...(silentCopy ? { sinMusica: signedUrl(`${archivo}-sin-musica.mp4`) } : {}),
+    });
+    const subir = 'subir' in item ? item.subir : yaExiste ? null : uploads();
     const musica = 'musica' in item ? item.musica : !yaExiste && music ? { nombre: music.name, url: `${origin}${musicPath}?token=${musicToken}` } : null;
     return { ...item, archivo, ya_existe: yaExiste, subir, musica };
   };
