@@ -181,7 +181,7 @@ const readSummary = unstable_cache(async (_slot: string) => computeSummary(), ['
 /**
  * "Lo que vamos a vigilar" en /black-friday (lib/black-friday-thermometer,
  * buildWatchList), del lunes 23 hasta que termina el evento. Fuera de esas
- * fechas no lee nada. Son unos 14 modelos: el historial de cada uno sale de
+ * fechas no lee nada. Son unos 16 modelos: el historial de cada uno sale de
  * la misma lectura que usa su ficha. Nunca lanza: sin datos, no hay lista.
  */
 export async function getWatchList(now: number = Date.now()): Promise<WatchItem[]> {

@@ -56,6 +56,44 @@ const CATALOG: [name: string, domain: string, model: string | null][] = [
   ['Marvels Wolverine Ps5', 'MLC-VIDEO_GAMES', null],
   ['Control Dualsense PS5 Playstation 5 Blanco', 'MLC-GAMEPADS_AND_JOYSTICKS', null],
   ['Consola Nintendo Switch 2', 'MLC-GAME_CONSOLES', null],
+  // Xbox Series X|S: las fichas con vendedor verde en Mercado Libre el 07-11-2026.
+  ['Consola Xbox Microsoft, Series S, de 512gb, digital, color blanco.', 'MLC-GAME_CONSOLES', 'xbox-series'],
+  ['Consola Microsoft Xbox Series S De 1tb, Color Blanco', 'MLC-GAME_CONSOLES', 'xbox-series'],
+  ['Consola Microsoft Xbox Series S 1tb White Standard Color Blanco', 'MLC-GAME_CONSOLES', 'xbox-series'],
+  ['Consola Xbox Series X Edición Digital 1tb Ssd Robot White Blanco', 'MLC-GAME_CONSOLES', 'xbox-series'],
+  ['Consola Xbox Series X 1tb Ssd 4k 120 Fps Uhd Internacional', 'MLC-GAME_CONSOLES', 'xbox-series'],
+  ['Microsoft Xbox Series X RRT-00002 1TB Standard color negro 2020', 'MLC-GAME_CONSOLES', 'xbox-series'],
+  ['Combo Xbox Series X 1tb + Control Inalambrico Xbox Color Verde', 'MLC-GAME_CONSOLES', 'xbox-series'],
+  // En el mismo tipo de producto, y no son una Xbox Series: la generación
+  // anterior, la ROG Xbox Ally (un PC portátil), un disco SSD de expansión, un
+  // soporte, un cargador y un juego.
+  ['Consola Xbox One S 1tb + Forza Horizon 4 Game Pass Live Gold', 'MLC-GAME_CONSOLES', null],
+  ['Consola Portátil Rog Xbox Ally X (2025) Negro', 'MLC-GAME_CONSOLES', null],
+  ['SSD Xbox Series X de 1 Tb con color negro', 'MLC-GAME_CONSOLES', null],
+  ['Soporte de juego vertical para consola Xbox Series S', 'MLC-GAME_CONSOLES', null],
+  ['Powera Play And Charge Kit For Xbox Series Xs', 'MLC-GAME_CONSOLES', null],
+  ['Capcom Street Fighter 6 Xbox Series X.', 'MLC-GAME_CONSOLES', null],
+  ['Control Xbox Series S Robot White Wireless - Mundojuegos', 'MLC-GAMEPADS_AND_JOYSTICKS', null],
+  // GTA 6: las cuatro ediciones de la ficha de catálogo y una preventa.
+  ['Grand Theft Auto VI GTA VI Standard Edition Code-in-Box PS5', 'MLC-VIDEO_GAMES', 'gta-6'],
+  ['Grand Theft Auto VI GTA VI Caja física con código de descarga para Xbox', 'MLC-VIDEO_GAMES', 'gta-6'],
+  ['ESRB Grand Theft Auto VI GTA VI XBOX Digital', 'MLC-VIDEO_GAMES', 'gta-6'],
+  ['ESRB Grand Theft Auto VI GTA VI Digital', 'MLC-VIDEO_GAMES', 'gta-6'],
+  [
+    'Grand Theft Auto Vi Playstation 5 Formato Fisico Con Codigo. Pre venta (el lanzamiento es el 12 de noviembre)',
+    'MLC-VIDEO_GAMES',
+    'gta-6',
+  ],
+  // Los GTA anteriores no son GTA 6, aunque digan "PS5"; el control DualSense
+  // de GTA VI y la taza son de otro tipo de producto.
+  ['GTA V Grand Theft Auto 5 Premium Juego Edición Física PS4', 'MLC-VIDEO_GAMES', null],
+  ['GTA V Grand Theft Auto 5 edición Standard Juego Formato Físico para PS5', 'MLC-VIDEO_GAMES', null],
+  ['Grand Theft Auto IV Edición estándar (Físico)', 'MLC-VIDEO_GAMES', null],
+  ['Grand Theft Auto: San Andreas Standard Edition Físico', 'MLC-VIDEO_GAMES', null],
+  ['Control Inalámbrico DualSense Grand Theft Auto VI Black Limited Edition', 'MLC-GAMEPADS_AND_JOYSTICKS', null],
+  ['Control Inalámbrico Dualsense GRAND THEFT AUTO VI LE White', 'MLC-GAMEPADS_AND_JOYSTICKS', null],
+  ['Taza de juego Grand Theft Auto 6 Gta Vi 2024', 'MLC-MUGS', null],
+  ['Sony PlayStation 4 500GB Grand Theft Auto V color negro azabache 2022', 'MLC-GAME_CONSOLES', null],
   ['Amazon Kindle E-reader 2024 11th Gen 6.0in 16gb Color Negro', 'MLC-E_READERS', 'kindle'],
   ['Ereader Amazon Kindle Paperwhite 7 2024 12 Gen 16 Gb Verde', 'MLC-E_READERS', 'kindle'],
   ['Amazon Kindle Colorsoft 16gb Modelo 2025 A Color Ereader', 'MLC-E_READERS', 'kindle'],
@@ -144,6 +182,15 @@ describe('modelPathsForSlugs (avisos a Bing desde la revisión de precios)', () 
   it('con un sufijo de desempate (otro producto con el mismo nombre) también', () => {
     expect(modelPathsForSlugs(['galaxy-s26-ultra-256gb-sky-blue-3f2b8'])).toEqual(['/modelo/galaxy-s26-ultra']);
   });
+
+  it('Xbox y GTA 6; el slug no trae el tipo de producto, así que el GTA VI de PS5 avisa también la de PS5 (un aviso de más)', () => {
+    expect(modelPathsForSlugs([slugify('Consola Microsoft Xbox Series S De 1tb, Color Blanco')])).toEqual(['/modelo/xbox-series']);
+    expect(modelPathsForSlugs([slugify('Grand Theft Auto VI GTA VI Standard Edition Code-in-Box PS5')]).sort()).toEqual([
+      '/modelo/gta-6',
+      '/modelo/ps5',
+    ]);
+    expect(modelPathsForSlugs([slugify('GTA V Grand Theft Auto 5 Premium Juego Edición Física PS4')])).toEqual([]);
+  });
 });
 
 describe('versionLabel', () => {
@@ -167,6 +214,24 @@ describe('versionLabel', () => {
       'Digital Slim + Juego Astro Bot y Gran Turismo 7',
     );
     expect(versionLabel(ps5, { name: 'Consola PlayStation 5 Pro 2TB Digital color blanco Sony', specs: {} })).toBe('Pro 2TB Digital');
+  });
+
+  it('Xbox: sin "Consola" ni la marca, y sin dejar un espacio antes de la coma', () => {
+    const xbox = getModel('xbox-series')!;
+    expect(versionLabel(xbox, { name: 'Consola Xbox Microsoft, Series S, de 512gb, digital, color blanco.', specs: {} })).toBe(
+      'Xbox, Series S, de 512gb, digital',
+    );
+    expect(versionLabel(xbox, { name: 'Consola Microsoft Xbox Series S De 1tb, Color Blanco', specs: {} })).toBe('Xbox Series S De 1tb');
+  });
+
+  it('GTA 6: sin el nombre del juego escrito de ninguna de sus formas', () => {
+    const gta = getModel('gta-6')!;
+    expect(versionLabel(gta, { name: 'Grand Theft Auto VI GTA VI Standard Edition Code-in-Box PS5', specs: {} })).toBe(
+      'Standard Edition Code-in-Box PS5',
+    );
+    expect(versionLabel(gta, { name: 'Grand Theft Auto VI GTA VI Caja física con código de descarga para Xbox', specs: {} })).toBe(
+      'Caja física con código de descarga para Xbox',
+    );
   });
 
   it('el Kindle: el modelo de la ficha sin repetir "Kindle", y el color', () => {
@@ -195,6 +260,17 @@ describe('textos de la página', () => {
   it('el título lleva "| ComparaTech" solo si cabe', () => {
     expect(modelTitle(iphone)).toBe('iPhone 17: precio en Chile e historial | ComparaTech');
     expect(modelTitle(getModel('galaxy-s26-ultra')!)).toBe('Samsung Galaxy S26 Ultra: precio en Chile e historial');
+    expect(modelTitle(getModel('xbox-series')!)).toBe('Xbox Series X|S: precio en Chile e historial | ComparaTech');
+    expect(modelTitle(getModel('gta-6')!)).toBe('GTA 6: precio en Chile e historial | ComparaTech');
+  });
+
+  it('la introducción nombra el alias: Xbox Series X y S, Grand Theft Auto VI', () => {
+    expect(modelIntro(getModel('xbox-series')!, [530_107, 952_831], 0)).toBe(
+      'Encontramos 2 versiones de Xbox Series X|S (Xbox Series X y Xbox Series S) a la venta en Mercado Libre, desde $530.107 hasta $952.831. Revisamos los precios varias veces al día.',
+    );
+    expect(modelIntro(getModel('gta-6')!, [94_990], 0)).toBe(
+      'Encontramos 1 versión de GTA 6 (Grand Theft Auto VI) a la venta en Mercado Libre, a $94.990. Revisamos los precios varias veces al día.',
+    );
   });
 
   it('el H1 no lleva artículo', () => {

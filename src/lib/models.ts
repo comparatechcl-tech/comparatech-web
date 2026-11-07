@@ -25,6 +25,12 @@ export interface ModelDef {
   name: string;
   /** Otro nombre con que se busca ("PlayStation 5"): va en el texto y en el dato estructurado. */
   alias?: string;
+  /**
+   * Otras formas en que los nombres de las fichas escriben el modelo ("GTA
+   * VI"), además del nombre y el alias. No distinguen una versión de otra:
+   * se sacan de su etiqueta (label 'nombre').
+   */
+  otherNames?: string[];
   brand: string;
   /**
    * Los tipos de producto de Mercado Libre de sus versiones. Una funda o un
@@ -154,6 +160,38 @@ export const MODELS: ModelDef[] = [
     exclude: [/\b(lector|unidad|disco|discos|portal|reproductor)\b/],
     label: 'nombre',
   },
+  // Para la semana de GTA 6 (sale el 19-11-2026 solo en PS5 y Xbox Series).
+  // Una sola página para la X y la S: en Mercado Libre hay unas 5 versiones
+  // con vendedor verde (07-11-2026), y dos páginas de 2 o 3 serían delgadas.
+  {
+    slug: 'xbox-series',
+    name: 'Xbox Series X|S',
+    alias: 'Xbox Series X y Xbox Series S',
+    brand: 'Microsoft',
+    domains: ['MLC-GAME_CONSOLES'],
+    // "Consola Xbox Microsoft, Series S, de 512gb": la marca puede ir entre
+    // medio. En el mismo tipo de producto hay juegos y accesorios con el
+    // nombre de la consola: una consola dice "consola" o su capacidad.
+    include: [/\bxbox\b/, /\bseries? (x|s)\b/, /\b(consola|consolas|videoconsola|console|\d+ ?(gb|tb))\b/],
+    // Los discos SSD de expansión y los soportes también dicen "1 TB" o "consola".
+    exclude: [/^(ssd|soporte|estuche|funda|skin|base)\b/, /\bexpansion\b/],
+    label: 'nombre',
+  },
+  {
+    slug: 'gta-6',
+    name: 'GTA 6',
+    alias: 'Grand Theft Auto VI',
+    otherNames: ['GTA VI'],
+    brand: 'Rockstar Games',
+    // Solo el juego. El control DualSense de GTA VI, la taza o el póster son
+    // de otro tipo de producto, y la consola con el juego es una versión de
+    // la consola.
+    domains: ['MLC-VIDEO_GAMES'],
+    // "vi" o "6" como palabra entera: GTA V, IV y San Andreas no calzan.
+    include: [/\b(gta|grand theft auto) (vi|6)\b/],
+    exclude: [/\b(steelbook|guia|poster|afiche|mapa)\b/],
+    label: 'nombre',
+  },
   {
     slug: 'kindle',
     name: 'Kindle',
@@ -275,6 +313,8 @@ function without(text: string, words: string[]): string {
   for (const word of words.filter(Boolean)) out = out.replace(new RegExp(`\\b${escapeRe(word)}\\b`, 'gi'), ' ');
   return out
     .replace(/\s+/g, ' ')
+    // "Consola Xbox Microsoft, Series S" sin la marca: "Xbox, Series S", no "Xbox , Series S".
+    .replace(/ ([,;:])/g, '$1')
     .replace(/^[\s\-–—,:;|•/+·]+|[\s\-–—,:;|•/+·]+$/g, '')
     .trim();
 }
@@ -305,6 +345,7 @@ export function versionLabel(model: ModelDef, product: { name: string; specs: Sp
         model.brand,
         model.name,
         model.alias ?? '',
+        ...(model.otherNames ?? []),
       ]);
       parts = [rest ? capitalize(shortProductName(rest, 60)) : null];
       break;
