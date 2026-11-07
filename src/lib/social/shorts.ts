@@ -96,6 +96,8 @@ export function shortsMetricoolInfo(
     return {
       ...videoBase('tiktok', texts.tiktok, videoUrl),
       tiktokData: {
+        // Metricool rechaza el video de TikTok sin título (06-11-2026).
+        title: texts.youtubeTitle.slice(0, 90),
         privacyOption: 'PUBLIC_TO_EVERYONE',
         commercialContentThirdParty: true,
         commercialContentOwnBrand: true,

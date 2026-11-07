@@ -87,7 +87,7 @@ describe('planShorts', () => {
     expect(tiktok.metricool.text).toBe(tiktok.texto);
     expect(tiktok.texto.includes(String.fromCharCode(10))).toBe(false);
     expect(youtube.texto.includes(String.fromCharCode(10))).toBe(true);
-    expect(tiktok.metricool.tiktokData).toMatchObject({ commercialContentThirdParty: true, privacyOption: 'PUBLIC_TO_EVERYONE', autoAddMusic: false });
+    expect(tiktok.metricool.tiktokData).toMatchObject({ title: expect.any(String), commercialContentThirdParty: true, privacyOption: 'PUBLIC_TO_EVERYONE', autoAddMusic: false });
     expect(youtube.metricool.youtubeData).toMatchObject({ type: 'short', privacy: 'public', madeForKids: false });
     expect(String((youtube.metricool.youtubeData as { title: string }).title).length).toBeGreaterThan(0);
     expect(youtube.metricool.text).toBe(youtube.texto);
