@@ -23,8 +23,8 @@ export interface ChristmasWindow {
   until: string;
 }
 
-/** Apagada: se enciende solo después de que el dueño apruebe las muestras. */
-export const CHRISTMAS_WINDOW: ChristmasWindow | null = null;
+/** Encendida: el dueño aprobó las muestras el 09-11-2026 ("enciéndelas hoy"). */
+export const CHRISTMAS_WINDOW: ChristmasWindow | null = { from: '2026-11-09', until: '2026-12-25' };
 
 const DAY_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 

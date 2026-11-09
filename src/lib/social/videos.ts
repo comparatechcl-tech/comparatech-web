@@ -90,10 +90,14 @@ export const VIDEO_BOARD_MAX = 8;
  * scripts/reels/plantillas por si se vuelve a variar; con más de una,
  * assignVideoTemplates las reparte sola según VIDEO_TEMPLATE_WEIGHTS.
  */
-export const VIDEO_TEMPLATES = ['impacto'] as const;
+//
+// Desde el 09-11-2026 se alterna con "navidad" (mismo reparto, con guirnalda,
+// nieve y "Regalo por menos de $X mil"): el dueño aprobó las muestras y pidió
+// alternarlas. Sacar 'navidad' después del 25-12.
+export const VIDEO_TEMPLATES = ['impacto', 'navidad'] as const;
 
 /** Cuántos videos de cada plantilla por vuelta. Una plantilla que no está acá pesa 1. */
-export const VIDEO_TEMPLATE_WEIGHTS: Readonly<Record<string, number>> = { impacto: 1 };
+export const VIDEO_TEMPLATE_WEIGHTS: Readonly<Record<string, number>> = { impacto: 1, navidad: 1 };
 
 /** ¿Es una plantilla que el generador arma hoy? Un video de una que se retiró ya no es el que saldría ahora. */
 function isCurrentTemplate(template: string): boolean {

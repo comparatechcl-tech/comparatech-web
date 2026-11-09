@@ -354,8 +354,20 @@ const fileOf = (date: string, p: SocialProduct, price: number = p.price, templat
   `${date}/${p.id}-${price}-${template}-${printOf(p, drop, price)}`;
 
 /**
- * Las plantillas son una lista fija en el código, y hoy hay una sola. Para
- * probar el día en que haya más, se agregan mientras dura el test.
+ * Las pruebas de este archivo se escribieron con una sola plantilla. Desde el
+ * 09-11-2026 se alterna con "navidad" hasta el 25-12: mientras corren queda
+ * solo "impacto", y el reparto real se revisa aparte con REAL_TEMPLATES.
+ */
+const REAL_TEMPLATES = [...VIDEO_TEMPLATES] as string[];
+beforeAll(() => {
+  (VIDEO_TEMPLATES as unknown as string[]).splice(0, VIDEO_TEMPLATES.length, 'impacto');
+});
+afterAll(() => {
+  (VIDEO_TEMPLATES as unknown as string[]).splice(0, VIDEO_TEMPLATES.length, ...REAL_TEMPLATES);
+});
+
+/**
+ * Para probar el día en que haya más plantillas, se agregan mientras dura el test.
  */
 async function withTemplates<T>(extra: string[], run: () => Promise<T>): Promise<T> {
   const list = VIDEO_TEMPLATES as unknown as string[];
@@ -656,12 +668,14 @@ describe('lo que el video dice y su huella', () => {
 describe('plantillas', () => {
   const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
 
-  it('hoy es una sola, "impacto": todos los videos del día salen con ella', () => {
-    expect(VIDEO_TEMPLATES).toEqual(['impacto']);
-    expect(VIDEO_TEMPLATE_WEIGHTS).toEqual({ impacto: 1 });
-    for (const template of VIDEO_TEMPLATES) expect(template).toMatch(/^[a-z0-9]+$/);
-    expect(assignVideoTemplates([], TODAY)).toEqual([]);
-    expect(assignVideoTemplates(['a', 'b', 'c', 'd'], TODAY)).toEqual(['impacto', 'impacto', 'impacto', 'impacto']);
+  it('hasta el 25-12 se alternan "impacto" y "navidad": la mitad de los videos del día con cada una', () => {
+    expect(REAL_TEMPLATES).toEqual(['impacto', 'navidad']);
+    expect(VIDEO_TEMPLATE_WEIGHTS).toEqual({ impacto: 1, navidad: 1 });
+    for (const template of REAL_TEMPLATES) expect(template).toMatch(/^[a-z0-9]+$/);
+    expect(assignVideoTemplates([], TODAY, new Map(), REAL_TEMPLATES)).toEqual([]);
+    const four = assignVideoTemplates(['a', 'b', 'c', 'd'], TODAY, new Map(), REAL_TEMPLATES);
+    expect(four.filter((t) => t === 'impacto')).toHaveLength(2);
+    expect(four.filter((t) => t === 'navidad')).toHaveLength(2);
   });
 
   it('con dos plantillas de pesos 3 y 1, de cada cuatro videos tres salen con la primera', () => {
