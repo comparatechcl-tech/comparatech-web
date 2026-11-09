@@ -105,6 +105,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   'MLC-WASHING_MACHINES': 'Lavadoras',
   'MLC-VACUUM_AND_STEAM_CLEANERS': 'Aspiradoras',
   'MLC-ELECTRIC_JUGS': 'Hervidores',
+  'MLC-AIR_FRYERS': 'Freidoras de aire',
   'MLC-FANS': 'Ventiladores',
   'MLC-ELECTRIC_HOME_HEATERS': 'Estufas',
   'MLC-OVENS': 'Hornos',

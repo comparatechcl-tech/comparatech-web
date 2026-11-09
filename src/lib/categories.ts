@@ -153,6 +153,8 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   'MLC-WASHING_MACHINES': 'electrodomesticos',
   'MLC-VACUUM_AND_STEAM_CLEANERS': 'electrodomesticos',
   'MLC-ELECTRIC_JUGS': 'electrodomesticos',
+  // El dueño quiso agregar una freidora de un aviso del canal de afiliados (09-11-2026).
+  'MLC-AIR_FRYERS': 'electrodomesticos',
   'MLC-OVENS': 'electrodomesticos',
   'MLC-COOKTOPS': 'electrodomesticos',
   'MLC-RANGES': 'electrodomesticos',
