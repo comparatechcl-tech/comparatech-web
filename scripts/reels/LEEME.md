@@ -135,10 +135,12 @@ arman a mano con `--plantilla` y vuelven a la lista si el dueño quiere variar.
 reparto. Arriba dice "Regalo por menos de $300 mil" (la misma cuenta de `impacto`), el cierre llama a "Mándaselo
 a quien le quieras regalar" y lleva un moño rojo en vez de la línea cian, cuelga una guirnalda de luces que
 titilan en la franja de arriba (la que tapan las apps), cae nieve sobre la hoja azul noche (nunca sobre la foto)
-y saltan chispas doradas cuando pega el precio. Está en `plantillas/index.mjs` para armarla a mano, pero **no**
-en `VIDEO_TEMPLATES`: entra al reel diario solo cuando el dueño apruebe las muestras, agregándola ahí (sola, para
-que todos los videos salgan con ella, o junto a `impacto` con sus pesos en `VIDEO_TEMPLATE_WEIGHTS`). El moño es
-el mismo de las historias de Navidad (`scripts/piezas/navidad.mjs` lo copia a `src/lib/content/christmas.ts`).
+y saltan chispas doradas cuando pega el precio. Desde el 09-11 (el dueño: "más navideño aún") el logo lleva el
+gorro del Viejito Pascuero, en la pastilla de arriba y en el cierre, y en el cierre se asoman abajo el Viejito
+Pascuero con su saco de regalos (a la izquierda) y un arbolito con un bastón de dulce. Los dibujos son propios,
+en SVG (`plantillas/navidad/dibujos.mjs`). El dueño la aprobó el 09-11: desde ese día está en
+`VIDEO_TEMPLATES`, alternada con `impacto`. Los dibujos (moño, gorro, Viejito Pascuero, arbolito) son los mismos de
+las historias de Navidad: `node scripts/piezas/navidad.mjs > src/lib/content/christmas-art.ts` los pasa a PNG.
 
 `estudio` se acomoda sola de dos maneras según la forma de la foto:
 

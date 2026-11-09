@@ -1,11 +1,11 @@
 // La plantilla "navidad": "impacto" (la del reel diario) con adornos de Navidad. Mismos momentos, mismos tiempos
 // (9 s con gancho) y mismo reparto de la pantalla. Cambia lo que dice arriba ("Regalo por menos de $X mil"), la
 // llamada del cierre ("Mándaselo a quien le quieras regalar") y se suman una guirnalda de luces arriba, nieve
-// sobre la hoja azul noche, chispas doradas cuando pega el precio y un moño rojo en el cierre (ver escena.mjs).
+// sobre la hoja azul noche, chispas doradas cuando pega el precio, el gorro del Viejito Pascuero en el logo y, en
+// el cierre, un moño rojo, el Viejito Pascuero con su saco y un arbolito (ver escena.mjs).
 //
-// Está registrada en ../index.mjs para armarla a mano (hacer.mjs --plantilla navidad), pero NO en
-// VIDEO_TEMPLATES (src/lib/social/videos.ts): una plantilla entra al reel diario solo después de que el dueño
-// apruebe las muestras.
+// El dueño la aprobó el 09-11-2026: va en el reel diario alternada con "impacto" (VIDEO_TEMPLATES en
+// src/lib/social/videos.ts). Se saca de ahí cuando termine la temporada.
 import { FPS, CTA_POR_DEFECTO, preparar, tiempos as tiemposSegunGancho, momentos, pintor } from './escena.mjs';
 
 export { FPS, CTA_POR_DEFECTO };

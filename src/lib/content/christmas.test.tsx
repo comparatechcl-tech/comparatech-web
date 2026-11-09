@@ -148,5 +148,36 @@ describe('la pieza con la temática de Navidad', () => {
     expect(at(72, 1370)[2]).toBeGreaterThan(80);
     expect(at(72, 1440)[2]).toBeLessThan(40);
     for (const [x, y] of [[540, 1500], [200, 1560], [880, 1600]]) expect(Math.max(...at(x, y))).toBeLessThan(90);
+    // El centro del lugar del sticker queda limpio: ni el Viejito Pascuero ni el arbolito llegan ahí.
+    let brightest = 0;
+    for (let y = 1430; y < 1620; y += 6) for (let x = 230; x < 860; x += 6) brightest = Math.max(brightest, ...at(x, y));
+    expect(brightest).toBeLessThan(90);
+    // Abajo a la derecha se asoma el Viejito Pascuero (rojo del gorro y blanco de la barba) y abajo a la izquierda
+    // está el arbolito (verde).
+    const some = (x0: number, x1: number, y0: number, y1: number, test: (c: number[]) => boolean) => {
+      for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) if (test(at(x, y))) return true;
+      return false;
+    };
+    expect(some(900, 1064, 1430, 1600, ([r, g, b]) => r > 180 && g < 90 && b < 100)).toBe(true);
+    expect(some(900, 1064, 1430, 1600, ([r, g, b]) => r > 235 && g > 235 && b > 235)).toBe(true);
+    expect(some(30, 200, 1460, 1610, ([r, g, b]) => g > 120 && r < 90 && b < 140)).toBe(true);
+    // El gorro sobre el logo de la cabecera: rojo justo arriba de la lupa (x=72 a 134, y=250 a 280).
+    expect(some(64, 124, 250, 282, ([r, g, b]) => r > 180 && g < 90 && b < 100)).toBe(true);
+  }, 60_000);
+
+  it('sin la temática no lleva gorro, ni Viejito Pascuero, ni arbolito', async () => {
+    const response = new ImageResponse(<OfferTemplate product={product()} photo={null} format="story" />, {
+      ...OG_SIZES.story,
+      fonts: await ogFonts('story'),
+    });
+    const { data, info } = await sharp(Buffer.from(await response.arrayBuffer())).raw().toBuffer({ resolveWithObject: true });
+    let reddest = 0;
+    for (let y = 240; y < 1620; y += 4) {
+      for (let x = 0; x < 1080; x += 4) {
+        const i = (y * info.width + x) * info.channels;
+        if (data[i + 1] < 90 && data[i + 2] < 100) reddest = Math.max(reddest, data[i]);
+      }
+    }
+    expect(reddest).toBeLessThan(120);
   }, 60_000);
 });

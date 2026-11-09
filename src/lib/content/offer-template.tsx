@@ -24,7 +24,8 @@
  */
 import { socialProductName } from '@/lib/content/social-name';
 import { captionDiscount, chileDateTime, formatPrice } from '@/lib/content/captions';
-import { CHRISTMAS_BOW_PNG, giftBudgetBand, snowFor, type OfferTheme } from '@/lib/content/christmas';
+import { giftBudgetBand, snowFor, type OfferTheme } from '@/lib/content/christmas';
+import { CHRISTMAS_BOW_PNG, CHRISTMAS_CORNER_PNG, CHRISTMAS_HAT_PNG, CHRISTMAS_SANTA_PNG } from '@/lib/content/christmas-art';
 import type { OgProduct } from '@/lib/content/og-template';
 
 const COLORS = {
@@ -105,6 +106,14 @@ const RIBBON_GAP = 24; // del listón a la marca del producto
 const RIBBON_EDGE = 3; // filete dorado arriba y abajo del listón
 const BOW_W = 132;
 const BOW_H = 99;
+// El gorro sobre el logo de la cabecera (62 px): se apoya en el borde de arriba de la lupa, inclinado.
+const HAT = { w: 50, h: 42, left: -7, top: -21 };
+// Solo en la historia, en las esquinas de abajo y fuera del centro (ahí va el sticker del enlace, ~x 260 a 820):
+// el Viejito Pascuero se asoma a la derecha y el arbolito con el bastón de dulce va a la izquierda. Los dos
+// "salen" de un montón de nieve que termina en y=1620, donde empieza lo que tapa Instagram.
+const SANTA = { w: 180, h: 198, left: 884 };
+const CORNER = { w: 190, h: 162, left: 26 };
+const ART_BOTTOM = 1620;
 const XMAS = {
   ribbon: 'linear-gradient(180deg, #8A0E22 0%, #B8182F 24%, #D3293F 50%, #B8182F 76%, #8A0E22 100%)',
   gold: 'linear-gradient(90deg, #B8862B 0%, #F3D27A 50%, #B8862B 100%)',
@@ -281,11 +290,26 @@ export function OfferTemplate({
       {giftBudget ? (
         <img src={CHRISTMAS_BOW_PNG} alt="" width={BOW_W} height={BOW_H} style={{ position: 'absolute', left: 1080 - MARGIN - BOW_W, top: ribbonTop + RIBBON_H / 2 - BOW_H / 2 }} />
       ) : null}
+      {/* Navidad, solo en la historia: el arbolito a la izquierda y el Viejito Pascuero a la derecha, abajo */}
+      {giftBudget && frame.glow ? (
+        <img src={CHRISTMAS_CORNER_PNG} alt="" width={CORNER.w} height={CORNER.h} style={{ position: 'absolute', left: CORNER.left, top: ART_BOTTOM - CORNER.h }} />
+      ) : null}
+      {giftBudget && frame.glow ? (
+        <img src={CHRISTMAS_SANTA_PNG} alt="" width={SANTA.w} height={SANTA.h} style={{ position: 'absolute', left: SANTA.left, top: ART_BOTTOM - SANTA.h }} />
+      ) : null}
 
       {/* Marca a la izquierda, datos del precio a la derecha */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: HEADER_H, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <img src={LOGO_PNG} alt="" width={62} height={62} />
+          {giftBudget ? (
+            // Navidad: el logo con el gorro del Viejito Pascuero
+            <div style={{ display: 'flex', position: 'relative', width: 62, height: 62 }}>
+              <img src={LOGO_PNG} alt="" width={62} height={62} />
+              <img src={CHRISTMAS_HAT_PNG} alt="" width={HAT.w} height={HAT.h} style={{ position: 'absolute', left: HAT.left, top: HAT.top }} />
+            </div>
+          ) : (
+            <img src={LOGO_PNG} alt="" width={62} height={62} />
+          )}
           <div style={{ display: 'flex', marginLeft: 14, fontSize: 50, fontWeight: 800, letterSpacing: -1.5 }}>
             <span>Compara</span>
             <span style={{ color: COLORS.cyan }}>Tech</span>

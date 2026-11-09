@@ -1,11 +1,14 @@
-// Los adornos de la plantilla "navidad": el moño, las chispas doradas, la guirnalda de luces de arriba y la
-// nieve que cae sobre la hoja azul noche. Nada de esto es texto ni tapa la foto del producto: la guirnalda
-// cuelga en la franja de arriba (la que tapan las apps) y la nieve cae solo sobre la hoja oscura.
+// Los adornos de la plantilla "navidad": el moño, las chispas doradas, la guirnalda de luces de arriba, la
+// nieve que cae sobre la hoja azul noche, el gorro del Viejito Pascuero sobre el logo y, en el cierre, el Viejito
+// Pascuero y el arbolito (los dibujos están en dibujos.mjs). Nada de esto es texto ni tapa la foto del producto:
+// la guirnalda cuelga en la franja de arriba (la que tapan las apps), la nieve cae solo sobre la hoja oscura y el
+// Viejito Pascuero sale recién en el cierre, cuando ya no hay producto en pantalla.
 //
 // El moño es el mismo de las piezas de historia (src/lib/content/christmas.ts): scripts/piezas/navidad.mjs lo
 // toma de aquí para imprimir su constante. Si se cambia el dibujo, se vuelve a pegar allá.
 import sharp from 'sharp';
 import { W, H, azar, limitar } from '../../pintar.mjs';
+import { GORRO_SVG, VIEJITO_SVG, RINCON_SVG } from './dibujos.mjs';
 
 // Los colores de los adornos. La marca sigue siendo azul noche y cian: el rojo y el dorado van solo en el moño,
 // las luces y las chispas.
@@ -47,13 +50,29 @@ async function capaDeSvg(svg, w, h, caja) {
   return { w: info.width, h: info.height, data: new Uint8Array(data.buffer, data.byteOffset, data.length) };
 }
 
+/**
+ * Dónde va el gorro respecto del logo, en fracciones del lado del logo: su esquina de arriba a la izquierda y su
+ * ancho (el alto sale de la proporción del dibujo, 120x100). Así se apoya en el borde de arriba de la lupa,
+ * inclinado. Es la misma posición de la cabecera de las historias (src/lib/content/offer-template.tsx).
+ */
+export const GORRO_EN_LOGO = { x: -0.113, y: -0.339, ancho: 0.806 };
+
 /** Las capas fijas de los adornos (se dibujan una vez por video y viajan en la escena a los hilos). */
-export async function capasDeAdornos() {
+export async function capasDeAdornos({ logoChico, logoGrande }) {
+  const anchoChico = Math.round(logoChico * GORRO_EN_LOGO.ancho);
+  const anchoGrande = Math.round(logoGrande * GORRO_EN_LOGO.ancho);
   return {
     // El moño del cierre, al doble de como se muestra (se anima achicado, igual que el logo).
     mono: await capaDeSvg(MONO_SVG, 320, 240, 200),
     chispaOro: await capaDeSvg(chispaSvg('#F6CF62'), 64, 64, 64),
     chispaBlanca: await capaDeSvg(chispaSvg('#FFF6DD'), 64, 64, 64),
+    // El gorro: uno al tamaño del logo de la pastilla de arriba y otro para el logo grande del cierre (que se
+    // anima achicado, así que va al mismo tamaño de su capa).
+    gorroChico: await capaDeSvg(GORRO_SVG, anchoChico, Math.round((anchoChico * 100) / 120), 120),
+    gorroGrande: await capaDeSvg(GORRO_SVG, anchoGrande, Math.round((anchoGrande * 100) / 120), 120),
+    // El Viejito Pascuero (280x308) y el arbolito con el bastón (200x170) del cierre, al tamaño en que se muestran.
+    viejito: await capaDeSvg(VIEJITO_SVG, 280, 308, 200),
+    rincon: await capaDeSvg(RINCON_SVG, 200, 170, 200),
   };
 }
 

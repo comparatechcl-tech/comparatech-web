@@ -7,8 +7,8 @@ const PLANTILLAS = {
   estudio: () => import('./estudio/index.mjs'),
   bloques: () => import('./bloques/index.mjs'),
   impacto: () => import('./impacto/index.mjs'),
-  // Para armar a mano y mostrarle muestras al dueño. Entra al reel diario solo si se agrega a VIDEO_TEMPLATES
-  // (src/lib/social/videos.ts), y eso, solo con su OK.
+  // La de Navidad: el dueño la aprobó el 09-11-2026 y desde ese día va en el reel diario, alternada con
+  // "impacto" (VIDEO_TEMPLATES en src/lib/social/videos.ts).
   navidad: () => import('./navidad/index.mjs'),
 };
 

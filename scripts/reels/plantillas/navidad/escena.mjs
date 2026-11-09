@@ -6,7 +6,10 @@
 //     línea cian;
 //   - una guirnalda de luces que titilan cuelga arriba (en la franja que tapan las apps), cae nieve sobre la hoja
 //     azul noche (nunca sobre la foto), cuando pega el precio saltan chispas doradas y, al subir la hoja para el
-//     cierre, la nieve se apura un momento.
+//     cierre, la nieve se apura un momento;
+//   - el logo lleva el gorro del Viejito Pascuero (en la pastilla de arriba y en el cierre) y, en el cierre, el
+//     Viejito Pascuero se asoma abajo a la izquierda con su saco de regalos y aparece un arbolito con un bastón
+//     de dulce (el dueño, 09-11-2026: "más navideño aún con algún gorro de navidad, algún Santa Claus").
 // Nada de esto tapa el producto ni dice algo que no venga en los datos.
 //
 // La foto real del producto va grande sobre un fondo claro de estudio. El video tiene cuatro momentos, y todos
@@ -22,7 +25,7 @@ import { leerFoto, prepararFoto, achicar } from '../../foto.mjs';
 import { W, H, fase, mezcla, suave, rgb, limitar, poner, ponerConBrillo, ponerEscalada, rectangulo, ponerFoto, sombraDeApoyo, resplandor } from '../../pintar.mjs';
 import { fondoEstudio, hojaOscura, destelloHoja } from '../impacto/fondos.mjs';
 import { fraseDePrecio } from '../impacto/escena.mjs';
-import { capasDeAdornos, pintarCable, ampolletas, pintarAmpolletas, copos, pintarNieve } from './adornos.mjs';
+import { capasDeAdornos, pintarCable, ampolletas, pintarAmpolletas, copos, pintarNieve, GORRO_EN_LOGO } from './adornos.mjs';
 
 export const FPS = 30;
 export const CTA_POR_DEFECTO = 'Mándaselo a quien le quieras regalar';
@@ -47,6 +50,13 @@ const PROPORCION_APAISADA = 1.2; // desde esta proporción (ancho/alto) le convi
 const ESTIRAR_MAX = 1.6; // una foto chica no se agranda más que esto: se vería borrosa
 const RADIO = 64; // esquinas de la hoja
 const MONO_ALTO = 120; // el moño del cierre se muestra a 160x120 (la capa es del doble)
+// El logo dentro de la pastilla de la marca (capas.pastillaMarca): 44 px, a 14 del borde y centrado en el alto.
+const LOGO_PASTILLA = { x: 14, lado: 44 };
+const LOGO_GRANDE = 400; // la capa del logo del cierre (se muestra a la mitad)
+// El Viejito Pascuero y el arbolito del cierre: abajo, sobre el borde de lo que dejan libre las apps (y=1500), a la
+// izquierda (los botones están a la derecha) y sin tocar lo escrito, que termina más arriba.
+const VIEJITO = { x: 30 }; // 280x308: de x=30 a 310 (la letra chica del cierre empieza más a la derecha)
+const RINCON = { x: 700 }; // 200x170: de x=700 a 900 (los botones de las apps empiezan en x=924)
 
 /** Texto de la consola: 0,5 */
 const coma = (n, d = 1) => n.toFixed(d).replace('.', ',');
@@ -276,7 +286,7 @@ async function armarPrecio(producto, dicho) {
 // --- Z. El cierre -------------------------------------------------------------------------------------------
 async function armarCierre(producto, cta, dicho) {
   const Z = {};
-  Z.logo = await capas.logoGrande(400); // se muestra a 200 px
+  Z.logo = await capas.logoGrande(LOGO_GRANDE); // se muestra a 200 px
   Z.luz = resplandor(960, 960, 0.2);
   Z.marca = await capas.nombreMarca(96);
   // La llamada: en negrita, de 76 px o más si cabe en dos renglones; si es larga baja hasta 40 px y, si ni así,
@@ -330,7 +340,8 @@ export async function preparar(producto, cta, { zonas = false } = {}) {
   const B = await armarNombre(producto, apaisada, dicho);
   const C = await armarPrecio(producto, dicho);
   const Z = await armarCierre(producto, cta, dicho);
-  const N = await capasDeAdornos(); // el moño y las chispas: no son texto, no van en `dicho`
+  // Los adornos (moño, chispas, gorros, Viejito Pascuero, arbolito): no son texto, no van en `dicho`.
+  const N = await capasDeAdornos({ logoChico: LOGO_PASTILLA.lado, logoGrande: LOGO_GRANDE });
   const escenas = { A, B, C };
   const claves = A ? ['A', 'B', 'C'] : ['B', 'C'];
 
@@ -449,6 +460,9 @@ export function pintor(escena, T) {
   const fondo = fondoEstudio();
   pintarCable(fondo); // navidad: el cable de la guirnalda va pintado en el fondo; las ampolletas, cuadro a cuadro
   poner(fondo, L.marca, MARGEN, MARCA_Y);
+  // navidad: el gorro sobre el logo de la pastilla (asoma unos px por arriba de ella).
+  const logoY = MARCA_Y + (MARCA_ALTO - LOGO_PASTILLA.lado) / 2;
+  poner(fondo, N.gorroChico, MARGEN + LOGO_PASTILLA.x + GORRO_EN_LOGO.x * LOGO_PASTILLA.lado, logoY + GORRO_EN_LOGO.y * LOGO_PASTILLA.lado);
   const hoja = hojaOscura({ radio: RADIO });
   const luces = ampolletas();
   const nieve = copos();
@@ -641,7 +655,25 @@ export function pintor(escena, T) {
       if (pLogo > 0) {
         poner(dst, Z.luz, W / 2 - Z.luz.w / 2, Z.logoY - Z.luz.h / 2, suave.sale(pLogo));
         const deriva = 1 + 0.03 * fase(t, c0 + 0.25, T.fin); // sigue acercándose apenas: el cierre no queda congelado
-        ponerEscalada(dst, Z.logo, W / 2, Z.logoY, 0.5 * (0.6 + 0.4 * suave.rebote(pLogo)) * deriva, Math.min(1, pLogo * 3.5));
+        const k = 0.5 * (0.6 + 0.4 * suave.rebote(pLogo)) * deriva;
+        ponerEscalada(dst, Z.logo, W / 2, Z.logoY, k, Math.min(1, pLogo * 3.5));
+        // navidad: el gorro va pegado al logo, con su misma escala (su centro, en fracciones del lado del logo).
+        const g = N.gorroGrande;
+        const cx = (GORRO_EN_LOGO.x - 0.5) * LOGO_GRANDE + g.w / 2;
+        const cy = (GORRO_EN_LOGO.y - 0.5) * LOGO_GRANDE + g.h / 2;
+        ponerEscalada(dst, g, W / 2 + cx * k, Z.logoY + cy * k, k, Math.min(1, pLogo * 3.5));
+      }
+      // navidad: el Viejito Pascuero sube saludando desde abajo a la izquierda y el arbolito aparece a su lado.
+      const pViejito = fase(t, c0 + 0.62, c0 + 1.12);
+      if (pViejito > 0) {
+        const v = N.viejito;
+        const vaiven = 3 * Math.sin(2 * Math.PI * 0.9 * (t - c0 - 1.12)) * fase(t, c0 + 1.12, c0 + 1.4);
+        poner(dst, v, VIEJITO.x, SEGURO.abajo - v.h + (1 - suave.sale(pViejito)) * 70 + vaiven, Math.min(1, pViejito * 2.5));
+      }
+      const pRincon = fase(t, c0 + 0.78, c0 + 1.16);
+      if (pRincon > 0) {
+        const r = N.rincon;
+        ponerEscalada(dst, r, RINCON.x + r.w / 2, SEGURO.abajo, 0.7 + 0.3 * suave.rebote(pRincon), Math.min(1, pRincon * 3), [0.5, 1]);
       }
       const pMarca = fase(t, c0 + 0.36, c0 + 0.86);
       if (pMarca > 0) {
