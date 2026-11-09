@@ -156,8 +156,10 @@ export const MODELS: ModelDef[] = [
     include: [/\b(ps5|ps 5|playstation 5|play station 5)\b/],
     // El lector de discos que se vende aparte está en el mismo tipo de producto,
     // y también el PlayStation Portal (un reproductor remoto, no una PS5): el
-    // 06-11-2026 la página decía "PS5 desde $272.924" por el Portal.
-    exclude: [/\b(lector|unidad|disco|discos|portal|reproductor)\b/],
+    // 06-11-2026 la página decía "PS5 desde $272.924" por el Portal. La palabra
+    // "disco" sola no basta: "PS5 Slim Disco 1tb" es la consola con lector, y
+    // hasta el 07-11-2026 quedaba fuera.
+    exclude: [/^(unidad|lector|lectora)\b/, /\b(lector|lectora|unidad) de discos?\b/, /\b(portal|reproductor)\b/],
     label: 'nombre',
   },
   // Para la semana de GTA 6 (sale el 19-11-2026 solo en PS5 y Xbox Series).

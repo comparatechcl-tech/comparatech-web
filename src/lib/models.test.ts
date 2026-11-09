@@ -50,8 +50,17 @@ const CATALOG: [name: string, domain: string, model: string | null][] = [
   ['Consola Playstation 5 Digital Slim + Juego Astro Bot y Gran Turismo 7', 'MLC-GAME_CONSOLES', 'ps5'],
   ['Consola PS5 Slim Standard + Juego Astro Bot Y Gt7', 'MLC-GAME_CONSOLES', 'ps5'],
   ['Consola PlayStation 5 Pro 2TB Digital color blanco Sony', 'MLC-GAME_CONSOLES', 'ps5'],
+  // La consola con lector sí es una PS5, aunque diga "disco" o "lector".
+  ['Consola Playstation Ps5 Slim Disco 1tb Fortnite Bundle Blanco', 'MLC-GAME_CONSOLES', 'ps5'],
+  ['Consola Sony Playstation 5 Slim Disco Bundle Astro Bot 1tb', 'MLC-GAME_CONSOLES', 'ps5'],
+  ['Consola Sony PlayStation 5 Slim Ghost de Yotei Edición Limitada con Disco y 1 TB', 'MLC-GAME_CONSOLES', 'ps5'],
+  ['Playstation 5 1tb Slim Lector Con Ratchet Y Clank Y Returnal Blanco', 'MLC-GAME_CONSOLES', 'ps5'],
+  ['Consola Playstation 5 Slim Edición Digital + Unidad Disco Blanco', 'MLC-GAME_CONSOLES', 'ps5'],
   // El lector de discos que se vende aparte, y los juegos y controles, no son una PS5.
   ['Unidad Lector de discos consola Ps5 Slim+ps5 pro color blanco', 'MLC-GAME_CONSOLES', null],
+  ['Unidad De Disco P/ Consola Playstation 5 Edición Digital Slim + Pro Ps5 Color Blanco', 'MLC-GAME_CONSOLES', null],
+  ['Lector de discos para PS5 Digital Slim', 'MLC-GAME_CONSOLES', null],
+  ['Sony Lector De Discos Para Consola PS5 Pro', 'MLC-GAME_CONSOLES', null],
   ['Reproductor remoto PlayStation Portal para consola PS5 Negro', 'MLC-GAME_CONSOLES', null],
   ['Marvels Wolverine Ps5', 'MLC-VIDEO_GAMES', null],
   ['Control Dualsense PS5 Playstation 5 Blanco', 'MLC-GAMEPADS_AND_JOYSTICKS', null],
