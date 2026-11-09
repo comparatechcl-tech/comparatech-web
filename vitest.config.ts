@@ -19,6 +19,10 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Con todo el conjunto corriendo a la vez, algunas pruebas de redes
+    // (meta-daily, carrusel, cola de candidatos) pasaban los 5 s por defecto
+    // en este PC y fallaban sin error real; solas pasan en menos de 1 s.
+    testTimeout: 20_000,
     // scripts/reels: lo que arma los videos del día corre fuera del sitio
     // (GitHub Actions), pero sus pruebas van con las demás.
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/reels/**/*.test.ts'],
