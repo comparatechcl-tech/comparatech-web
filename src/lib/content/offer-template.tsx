@@ -24,6 +24,7 @@
  */
 import { socialProductName } from '@/lib/content/social-name';
 import { captionDiscount, chileDateTime, formatPrice } from '@/lib/content/captions';
+import { CHRISTMAS_BOW_PNG, giftBudgetBand, snowFor, type OfferTheme } from '@/lib/content/christmas';
 import type { OgProduct } from '@/lib/content/og-template';
 
 const COLORS = {
@@ -94,6 +95,22 @@ const BAND_H = 110; // franja del descuento
 const RULE_H = 8; // sin descuento, la franja queda en un filete cian grueso
 const PANEL_H = 172; // bloque del precio...
 const PANEL_CHIPS_H = 252; // ...y con la fila de etiquetas, con aire arriba y abajo (el dueño, 20-10-2026)
+
+// Temática de Navidad (lib/content/christmas): un listón rojo de lado a lado entre la cabecera y el nombre,
+// con "Idea de regalo" y el rango de precio, y el moño a la derecha. La tarjeta termina en el mismo punto: lo
+// que ocupa el listón lo cede la foto.
+const RIBBON_TOP_GAP = 24; // de la cabecera al listón (el moño asoma 17 px por arriba y por abajo)
+const RIBBON_H = 64;
+const RIBBON_GAP = 24; // del listón a la marca del producto
+const RIBBON_EDGE = 3; // filete dorado arriba y abajo del listón
+const BOW_W = 132;
+const BOW_H = 99;
+const XMAS = {
+  ribbon: 'linear-gradient(180deg, #8A0E22 0%, #B8182F 24%, #D3293F 50%, #B8182F 76%, #8A0E22 100%)',
+  gold: 'linear-gradient(90deg, #B8862B 0%, #F3D27A 50%, #B8862B 100%)',
+  goldDot: '#F3D27A',
+  cream: '#FFF3DC',
+};
 
 // Nombre: solo dos tamaños, y casi iguales, para que las piezas de un mismo día se vean como una serie.
 const NAME_SPACING = -0.5;
@@ -174,12 +191,19 @@ export function OfferTemplate({
   product,
   photo,
   format,
+  theme = null,
 }: {
   product: OgProduct;
   photo: string | null;
   format: OfferFormat;
+  /** 'navidad': el listón con "Idea de regalo" y la nieve (lib/content/christmas). Sin tema, la pieza de siempre. */
+  theme?: OfferTheme | null;
 }) {
   const frame = FRAMES[format];
+  // Navidad: el rango sale del mismo precio que muestra la pieza. Sin un precio válido no hay listón.
+  const giftBudget = theme === 'navidad' ? giftBudgetBand(product.price) : null;
+  const ribbonTop = frame.top + HEADER_H + RIBBON_TOP_GAP;
+  const snow = giftBudget ? snowFor(frame.height, { top: frame.top, cardBottom: frame.cardBottom, sticker: frame.glow }) : [];
   const discount = captionDiscount(product);
   const hasList = discount > 0 && !!product.original_price;
   const checked = chileDateTime(product.price_checked_at);
@@ -203,7 +227,8 @@ export function OfferTemplate({
   const priceSize = Math.min(PRICE_MAX, Math.floor((INNER_W - CARD_PAD * 2) / priceEm));
 
   // La tarjeta empieza donde termina el nombre y acaba siempre en el mismo punto; la foto ocupa lo que quede.
-  const cardH = frame.cardBottom - (frame.top + HEADER_H + TITLE_GAP + titleH + CARD_GAP);
+  const titleGap = giftBudget ? RIBBON_TOP_GAP + RIBBON_H + RIBBON_GAP : TITLE_GAP;
+  const cardH = frame.cardBottom - (frame.top + HEADER_H + titleGap + titleH + CARD_GAP);
   const bandH = hasList ? BAND_H : RULE_H;
   const panelH = hasChips ? PANEL_CHIPS_H : PANEL_H;
   const photoH = cardH - HAIRLINE * 2 - bandH - panelH;
@@ -237,6 +262,25 @@ export function OfferTemplate({
       <div style={{ display: 'flex', position: 'absolute', left: 0, top: 0, width: 1080, height: 600, backgroundImage: 'linear-gradient(180deg, #0D1B36 0%, #070B14 100%)' }} />
       {/* Luz bajo la tarjeta: la historia se ve terminada aunque no lleve el sticker del enlace */}
       {frame.glow ? <div style={{ display: 'flex', position: 'absolute', left: 0, top: frame.cardBottom - 70, width: 1080, height: 400, backgroundImage: 'radial-gradient(ellipse at 50% 22%, rgba(0,212,255,0.2) 0%, rgba(0,212,255,0) 68%)' }} /> : null}
+      {/* Navidad: nieve tenue en los bordes, detrás de todo */}
+      {snow.map((f, i) => (
+        <div key={`s${i}`} style={{ display: 'flex', position: 'absolute', left: f.x - f.r, top: f.y - f.r, width: f.r * 2, height: f.r * 2, borderRadius: f.r, backgroundColor: `rgba(255,255,255,${f.a})` }} />
+      ))}
+      {/* Navidad: el listón de lado a lado, con "Idea de regalo" y el rango de precio, y el moño a la derecha */}
+      {giftBudget ? (
+        <div style={{ display: 'flex', flexDirection: 'column', position: 'absolute', left: 0, top: ribbonTop, width: 1080, height: RIBBON_H }}>
+          <div style={{ display: 'flex', width: 1080, height: RIBBON_EDGE, backgroundImage: XMAS.gold }} />
+          <div style={{ display: 'flex', alignItems: 'center', width: 1080, height: RIBBON_H - RIBBON_EDGE * 2, paddingLeft: MARGIN, backgroundImage: XMAS.ribbon }}>
+            <div style={{ display: 'flex', fontSize: 27, fontWeight: 800, letterSpacing: 3, color: XMAS.cream, textTransform: 'uppercase' }}>Idea de regalo</div>
+            <div style={{ display: 'flex', width: 9, height: 9, margin: '0 18px', borderRadius: 5, backgroundColor: XMAS.goldDot }} />
+            <div style={{ display: 'flex', fontSize: 32, fontWeight: 600, letterSpacing: -0.4, color: COLORS.white }}>{giftBudget}</div>
+          </div>
+          <div style={{ display: 'flex', width: 1080, height: RIBBON_EDGE, backgroundImage: XMAS.gold }} />
+        </div>
+      ) : null}
+      {giftBudget ? (
+        <img src={CHRISTMAS_BOW_PNG} alt="" width={BOW_W} height={BOW_H} style={{ position: 'absolute', left: 1080 - MARGIN - BOW_W, top: ribbonTop + RIBBON_H / 2 - BOW_H / 2 }} />
+      ) : null}
 
       {/* Marca a la izquierda, datos del precio a la derecha */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: HEADER_H, flexShrink: 0 }}>
@@ -254,7 +298,7 @@ export function OfferTemplate({
       </div>
 
       {/* Marca del producto y nombre */}
-      <div style={{ display: 'flex', flexDirection: 'column', height: titleH, marginTop: TITLE_GAP, marginBottom: CARD_GAP, flexShrink: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: titleH, marginTop: titleGap, marginBottom: CARD_GAP, flexShrink: 0 }}>
         {brand ? (
           <div style={{ display: 'block', height: KICKER_H, fontSize: 30, fontWeight: 800, lineHeight: '34px', color: COLORS.cyan, textTransform: 'uppercase', letterSpacing: 5, lineClamp: 1 }}>
             {brand}

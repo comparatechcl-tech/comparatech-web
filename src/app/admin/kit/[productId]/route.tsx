@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { checkBasicAuth } from '@/lib/basic-auth';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { isOgFormat, productImageResponse, type OgFormat, type OgProduct } from '@/lib/content/og-template';
+import { offerThemeAt } from '@/lib/content/christmas';
 
 /**
  * Imágenes del kit para redes: /admin/kit/{id}?f=feed|story|pin, y con
@@ -64,5 +65,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prod
     headers['Content-Disposition'] = `attachment; filename="comparatech-${safeSlug}-${format}.png"`;
   }
 
-  return productImageResponse(product, format, { headers });
+  // La misma temática que la pieza pública (/social/pieza): con la de Navidad encendida, el kit también la muestra.
+  return productImageResponse(product, format, { headers, theme: offerThemeAt(new Date()) });
 }

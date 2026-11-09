@@ -3,6 +3,7 @@ import { shortProductName } from '@/lib/text';
 import { captionDiscount, chileDateTime, formatPrice, mlPhotoJpg } from '@/lib/content/captions';
 import { interFonts, type OgFont } from '@/lib/content/og-fonts';
 import { OfferTemplate } from '@/lib/content/offer-template';
+import type { OfferTheme } from '@/lib/content/christmas';
 
 /**
  * Plantilla de las imágenes de producto: el kit para redes del admin
@@ -174,12 +175,15 @@ export function ProductOgTemplate({
   product,
   format,
   photo,
+  theme = null,
 }: {
   product: OgProduct;
   format: OgFormat;
   photo: string | null;
+  /** Temática de la historia y el feed (lib/content/christmas). El pin y la vista previa de links no la usan. */
+  theme?: OfferTheme | null;
 }) {
-  if (format === 'story' || format === 'feed') return <OfferTemplate product={product} photo={photo} format={format} />;
+  if (format === 'story' || format === 'feed') return <OfferTemplate product={product} photo={photo} format={format} theme={theme} />;
 
   const L = LAYOUTS[format];
   const { width, height } = OG_SIZES[format];
@@ -362,12 +366,12 @@ export async function ogFonts(format: OgFormat): Promise<OgFont[] | undefined> {
 export async function productImageResponse(
   product: OgProduct,
   format: OgFormat,
-  init: { headers?: Record<string, string> } = {}
+  init: { headers?: Record<string, string>; theme?: OfferTheme | null } = {}
 ): Promise<ImageResponse> {
   // Para la vista previa de links basta la foto mediana: el PNG pesa menos
   // y WhatsApp descarta las imágenes pesadas.
   const photo = await loadPhoto(product.image_url, format === 'og' ? 'O' : 'F');
-  return new ImageResponse(<ProductOgTemplate product={product} format={format} photo={photo} />, {
+  return new ImageResponse(<ProductOgTemplate product={product} format={format} photo={photo} theme={init.theme ?? null} />, {
     ...OG_SIZES[format],
     fonts: await ogFonts(format),
     headers: init.headers,

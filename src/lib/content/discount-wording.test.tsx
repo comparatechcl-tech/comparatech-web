@@ -127,9 +127,9 @@ function socialTexts(p: Sample, evidence: InterestEvidence): { where: string; te
   return texts;
 }
 
-/** El texto visible de una imagen de producto, sin etiquetas. */
+/** El texto visible de una imagen de producto, sin etiquetas: la de siempre y, después, la de Navidad. */
 function imageText(p: Sample, format: OgFormat): string {
-  const html = renderToStaticMarkup(<ProductOgTemplate product={p} format={format} photo={null} />);
+  const html = [null, 'navidad' as const].map((theme) => renderToStaticMarkup(<ProductOgTemplate product={p} format={format} photo={null} theme={theme} />)).join(' ');
   return html
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')

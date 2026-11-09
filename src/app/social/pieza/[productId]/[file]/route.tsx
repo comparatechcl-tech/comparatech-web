@@ -4,6 +4,7 @@ import { getSupabase } from '@/lib/supabase/client';
 import { pngToJpeg } from '@/lib/content/jpeg';
 import { OG_SIZES, ProductOgTemplate, loadPhoto, ogFonts, type OgProduct } from '@/lib/content/og-template';
 import { checkPiecePath, pieceKey, piecePath, type PieceSnapshot } from '@/lib/social/piece-url';
+import { offerThemeAt } from '@/lib/content/christmas';
 
 /**
  * La pieza de un producto para redes, en JPG y en una dirección pública.
@@ -90,7 +91,9 @@ async function draw(s: PieceSnapshot): Promise<Drawn> {
   };
 
   try {
-    const png = new ImageResponse(<ProductOgTemplate product={product} format={s.format} photo={photo} />, {
+    // La temática (Navidad) se decide al dibujar, no al firmar: una historia programada antes que se publica
+    // después de la ventana sale sin ella. Lo dibujado se guarda 10 minutos como mucho (RECENT_TTL_MS).
+    const png = new ImageResponse(<ProductOgTemplate product={product} format={s.format} photo={photo} theme={offerThemeAt(new Date())} />, {
       ...OG_SIZES[s.format],
       fonts: await ogFonts(s.format),
     });

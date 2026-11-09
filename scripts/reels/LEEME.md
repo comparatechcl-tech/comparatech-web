@@ -89,7 +89,7 @@ node scripts/reels/hacer.mjs <productos.json> <número> <salida.mp4> [opciones]
 
 | Opción | Qué hace |
 |---|---|
-| `--plantilla estudio` | Cómo se ve el video: `estudio`, `bloques` o `impacto`. Por defecto, `estudio`. |
+| `--plantilla estudio` | Cómo se ve el video: `estudio`, `bloques`, `impacto` o `navidad`. Por defecto, `estudio`. |
 | `--cta "texto"` | Cambia la llamada del cierre (por defecto, "Más ofertas en el perfil"). Si es larga se parte en dos renglones y se achica; si ni así cabe, se corta con puntos suspensivos y avisa. No acepta direcciones web ni frases como "solo hoy" o "mejor precio". |
 | `--portada foto.jpg` | Guarda además la escena del precio completa como imagen, para subirla de portada. |
 | `--hoja hoja.jpg` | Guarda además una hoja con 8 cuadros del video ya armado, para revisarlo de un vistazo. |
@@ -122,7 +122,7 @@ minúsculas y números. Lo demás (leer los datos, medir y dibujar texto, prepar
 es común y está fuera de las carpetas de las plantillas. El sitio dice en el plan con qué plantilla va cada
 producto.
 
-Hay tres: `estudio` (la primera, más tranquila), `bloques` (más enérgica, ver más abajo) e `impacto`. El sitio
+Hay cuatro: `estudio` (la primera, más tranquila), `bloques` (más enérgica, ver más abajo), `impacto` y `navidad`. El sitio
 decide cuál usa cada video del día (`VIDEO_TEMPLATES` en `src/lib/social/videos.ts`): desde el 05-11-2026 solo
 `impacto`, que el dueño aprobó el 04-11 para todos los días. `impacto` es `estudio` con más fuerza: arriba del
 descuento "Por menos de $300 mil" (el precio redondeado hacia arriba a dos cifras, así siempre es cierto),
@@ -130,6 +130,15 @@ números y letras más grandes y la información repartida (el dueño: "se ve to
 va con "Envío gratis" y "Full" debajo, y la escena del precio lleva solo el precio, el descuento y la letra chica en un renglón ("Precio revisado en Mercado Libre 04/11 09:00"),
 la llamada "Mándaselo a quien lo esté buscando" y un cierre más corto: 9 segundos con gancho. Las otras dos se
 arman a mano con `--plantilla` y vuelven a la lista si el dueño quiere variar.
+
+`navidad` (07-11-2026, muestras para el dueño) es `impacto` con adornos: mismos momentos, mismos tiempos y mismo
+reparto. Arriba dice "Regalo por menos de $300 mil" (la misma cuenta de `impacto`), el cierre llama a "Mándaselo
+a quien le quieras regalar" y lleva un moño rojo en vez de la línea cian, cuelga una guirnalda de luces que
+titilan en la franja de arriba (la que tapan las apps), cae nieve sobre la hoja azul noche (nunca sobre la foto)
+y saltan chispas doradas cuando pega el precio. Está en `plantillas/index.mjs` para armarla a mano, pero **no**
+en `VIDEO_TEMPLATES`: entra al reel diario solo cuando el dueño apruebe las muestras, agregándola ahí (sola, para
+que todos los videos salgan con ella, o junto a `impacto` con sus pesos en `VIDEO_TEMPLATE_WEIGHTS`). El moño es
+el mismo de las historias de Navidad (`scripts/piezas/navidad.mjs` lo copia a `src/lib/content/christmas.ts`).
 
 `estudio` se acomoda sola de dos maneras según la forma de la foto:
 
