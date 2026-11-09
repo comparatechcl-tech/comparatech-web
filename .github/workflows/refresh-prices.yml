@@ -7,8 +7,9 @@ name: Refrescar precios
 # seguridad y para lanzarlo a mano (Actions → Refrescar precios → Run).
 #
 # Requiere el secreto CRON_SECRET (Settings → Secrets and variables →
-# Actions), con el mismo valor que la variable de Vercel. La URL se puede
-# cambiar con la variable SITE_URL cuando el sitio tenga dominio propio.
+# Actions), con el mismo valor que la variable del sitio (Vercel o Railway).
+# Llama al dominio propio con www, que sirve igual desde Vercel o desde
+# Railway; la variable SITE_URL del repositorio, si existe, manda sobre eso.
 
 on:
   schedule:
@@ -32,7 +33,7 @@ jobs:
       - name: Llamar al endpoint
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          SITE_URL: ${{ vars.SITE_URL || 'https://comparatech-web.vercel.app' }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://www.comparatech.cl' }}
         run: |
           # Sin el secreto no hay nada que hacer, pero tampoco es una falla:
           # así no llega un correo de error cada 2 horas mientras no se

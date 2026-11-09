@@ -6,6 +6,7 @@ import './globals.css';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { SITE_URL } from '@/lib/site';
+import { isVercel } from '@/lib/runtime-env';
 import { CONTACT_EMAIL } from '@/lib/contact';
 import { getSiteCategories } from '@/lib/queries/site-categories';
 import { getDeals } from '@/lib/queries/products';
@@ -95,8 +96,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <Footer categories={categories} />
         </ThemeProvider>
         {/* Visitas agregadas de Vercel (sin cookies) y el origen de la visita
-            para los clics a Mercado Libre. Ver /privacidad. */}
-        <Analytics />
+            para los clics a Mercado Libre. Ver /privacidad. Vercel Analytics
+            solo existe en Vercel: en Railway su script daría 404. */}
+        {isVercel() && <Analytics />}
         <UtmCapture />
       </body>
     </html>

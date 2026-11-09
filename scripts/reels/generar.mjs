@@ -54,8 +54,12 @@ import {
   musicUrlProblem,
 } from './plan.mjs';
 
-/** El sitio publicado. Cambiar acá (y en scripts/redes.mjs) cuando el dominio propio esté funcionando. */
-export const PRODUCTION = 'https://comparatech-web.vercel.app';
+/**
+ * El sitio publicado, en el dominio propio: sirve igual desde Vercel o desde Railway (mudanza de noviembre
+ * de 2026). Con www: comparatech.cl sin www redirige, y el secreto no sigue redirecciones. Si cambia, cambia
+ * también en scripts/redes.mjs (un test los compara).
+ */
+export const PRODUCTION = 'https://www.comparatech.cl';
 const PLAN_PATH = '/api/social/videos/plan';
 /** Volumen de la canción de fondo (0 a 1): el video no tiene voz, pero tampoco tiene que reventar los oídos. */
 const MUSIC_VOLUME = 0.9;

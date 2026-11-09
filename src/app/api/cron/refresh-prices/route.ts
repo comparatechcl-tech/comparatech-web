@@ -29,10 +29,12 @@ import {
 /**
  * Refresco de precios y disponibilidad.
  *
- * Lo llaman cada 30 minutos desde Supabase (pg_cron, ver la migración 0011),
- * además de una vez al día desde Vercel Cron y de respaldo desde GitHub
- * Actions: el plan gratuito de Vercel solo permite crons diarios, y el
- * programador de GitHub resultó impuntual (corría cada 3 a 6 horas).
+ * Lo llaman cada 30 minutos desde Supabase (pg_cron, ver la migración 0011;
+ * con la mudanza a Railway, la 0019 lo apunta a www.comparatech.cl), además
+ * de una vez al día desde Vercel Cron mientras el sitio esté en Vercel, y de
+ * respaldo desde GitHub Actions: el plan gratuito de Vercel solo permite
+ * crons diarios, y el programador de GitHub resultó impuntual (corría cada 3
+ * a 6 horas).
  *
  * Pero revisa de verdad cada REFRESH_EVERY_MS (2 horas): el 26-10-2026 el
  * plan gratuito de Vercel llegó al 100% de su CPU del mes (4 horas), y el

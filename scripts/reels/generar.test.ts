@@ -182,6 +182,13 @@ describe('readSecret', () => {
 });
 
 describe('resolveSite', () => {
+  it('el sitio publicado es el dominio propio con www, el mismo de scripts/redes.mjs', () => {
+    // Con la mudanza a Railway el dominio de Vercel deja de ser el sitio; www sirve desde los dos.
+    expect(PRODUCTION).toBe('https://www.comparatech.cl');
+    const redes = readFileSync(fileURLToPath(new URL('../redes.mjs', import.meta.url)), 'utf8');
+    expect(/const PRODUCTION = '([^']+)'/.exec(redes)?.[1]).toBe(PRODUCTION);
+  });
+
   it('sin --sitio es el sitio publicado', () => {
     expect(resolveSite(null)).toBe(PRODUCTION);
     expect(resolveSite(undefined)).toBe(PRODUCTION);
@@ -201,9 +208,12 @@ describe('resolveSite', () => {
   it('no acepta ningún otro, aunque se parezca', () => {
     const bad = [
       'https://evil.example',
-      'http://comparatech-web.vercel.app',
-      'https://comparatech-web.vercel.app.evil.example',
-      'https://comparatech-web.vercel.app@evil.example',
+      'http://www.comparatech.cl',
+      'https://www.comparatech.cl.evil.example',
+      'https://www.comparatech.cl@evil.example',
+      // Sin www redirige, y el dominio de Vercel deja de ser el sitio con la mudanza a Railway.
+      'https://comparatech.cl',
+      'https://comparatech-web.vercel.app',
       'http://localhost.evil.example:3000',
       'http://localhost@evil.example',
       'http://192.168.1.20:3000',
@@ -377,7 +387,7 @@ describe('generate: el secreto', () => {
   it('no se manda a un sitio que no sea el publicado o uno local', async () => {
     const calls: Call[] = [];
     const never = offlineFetch(calls, () => new Response(null, { status: 500 }));
-    for (const other of ['https://evil.example', 'http://comparatech-web.vercel.app', 'http://localhost.evil.example:3000']) {
+    for (const other of ['https://evil.example', 'http://www.comparatech.cl', 'https://comparatech-web.vercel.app', 'http://localhost.evil.example:3000']) {
       await expect(generate({ site: other, secret: SECRET, fetch: never, log: () => {}, render: fakeRender })).rejects.toThrow('--sitio solo acepta');
     }
     expect(calls).toEqual([]);

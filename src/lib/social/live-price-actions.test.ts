@@ -117,9 +117,10 @@ function expectNothingTouched() {
 
 beforeEach(() => {
   vi.stubGlobal('fetch', spy.fetch);
-  // Sin ninguna marca de Vercel: cada test pone las suyas.
+  // Sin ninguna marca de Vercel ni de Railway: cada test pone las suyas.
   vi.stubEnv('VERCEL', undefined);
   vi.stubEnv('VERCEL_ENV', undefined);
+  vi.stubEnv('APP_ENV', undefined);
 });
 
 afterEach(() => {
@@ -140,6 +141,7 @@ describe('fuera del sitio publicado no pregunta, no lee y no escribe', () => {
     ['con el .env bajado de Vercel (development)', { VERCEL: '1', VERCEL_ENV: 'development' }],
     ['con solo VERCEL=1', { VERCEL: '1' }],
     ['con un VERCEL_ENV que no es exactamente "production"', { VERCEL: '1', VERCEL_ENV: 'Production ' }],
+    ['con un APP_ENV que no es "production" (Railway)', { APP_ENV: 'staging' }],
   ];
 
   for (const [name, env] of cases) {
@@ -187,6 +189,19 @@ describe('sin sesión de admin no hace nada', () => {
     spy.getSupabaseAdmin.mockReturnValue(fakeDb([product(1)]).admin);
     await expect(checkLivePrices([{ productId: ID(1), shown: SHOWN }])).rejects.toThrow('No autorizado');
     expectNothingTouched();
+  });
+});
+
+describe('en el sitio publicado de Railway (APP_ENV=production, sin variables de Vercel)', () => {
+  it('pregunta a Mercado Libre igual que en Vercel', async () => {
+    vi.stubEnv('APP_ENV', 'production');
+    spy.getSupabaseAdmin.mockReturnValue(fakeDb([product(1)]).admin);
+    spy.priceProducts.mockImplementation(async ([row]: Row[]) => [
+      outcome(String(row.id), { patch: { price_checked_at: CHECKED, seller_id: 99 } }),
+    ]);
+    const out = await checkLivePrices([{ productId: ID(1), shown: SHOWN }]);
+    expect(out[ID(1)]).toEqual({ status: 'same', checkedAt: CHECKED });
+    expect(spy.priceProducts).toHaveBeenCalledTimes(1);
   });
 });
 

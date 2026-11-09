@@ -8,10 +8,12 @@
  * del dueño del dominio. Si se cambia, se cambian los dos (un test los
  * compara).
  *
- * Solo avisa desde producción y solo de direcciones del dominio propio: un
+ * Solo avisa desde producción (isProductionRuntime: Vercel o Railway) y solo
+ * de direcciones del dominio propio: un
  * aviso desde una vista previa, o con otro dominio, Bing lo rechaza (y
  * repetirlo puede hacer que deje de aceptar los avisos del sitio).
  */
+import { isProductionRuntime } from '@/lib/runtime-env';
 import { SITE_URL } from '@/lib/site';
 
 export const INDEXNOW_KEY = '11672abb6cbd5fb736fb43a925f906cc';
@@ -51,9 +53,9 @@ export function indexNowBody(urls: string[], siteUrl: string = SITE_URL) {
  */
 export async function notifyIndexNow(
   urls: string[],
-  { siteUrl = SITE_URL, env = process.env.VERCEL_ENV, fetchImpl = fetch } = {},
+  { siteUrl = SITE_URL, production = isProductionRuntime(), fetchImpl = fetch } = {},
 ): Promise<IndexNowResult> {
-  if (env !== 'production') return { omitido: 'no es producción' };
+  if (!production) return { omitido: 'no es producción' };
   if (!siteUrl.startsWith('https://') || /vercel\.app/.test(siteUrl)) return { omitido: 'sin dominio propio' };
   const body = indexNowBody(urls, siteUrl);
   if (!body) return { omitido: 'nada que avisar' };

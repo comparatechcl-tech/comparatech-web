@@ -26,8 +26,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-/** El sitio publicado. Cambiar acá cuando el dominio propio esté funcionando. */
-const PRODUCTION = 'https://comparatech-web.vercel.app';
+/**
+ * El sitio publicado, en el dominio propio: sirve igual desde Vercel o desde
+ * Railway (mudanza de noviembre de 2026). El mismo valor que PRODUCTION en
+ * scripts/reels/generar.mjs (un test los compara).
+ */
+const PRODUCTION = 'https://www.comparatech.cl';
 const PIECE_MAX_BYTES = 4 * 1024 * 1024;
 
 function fail(message) {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { INDEXNOW_KEY, indexNowBody, notifyIndexNow } from './indexnow';
@@ -38,8 +38,8 @@ describe('notifyIndexNow', () => {
 
   it('no avisa fuera de producción ni desde el dominio de Vercel', async () => {
     const fetchImpl = vi.fn();
-    expect(await notifyIndexNow(urls, { siteUrl: SITE, env: 'preview', fetchImpl })).toEqual({ omitido: 'no es producción' });
-    expect(await notifyIndexNow(urls, { siteUrl: 'https://comparatech-web.vercel.app', env: 'production', fetchImpl })).toEqual({
+    expect(await notifyIndexNow(urls, { siteUrl: SITE, production: false, fetchImpl })).toEqual({ omitido: 'no es producción' });
+    expect(await notifyIndexNow(urls, { siteUrl: 'https://comparatech-web.vercel.app', production: true, fetchImpl })).toEqual({
       omitido: 'sin dominio propio',
     });
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -47,7 +47,7 @@ describe('notifyIndexNow', () => {
 
   it('manda el aviso y cuenta las direcciones', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
-    expect(await notifyIndexNow(urls, { siteUrl: SITE, env: 'production', fetchImpl })).toEqual({ enviadas: 1, http: 202 });
+    expect(await notifyIndexNow(urls, { siteUrl: SITE, production: true, fetchImpl })).toEqual({ enviadas: 1, http: 202 });
     const [endpoint, init] = fetchImpl.mock.calls[0];
     expect(endpoint).toBe('https://api.indexnow.org/indexnow');
     expect(init.method).toBe('POST');
@@ -56,10 +56,33 @@ describe('notifyIndexNow', () => {
 
   it('nunca lanza: un rechazo o una caída quedan como error', async () => {
     const rejected = vi.fn().mockResolvedValue(new Response(null, { status: 403 }));
-    expect(await notifyIndexNow(urls, { siteUrl: SITE, env: 'production', fetchImpl: rejected })).toEqual({
+    expect(await notifyIndexNow(urls, { siteUrl: SITE, production: true, fetchImpl: rejected })).toEqual({
       error: 'IndexNow respondió HTTP 403',
     });
     const down = vi.fn().mockRejectedValue(new Error('timeout'));
-    expect(await notifyIndexNow(urls, { siteUrl: SITE, env: 'production', fetchImpl: down })).toEqual({ error: 'timeout' });
+    expect(await notifyIndexNow(urls, { siteUrl: SITE, production: true, fetchImpl: down })).toEqual({ error: 'timeout' });
+  });
+
+  describe('sin decirle si es producción, lo ve en las variables', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('en Railway (APP_ENV=production) avisa; sin VERCEL_ENV ni APP_ENV, no', async () => {
+      vi.stubEnv('VERCEL_ENV', '');
+      vi.stubEnv('APP_ENV', '');
+      const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+      expect(await notifyIndexNow(urls, { siteUrl: SITE, fetchImpl })).toEqual({ omitido: 'no es producción' });
+
+      vi.stubEnv('APP_ENV', 'production');
+      expect(await notifyIndexNow(urls, { siteUrl: SITE, fetchImpl })).toEqual({ enviadas: 1, http: 200 });
+    });
+
+    it('en Vercel (VERCEL_ENV=production) sigue avisando como antes', async () => {
+      vi.stubEnv('APP_ENV', '');
+      vi.stubEnv('VERCEL_ENV', 'production');
+      const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+      expect(await notifyIndexNow(urls, { siteUrl: SITE, fetchImpl })).toEqual({ enviadas: 1, http: 202 });
+    });
   });
 });

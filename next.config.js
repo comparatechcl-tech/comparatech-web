@@ -96,8 +96,35 @@ const privateHeaders = [
 
 /** El dominio de Vercel donde vivió el sitio hasta el 17-10-2026. */
 const OLD_PRODUCTION_HOST = 'comparatech-web.vercel.app';
-/** El dominio propio (comparatech.cl redirige a www en Vercel → Domains). */
+/** El dominio propio. */
 const CANONICAL_ORIGIN = 'https://www.comparatech.cl';
+
+/**
+ * Los nombres con que se puede llegar al sitio de verdad: el dominio propio y
+ * el PC. Como expresión regular para `has`/`missing` de Next, que la compara
+ * entera con el host (sin el puerto) o con la cabecera (tal cual, por eso el
+ * puerto opcional).
+ */
+const KNOWN_HOSTS = String.raw`(?:www\.comparatech\.cl|comparatech\.cl|localhost|127\.0\.0\.1)`;
+const APEX_HOST = String.raw`comparatech\.cl`;
+/**
+ * El host con que llegó la visita. Railway lo deja además en X-Forwarded-Host
+ * ("the original host header", según su documentación): se mira también ahí,
+ * por si su proxy le cambiara el Host a la app. Así un Host cambiado nunca
+ * deja al dominio propio con noindex ni sin su redirección.
+ */
+const knownHost = [
+  { type: 'host', value: KNOWN_HOSTS },
+  { type: 'header', key: 'x-forwarded-host', value: String.raw`${KNOWN_HOSTS}(?::\d+)?` },
+];
+
+/**
+ * Lo que hace la plataforma y no el código. Vercel manda HSTS por su cuenta
+ * en el dominio propio; Railway no (07-11-2026). Los navegadores ya lo
+ * recibieron de Vercel por 2 años, así que en Railway se sigue mandando igual.
+ */
+const hstsHeaders =
+  process.env.VERCEL === '1' ? [] : [{ key: 'Strict-Transport-Security', value: 'max-age=63072000' }];
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -127,14 +154,22 @@ const nextConfig = {
     // dominio viejo de Vercel llevan al propio con 301, que es lo que Google
     // y Bing piden para un cambio permanente (y la herramienta "Cambio de
     // dirección" de Search Console revisa). Se quedan donde están:
-    // - /api: pg_cron (migración 0011), GitHub Actions y los scripts llaman
+    // - /api: pg_cron (migración 0011, hasta que la 0019 lo pase a www) llama
     //   ahí con el secreto, y curl ni sigue la redirección ni reenvía la
-    //   clave a otro host: el refresco de precios se cortaría.
+    //   clave a otro host: el refresco de precios se cortaría. GitHub Actions
+    //   y los scripts ya llaman a www.
     // - /social: las imágenes de lo que ya está programado en Metricool.
     // - /admin: los accesos guardados del dueño (la clave es por dominio).
     // - /_next: los archivos del propio sitio.
     // Las vistas previas de Vercel tienen otro host y no se tocan.
     const oldHost = [{ type: 'host', value: OLD_PRODUCTION_HOST }];
+    // comparatech.cl (sin www) → www, con 308 como lo hacía Vercel → Domains.
+    // En Vercel nunca llega acá (Vercel redirige antes, en su borde); en
+    // Railway sí. Sin /api: los que llaman con el secreto no siguen
+    // redirecciones, y ahí no hay nada que indexar. Next pasa la consulta
+    // (?x=1) tal cual y nunca redirige /_next.
+    const apexHost = [{ type: 'host', value: APEX_HOST }];
+    const apexForwarded = [{ type: 'header', key: 'x-forwarded-host', value: String.raw`${APEX_HOST}(?::\d+)?` }];
     return [
       { source: '/', has: oldHost, destination: `${CANONICAL_ORIGIN}/`, statusCode: 301 },
       {
@@ -143,18 +178,32 @@ const nextConfig = {
         destination: `${CANONICAL_ORIGIN}/:path`,
         statusCode: 301,
       },
+      ...[apexHost, apexForwarded].flatMap((has) => [
+        { source: '/', has, destination: `${CANONICAL_ORIGIN}/`, permanent: true },
+        { source: '/:path((?!api(?:/|$)).*)', has, destination: `${CANONICAL_ORIGIN}/:path`, permanent: true },
+      ]),
     ];
   },
   async headers() {
     const siteHeaders =
       process.env.NODE_ENV === 'production'
-        ? [...securityHeaders, { key: 'Content-Security-Policy', value: buildContentSecurityPolicy() }]
+        ? [...securityHeaders, ...hstsHeaders, { key: 'Content-Security-Policy', value: buildContentSecurityPolicy() }]
         : securityHeaders;
 
     return [
       { source: '/:path*', headers: siteHeaders },
       { source: '/admin/:path*', headers: privateHeaders },
       { source: '/api/:path*', headers: privateHeaders },
+      // Una copia que no está en el dominio propio (la de prueba en
+      // *.up.railway.app, una vista previa de Vercel) no se indexa: si Google
+      // la encontrara, competiría con el sitio. Va acá y no en el middleware a
+      // propósito: el middleware correría en cada visita (en Vercel, CPU e
+      // invocaciones), y esto lo resuelve el enrutador sin código.
+      {
+        source: '/:path*',
+        missing: knownHost,
+        headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
+      },
     ];
   },
 };

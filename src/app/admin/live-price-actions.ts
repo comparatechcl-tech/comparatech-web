@@ -1,6 +1,7 @@
 'use server';
 
 import { requireAdmin } from '@/lib/admin-auth';
+import { isProductionRuntime } from '@/lib/runtime-env';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { LIVE_TEXT, parseLiveItems, type LiveCheck, type ShownOffer } from '@/lib/social/live-price';
 import { liveCheckOffers } from '@/lib/social/live-check-server';
@@ -14,7 +15,7 @@ import { liveCheckOffers } from '@/lib/social/live-check-server';
  * el link de afiliado ni el meli.la (sin verifyLink): cada apertura cuenta
  * como un clic de afiliado.
  *
- * Solo en el sitio publicado (isLiveSite: VERCEL_ENV === 'production'): ahí,
+ * Solo en el sitio publicado (isProductionRuntime: VERCEL_ENV o APP_ENV === 'production'): ahí,
  * si cambió lo que la tarjeta muestra, lo guarda igual que el refresco
  * (applyPricing, con su historial de precios), para que al tocar Actualizar
  * la tarjeta y la imagen salgan con lo de ahora. En cualquier otro lado (el
@@ -30,9 +31,9 @@ import { liveCheckOffers } from '@/lib/social/live-check-server';
  * tardar en minutos.
  */
 
-/** ¿Es el sitio publicado? Solo ahí se consulta Mercado Libre y se escribe. */
+/** ¿Es el sitio publicado (Vercel o Railway)? Solo ahí se consulta Mercado Libre y se escribe. */
 function isLiveSite(): boolean {
-  return process.env.VERCEL_ENV === 'production';
+  return isProductionRuntime();
 }
 
 function allUnknown(ids: string[], what: string): Record<string, LiveCheck> {
