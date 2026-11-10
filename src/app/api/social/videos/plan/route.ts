@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { SITE_URL } from '@/lib/site';
-import { listMusic, pickTrack, signMusic } from '@/lib/social/music';
+import { isProductionRuntime } from '@/lib/runtime-env';
+import { chooseTrack, listMusic, readMusicLog, signMusic, tracksForTemplate, writeMusicLog } from '@/lib/social/music';
 import {
   VIDEO_PLAN_MAX,
   VIDEO_RULES,
@@ -23,9 +24,10 @@ import {
  * Lo llama el generador de videos, que corre fuera del sitio, con el mismo
  * secreto de los crons. ?n= pide otra cantidad (1 a 6).
  *
- * No publica ni marca nada. Lo único que toca es el almacén: crea el bucket
- * la primera vez, entrega direcciones firmadas para subir lo que falta y
- * borra los videos de hace más de tres días. De un producto cuyo video de hoy
+ * No publica ni marca nada. Toca el almacén (crea el bucket la primera vez,
+ * entrega direcciones firmadas para subir lo que falta y borra los videos de
+ * hace más de tres días) y anota qué canción le tocó a cada video, para que
+ * no se repita (lib/social/music). De un producto cuyo video de hoy
  * ya está arriba (`ya_existe`) no entrega dónde subir: no hay que rehacerlo.
  *
  * `archivo` es "AAAA-MM-DD/<id>-<precio>-<plantilla>-<huella>". La huella
@@ -100,16 +102,26 @@ export async function GET(req: NextRequest) {
     const plan = await readVideoPicks(admin, now, count);
 
     const tracks = await listMusic(admin);
+    // La canción que lleva más tiempo sin sonar (lib/social/music: chooseTrack),
+    // anotada para la próxima vez. Solo en producción: una copia de prueba con
+    // la base de producción no debe mover la cuenta.
+    const log = tracks.length > 0 ? await readMusicLog(admin) : [];
+    let logged = false;
     const seleccion = [];
     for (const item of plan.picks) {
       if (item.exists) {
         seleccion.push(describe(item, null));
         continue;
       }
-      const track = pickTrack(tracks, `${plan.date}|${item.product.id}`);
+      const track = chooseTrack(tracksForTemplate(tracks, item.template), log, plan.date, item.product.id);
+      if (track && !log.some((u) => u.date === plan.date && u.productId === item.product.id && u.track === track)) {
+        log.push({ date: plan.date, productId: item.product.id, track });
+        logged = true;
+      }
       const url = track ? await signMusic(admin, track) : null;
       seleccion.push(describe(item, await signVideoUploads(admin, item.file), track && url ? { nombre: track, url } : null));
     }
+    if (logged && isProductionRuntime()) await writeMusicLog(admin, log);
 
     // Al final: si no se pudo limpiar, el plan sale igual (removeOldVideos no lanza).
     const borrados = await removeOldVideos(admin, now);

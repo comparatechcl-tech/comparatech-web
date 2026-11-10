@@ -40,13 +40,104 @@ export async function listMusic(admin: SupabaseClient): Promise<string[]> {
 }
 
 /**
- * La canción de un video: siempre la misma para el mismo día y producto (si
- * una pasada falla, la siguiente usa la misma), y repartida entre todas. Puro.
+ * Una canción al azar pero fija para la misma semilla. Hoy solo desempata
+ * en chooseTrack, entre las que llevan el mismo tiempo sin usarse. Puro.
  */
 export function pickTrack(tracks: readonly string[], seed: string): string | null {
   if (tracks.length === 0) return null;
   const n = createHash('sha256').update(seed).digest().readUInt32BE(0);
   return tracks[n % tracks.length];
+}
+
+/**
+ * Canciones navideñas: en el bucket se llaman "navidad-N.mp3". Van solo en
+ * los videos de la plantilla navideña; los demás usan el resto. Así, mientras
+ * la Navidad está encendida, las publicaciones alternan música navideña y
+ * normal, y al apagarla las navideñas dejan de sonar solas.
+ */
+export const CHRISTMAS_TRACK_PREFIX = 'navidad-';
+const CHRISTMAS_TEMPLATE = 'navidad';
+
+export function isChristmasTrack(name: string): boolean {
+  return name.startsWith(CHRISTMAS_TRACK_PREFIX);
+}
+
+/** Las canciones que le tocan a un video según su plantilla. Una plantilla navideña sin canciones navideñas usa las normales. Puro. */
+export function tracksForTemplate(tracks: readonly string[], template: string): string[] {
+  const regular = tracks.filter((t) => !isChristmasTrack(t));
+  if (template !== CHRISTMAS_TEMPLATE) return regular;
+  const christmas = tracks.filter(isChristmasTrack);
+  return christmas.length > 0 ? christmas : regular;
+}
+
+/** Qué canción llevó un video: el día y el producto bastan, porque cada producto tiene un solo video al día. */
+export interface TrackUse {
+  date: string;
+  productId: string;
+  track: string;
+}
+
+/**
+ * Antes cada video sacaba su canción al azar (pickTrack) y la misma salía
+ * varios días seguidos: el dueño lo notó el 10-11-2026 (la 7 sonó el 7, el 8 y
+ * el 9 de noviembre, y la 2 y la 4 nunca). Ahora toca la que lleva más tiempo
+ * sin usarse, según la lista de lo ya asignado (lo más nuevo al final). Con
+ * 6 o 7 videos al día y 8 canciones o más por lista, el reel de un día nunca
+ * repite la del anterior. El mismo video conserva su canción si se vuelve a
+ * pedir el mismo día. Puro.
+ */
+export function chooseTrack(
+  pool: readonly string[],
+  log: readonly TrackUse[],
+  date: string,
+  productId: string
+): string | null {
+  if (pool.length === 0) return null;
+  const known = log.find((u) => u.date === date && u.productId === productId && pool.includes(u.track));
+  if (known) return known.track;
+  const lastUse = new Map<string, number>(pool.map((t) => [t, -1]));
+  log.forEach((u, i) => {
+    if (lastUse.has(u.track)) lastUse.set(u.track, i);
+  });
+  const oldest = Math.min(...lastUse.values());
+  return pickTrack(
+    pool.filter((t) => lastUse.get(t) === oldest),
+    `${date}|${productId}`
+  );
+}
+
+/** Dónde se anota qué canción llevó cada video (admin_private_settings). */
+export const MUSIC_LOG_KEY = 'reels_musica';
+/** Cuántas asignaciones se guardan: unas dos semanas de videos, de sobra para no repetir. */
+export const MUSIC_LOG_MAX = 120;
+
+function isTrackUse(value: unknown): value is TrackUse {
+  const u = value as TrackUse | null;
+  return !!u && typeof u.date === 'string' && typeof u.productId === 'string' && typeof u.track === 'string';
+}
+
+/** Lo asignado hasta ahora, lo más nuevo al final. [] si no se pudo leer: ahí la canción sale como antes, sin historia. */
+export async function readMusicLog(admin: SupabaseClient): Promise<TrackUse[]> {
+  try {
+    const { data, error } = await admin.from('admin_private_settings').select('value').eq('key', MUSIC_LOG_KEY).maybeSingle();
+    if (error || !data) return [];
+    const list = (data.value as { uses?: unknown } | null)?.uses;
+    return Array.isArray(list) ? list.filter(isTrackUse) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Guarda lo asignado (solo lo último). Si falla, el video sale igual: solo se pierde la memoria de esta vez. */
+export async function writeMusicLog(admin: SupabaseClient, log: readonly TrackUse[]): Promise<boolean> {
+  try {
+    const { error } = await admin
+      .from('admin_private_settings')
+      .upsert({ key: MUSIC_LOG_KEY, value: { uses: log.slice(-MUSIC_LOG_MAX) }, updated_at: new Date().toISOString() });
+    return !error;
+  } catch {
+    return false;
+  }
 }
 
 /** Dirección firmada para bajar una canción. null si no se pudo firmar. */
