@@ -432,7 +432,9 @@ export function tiempos(conGancho) {
   T.brillo = [T.golpe + 3.0, T.golpe + 3.7]; // un brillo pasa por el descuento y el precio, con todo ya quieto
   T.cierre = conGancho ? 7.3 : 6.9; // la hoja sube del todo (antes que en estudio: el cierre largo hacía deslizar)
   T.portada = T.cierre - 0.4; // el cuadro que se guarda con --portada: la escena del precio completa
-  T.fin = T.cierre + 1.7;
+  // El texto del cierre termina de entrar a los 1,1 s: con 3,3 se lee unos 2 s (antes, 1,7 dejaba medio segundo;
+  // el dueño lo notó el 11-11-2026).
+  T.fin = T.cierre + 3.3;
   return T;
 }
 

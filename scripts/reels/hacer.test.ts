@@ -118,16 +118,19 @@ describe('plantillas: "bloques"', () => {
 });
 
 describe('plantillas: "impacto" (la de todos los días desde el 05-11-2026)', () => {
-  it('entrega lo mismo que "estudio" y dura 9 segundos con gancho', async () => {
+  it('entrega lo mismo que "estudio" y dura 10,6 segundos con gancho, con el cierre a la vista 2 segundos o más', async () => {
     const estudio = await cargarPlantilla('estudio');
     const impacto = await cargarPlantilla('impacto');
     expect(Object.keys(impacto).sort()).toEqual(Object.keys(estudio).sort());
     expect(impacto.CTA_POR_DEFECTO).toBe('Mándaselo a quien lo esté buscando');
     const withHook = impacto.tiempos({ A: {} });
     const withoutHook = impacto.tiempos({ A: null });
-    expect(withHook.fin).toBeCloseTo(9, 5);
+    expect(withHook.fin).toBeCloseTo(10.6, 5);
     expect(withoutHook.fin).toBeLessThan(withHook.fin);
     for (const T of [withHook, withoutHook]) {
+      expect(T.fin).toBeLessThanOrEqual(11);
+      // El último texto del cierre entra hasta 1,1 s después de que sube la hoja.
+      expect(T.fin - (T.cierre + 1.1)).toBeGreaterThanOrEqual(2);
       expect(T.portada).toBeLessThan(T.cierre);
       expect(T.portada).toBeGreaterThan(T.pie + 0.4);
       expect(impacto.momentos(T)).toHaveLength(8);
@@ -182,7 +185,7 @@ describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el
       expect(navidad.tiempos({ A })).toEqual(impacto.tiempos({ A }));
       expect(navidad.momentos(navidad.tiempos({ A }))).toEqual(impacto.momentos(impacto.tiempos({ A })));
     }
-    expect(navidad.tiempos({ A: {} }).fin).toBeCloseTo(9, 5);
+    expect(navidad.tiempos({ A: {} }).fin).toBeCloseTo(10.6, 5);
   });
 
   it('el Viejito Pascuero y el arbolito del cierre no tapan lo escrito ni caen donde las apps ponen sus botones', async () => {

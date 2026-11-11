@@ -1,6 +1,6 @@
 // La plantilla "impacto", la de todos los días desde el 05-11-2026 (el dueño la aprobó el 04-11). Es "estudio"
 // con más fuerza: arriba "Por menos de $X mil", números y letras más grandes, más aire en la escena del precio
-// (ahí la hoja sube y la foto se achica), la letra chica en un renglón y un cierre más corto (9 s en total).
+// (ahí la hoja sube y la foto se achica), la letra chica en un renglón y un cierre más corto (10,6 s en total; el cierre se lee 2 s).
 // Como "estudio": la foto real del producto, grande, sobre un fondo claro, y una hoja azul noche que
 // sube desde abajo y va diciendo el descuento, el nombre y el precio. Según la forma de la foto se acomoda de
 // dos maneras: una foto alta o cuadrada (un celular) ocupa todo lo que deja la hoja; una apaisada (un
