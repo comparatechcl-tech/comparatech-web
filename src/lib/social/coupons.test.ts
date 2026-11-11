@@ -11,6 +11,7 @@ import {
   isCouponNotice,
   parseCouponTargets,
   parseCouponText,
+  productCouponCodes,
   toCoupons,
   type Coupon,
 } from './coupons';
@@ -237,5 +238,45 @@ describe('avisos que no son de cupones (05-11-2026)', () => {
     expect(parseCouponText('Código TELE10: 10% de descuento en televisores 4K')).toEqual([
       coupon({ code: 'TELE10', kind: 'porcentaje', value: 10, cap: 0, min: 0, minWord: 'desde' }),
     ]);
+  });
+});
+
+describe('cupones de un producto puntual (avisos del 11-11-2026)', () => {
+  // Tres mensajes del canal copiados juntos: dos cupones de un producto y uno general.
+  const notice = [
+    '[11/11, 11:58] null: *🔥 DOREL 11/11: descuentos de hasta 67% OFF 🛒*',
+    'Silla De Auto Convertible Poplar Stone Onyx Britax',
+    'Con el cupón *🎟️ PICK11* queda en $279.990',
+    '🔗https://www.mercadolibre.cl/up/MLCU379728559',
+    '[11/11, 11:58] null: ¡Lo más vendido en electro! ⚡',
+    'Ventilador Tower Fan Mouvair Freeze Silencioso 6 Velocidades Con Ionizador De Aire y Wifi',
+    'Con el cupón 🎟️ LOCURASDD queda en $84.990',
+    '🔗https://www.mercadolibre.cl/p/MLC63071662',
+    '[11/11, 12:34] null: *¡HABEMUS CUPÓN DE FECHA DOBLE!* ',
+    '🎟️FECHADOBLE: $5.000 off en compras sobre $34.990',
+  ].join('\n');
+
+  it('"queda en $X" es el precio del producto con el cupón, no el descuento: no va en la imagen', () => {
+    expect(parseCouponText(notice)).toEqual([
+      coupon({ code: 'FECHADOBLE', kind: 'monto', value: 5_000, cap: 0, min: 34_990, minWord: 'sobre' }),
+    ]);
+    expect(productCouponCodes(notice)).toEqual(['PICK11', 'LOCURASDD']);
+  });
+
+  it('solo cupones de producto: ninguno general', () => {
+    const one = 'Con el cupón 🎟️ LOCURASDD queda en $84.990';
+    expect(parseCouponText(one)).toEqual([]);
+    expect(productCouponCodes(one)).toEqual(['LOCURASDD']);
+  });
+
+  it('si además dice cuánto da, se lee ese descuento y no el precio del producto', () => {
+    expect(parseCouponText('Con cupón BELLEZA (10% extra): queda en $89.991')).toEqual([
+      coupon({ code: 'BELLEZA', kind: 'porcentaje', value: 10, cap: 0, min: 0, minWord: 'desde' }),
+    ]);
+    expect(productCouponCodes('Con cupón BELLEZA (10% extra): queda en $89.991')).toEqual([]);
+  });
+
+  it('un cupón general no se confunde', () => {
+    expect(productCouponCodes('🎟️FECHADOBLE: $5.000 off en compras sobre $34.990')).toEqual([]);
   });
 });

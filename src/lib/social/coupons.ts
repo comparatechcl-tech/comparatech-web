@@ -197,14 +197,22 @@ export function isCouponNotice(text: string): boolean {
 }
 
 /**
- * Los cupones que se reconocen en el texto pegado, en orden. Solo si el aviso
- * habla de cupones (isCouponNotice). Un código es una
- * palabra en mayúsculas con algún número (ORBITA45), o de 6 letras o más que
- * no sea una palabra común. Lo que dice cada uno se lee del pedazo de texto
- * que va desde su código hasta el siguiente.
+ * "Con el cupón PICK11 queda en $279.990": el cupón de UN producto, y el monto
+ * es lo que cuesta el producto con él, no el descuento. Sin esto salía
+ * "PICK11: $279.990 de descuento" (avisos del 11-11-2026). Esos avisos van en
+ * Recomendaciones del canal (/admin/historias/aviso), con el producto. Si el
+ * aviso dice además cuánto da ("BELLEZA (10% extra): queda en $89.991"), se
+ * lee ese descuento y el precio del producto no se cuenta.
  */
-export function parseCouponText(text: string): Coupon[] {
-  if (!isCouponNotice(text)) return [];
+const PRODUCT_PRICE_RE = /\bqueda(?:n)?\s+(?:en|a)\b|\bte\s+queda\b|\bpagas\s+solo\b/i;
+/** La frase del precio con el cupón, para sacarla antes de leer el descuento. */
+const PRODUCT_PRICE_PART_RE =
+  /\b(?:queda(?:n)?\s+(?:en|a)|te\s+queda|pagas\s+solo)\b\s*:?\s*(?:en\s+)?\$?\s?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:\s?(?:mil|k)\b)?/gi;
+
+/** Lo que se lee del aviso: los cupones generales y los códigos de cupones de un producto puntual. */
+function readCoupons(text: string): { coupons: Coupon[]; productCodes: string[] } {
+  const productCodes: string[] = [];
+  if (!isCouponNotice(text)) return { coupons: [], productCodes };
   const src = strip(String(text ?? '')).slice(0, 4000);
   const codeRe = /(^|[^A-Za-z0-9])([A-Z][A-Z0-9]{2,19})(?![A-Za-z0-9])/g;
   const found: { code: string; at: number; end: number }[] = [];
@@ -229,7 +237,14 @@ export function parseCouponText(text: string): Coupon[] {
       terms += ` ${part}`;
       if (HAS_AMOUNT_RE.test(part)) break;
     }
-    let coupon = readTerms(f.code, terms);
+    // "queda en $X" es el precio de un producto con el cupón: no se lee como descuento.
+    const productPrice = PRODUCT_PRICE_RE.test(terms);
+    let coupon = readTerms(f.code, productPrice ? terms.replace(PRODUCT_PRICE_PART_RE, ' ') : terms);
+    // Sin otro monto que el precio del producto, es el cupón de ese producto: no va en la imagen.
+    if (productPrice && !coupon.value) {
+      productCodes.push(f.code);
+      continue;
+    }
     // Si no, la frase justo antes del código ("10% en compras internacionales, código USA10").
     if (!coupon.value) {
       const before = src.slice(i > 0 ? found[i - 1].end : 0, f.at).split(SENTENCE_RE);
@@ -238,11 +253,28 @@ export function parseCouponText(text: string): Coupon[] {
     // Sin ningún número cerca no es un cupón: es una palabra en mayúsculas del aviso.
     if (coupon.value) out.push(coupon);
   }
-  if (out.length === 0) {
+  if (out.length === 0 && productCodes.length === 0) {
     const noCode = readNoCodeCoupon(src);
     if (noCode) out.push(noCode);
   }
-  return out;
+  return { coupons: out, productCodes };
+}
+
+/**
+ * Los cupones que se reconocen en el texto pegado, en orden. Solo si el aviso
+ * habla de cupones (isCouponNotice). Un código es una
+ * palabra en mayúsculas con algún número (ORBITA45), o de 6 letras o más que
+ * no sea una palabra común. Lo que dice cada uno se lee del pedazo de texto
+ * que va desde su código hasta el siguiente. Los cupones de un producto
+ * puntual ("queda en $X") no vienen: ver productCouponCodes.
+ */
+export function parseCouponText(text: string): Coupon[] {
+  return readCoupons(text).coupons;
+}
+
+/** Los códigos de cupones de un producto puntual ("Con el cupón X queda en $Y"): no van en la imagen de cupones. */
+export function productCouponCodes(text: string): string[] {
+  return readCoupons(text).productCodes;
 }
 
 /**

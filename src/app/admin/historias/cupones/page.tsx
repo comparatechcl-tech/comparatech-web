@@ -30,13 +30,19 @@ export default async function CuponesPage() {
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         <li>
-          En WhatsApp, mantén apretado el aviso de cupones del canal y toca <strong>Copiar</strong>. Sirven los de
-          tecnología; los de belleza, ropa o fechas se saltan.
+          En WhatsApp, mantén apretado el aviso de cupones del canal y toca <strong>Copiar</strong>. Puedes copiar
+          varios mensajes juntos: caben hasta 4 cupones por imagen. Sirven los generales (un código para muchas compras,
+          como &quot;$5.000 en compras sobre $34.990&quot;) y los de tecnología; los de belleza o ropa se saltan.
+        </li>
+        <li>
+          Los que dicen &quot;con el cupón X <strong>queda en</strong> $…&quot; son de un solo producto: esos no van aquí.
+          Pégalos en <strong>Recomendaciones del canal</strong> y la historia de ese producto sale con el cupón anotado.
         </li>
         <li>
           Pégalo abajo y toca <strong>Leer cupones</strong>. Revisa que cada código, monto y compra mínima calce con el
           aviso. Si no los leyó bien, corrígelos a mano. Si el cupón no trae código (se aplica solo al pagar), deja el
-          código vacío.
+          código vacío. Si el aviso dice a qué aplica (&quot;en celulares&quot;, &quot;en electro&quot;), escríbelo en{' '}
+          <strong>A qué aplica</strong>: sale junto al cupón en la imagen y en el texto.
         </li>
         <li>
           Toca <strong>Armar imágenes</strong> y mira cómo quedaron.

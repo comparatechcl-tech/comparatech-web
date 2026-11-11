@@ -10,6 +10,7 @@ import {
   COUPON_TARGET_LABEL,
   isCouponNotice,
   parseCouponText,
+  productCouponCodes,
   type Coupon,
   type CouponTarget,
 } from '@/lib/social/coupons';
@@ -88,11 +89,25 @@ export function CouponsView({ metaReady }: { metaReady: boolean }) {
       return;
     }
     const found = parseCouponText(text);
+    // "Con el cupón X queda en $Y": cupones de un producto puntual. Van con su producto, no en la imagen de cupones.
+    const product = productCouponCodes(text);
+    const productNote =
+      product.length === 0
+        ? ''
+        : ` ${product.join(' y ')} ${product.length === 1 ? 'es un cupón' : 'son cupones'} de un producto puntual ` +
+          '(dicen "queda en $…"): no van aquí. Si el producto es de tecnología, pega ese aviso en Recomendaciones del ' +
+          'canal y su historia sale con el cupón anotado.';
     if (found.length === 0) {
-      setReadNote('No encontré códigos en el texto. Escríbelos abajo, uno por cupón.');
+      setReadNote(
+        product.length > 0
+          ? productNote.trim()
+          : 'No encontré códigos en el texto. Escríbelos abajo, uno por cupón.'
+      );
       return;
     }
-    setReadNote(`Encontré ${found.length} ${found.length === 1 ? 'cupón' : 'cupones'}. Revisa que cada dato calce con el aviso.`);
+    setReadNote(
+      `Encontré ${found.length} ${found.length === 1 ? 'cupón' : 'cupones'}. Revisa que cada dato calce con el aviso y, si el aviso dice a qué aplica, escríbelo en "A qué aplica".${productNote}`
+    );
     change(found.map(toRow));
   }
 
@@ -234,11 +249,11 @@ export function CouponsView({ metaReady }: { metaReady: boolean }) {
                   {peso(r.min) && <span className="mt-0.5 block text-fg">{peso(r.min)}</span>}
                 </label>
                 <label className="col-span-2 text-xs text-muted">
-                  Aclaración (opcional)
+                  A qué aplica (opcional; sale junto al cupón)
                   <input
                     value={r.note}
                     onChange={(e) => edit(i, { note: e.target.value.slice(0, COUPON_NOTE_MAX) })}
-                    placeholder="compras internacionales"
+                    placeholder="en celulares, compras internacionales…"
                     className={`${INPUT} mt-1`}
                   />
                 </label>
