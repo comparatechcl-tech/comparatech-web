@@ -87,7 +87,7 @@ describe('StoryList: el motivo y el aviso en la tarjeta', () => {
     expect(html.slice(0, at)).toMatch(/<p class="[^"]*text-xs[^"]*">$/);
     // Antes de los botones: se lee antes de decidir.
     expect(at).toBeLessThan(html.indexOf('Copiar link'));
-    expect(at).toBeLessThan(html.indexOf('Ya la publiqué'));
+    expect(at).toBeLessThan(html.indexOf('Subida en:'));
   });
 
   it('si hay algo que mirar, lo dice en una línea aparte que se distingue: "Ojo: …"', () => {
@@ -121,7 +121,7 @@ describe('StoryList: el motivo y el aviso en la tarjeta', () => {
   it('la tarjeta conserva lo que ya hacía: precio, link, copiar, guardar y marcar', () => {
     const item = story({ again: { price: 59_990, at: '2026-10-09T12:00:00.000Z' } });
     const html = render([item]);
-    for (const text of ['$49.990', '-50%', 'Copiar link', 'Guardar imagen', 'Ya la publiqué', 'Ya la subiste el', item.link]) {
+    for (const text of ['$49.990', '-50%', 'Copiar link', 'Guardar imagen', 'Subida en:', 'Instagram y Facebook', 'TikTok', 'Ya la subiste el', item.link]) {
       expect(html).toContain(text);
     }
     expect(html).toContain('Bajaron desde que las subiste');
@@ -138,13 +138,17 @@ describe('StoryList: el motivo y el aviso en la tarjeta', () => {
       ...story({ reason: '', warning: null, points: 0 }),
       postId: 77,
       postedAt: '2026-10-12T13:00:00.000Z',
+      marks: { instagram: 77 },
       postedPrice: 49_990,
       onSale: true,
     };
     const html = render([offer], [done]);
     const postedCard = card(html, done);
-    expect(postedCard).toContain('Subida a Instagram el');
-    expect(postedCard).toContain('No la publiqué: deshacer');
+    expect(postedCard).toContain('Marcada el');
+    // Instagram marcada (se toca de nuevo para deshacer) y TikTok por marcar, con lo que falta dicho en palabras.
+    expect(postedCard).toMatch(/aria-pressed="true"[^>]*>.*?Instagram y Facebook/);
+    expect(postedCard).toMatch(/aria-pressed="false"[^>]*>.*?TikTok/);
+    expect(postedCard).toContain('Ya está en Instagram y Facebook. Falta: TikTok.');
     expect(postedCard).not.toContain('Ojo:');
     expect(postedCard).not.toContain(offer.reason);
     // Una sola línea de "Ojo" en toda la página: la de la oferta.
@@ -220,9 +224,7 @@ const gestures: StoryGestures = {
   share: vi.fn(noop),
   save: vi.fn(() => true),
   copyLink: vi.fn(async () => {}),
-  mark: vi.fn(noop),
-  undoOffer: vi.fn(noop),
-  undoPosted: vi.fn(noop),
+  toggle: vi.fn(noop),
 };
 
 /** Una tarjeta sola, en el estado que se pida. Por omisión: oferta con la imagen lista, en un teléfono que comparte. */
@@ -242,6 +244,7 @@ function drawCard(over: Partial<StoryCardProps> = {}): string {
       copied={null}
       busy={null}
       note={undefined}
+      marks={{}}
       gestures={gestures}
       {...over}
     />
@@ -254,6 +257,7 @@ function postedStory(over: Partial<PostedStory> = {}): PostedStory {
     ...story({ reason: '', warning: null, points: 0 }),
     postId: 900 + seq,
     postedAt: new Date(T - 2 * 3600_000).toISOString(),
+    marks: { instagram: 900 + seq },
     postedPrice: 49_990,
     onSale: true,
     ...over,
@@ -469,7 +473,7 @@ describe('StoryCard: una historia ya subida cuyo precio cambió', () => {
     expect(html).toContain(alert);
     expect(classBefore(html, alert)).toContain('border-red-500/40');
     expect(classBefore(html, alert)).toContain('text-red-400');
-    expect(html).toContain('Subida a Instagram el 12/10 a las 10:00, a $49.990.');
+    expect(html).toContain('Marcada el 12/10 a las 10:00, a $49.990.');
   });
 
   it('la revisión en vivo manda sobre el precio de la base: si encontró uno más caro, ese es el que se avisa', () => {
@@ -501,7 +505,7 @@ describe('StoryCard: una historia ya subida cuyo precio cambió', () => {
 
   it('ya no está a la venta en el sitio: sin imagen ni botones para subirla, sin revisión, y el aviso rojo', () => {
     const item = postedStory({ onSale: false });
-    const html = drawCard({ item, kind: 'posted', cardKey: `publicada-${item.postId}`, check: undefined });
+    const html = drawCard({ item, kind: 'posted', cardKey: `publicada-${item.id}`, check: undefined, marks: item.marks });
     const alert = 'Tu historia en Instagram dice $49.990 y ya no está a la venta: bórrala.';
     expect(html).toContain(alert);
     expect(classBefore(html, alert)).toContain('text-red-400');
@@ -511,8 +515,12 @@ describe('StoryCard: una historia ya subida cuyo precio cambió', () => {
     for (const absent of ['Compartir', 'Copiar link', 'Guardar imagen', item.link, CHECKING_LINE, 'Mismo precio']) {
       expect(html, absent).not.toContain(absent);
     }
-    // Deshacer la marca sigue a mano.
-    expect(html).toContain('No la publiqué: deshacer');
+    // Deshacer la marca sigue a mano: la red marcada se puede tocar; la otra no se puede marcar.
+    expect(html).toMatch(/aria-pressed="true"[^>]*>.*?Instagram y Facebook/);
+    expect(html).not.toMatch(/aria-pressed="true"[^>]*disabled=""/);
+    // Y no pide subirla a la red que falta: ya no se vende.
+    expect(html).not.toContain('Falta:');
+    expect(html).toMatch(/aria-pressed="false"[^>]*disabled=""[^>]*>.*?TikTok/);
 
     // Sin precio anotado, el aviso igual pide borrarla.
     const noPrice = drawCard({ item: postedStory({ onSale: false, postedPrice: null }), kind: 'posted' });
@@ -659,11 +667,12 @@ describe('/admin/historias: cuándo hay historias nuevas y cómo se marca', () =
     expect(page).not.toContain('ofertas más esperando');
   });
 
-  it('explica cómo se marca: una sola vez, pálida hasta Actualizar, 24 horas en "Ya publicadas" y 14 días sin volver', async () => {
+  it('explica cómo se marca: por red, pálida hasta Actualizar, 24 horas en "Ya publicadas" y 14 días sin volver', async () => {
     const page = await pageAt('2026-10-17T13:10:00Z');
     expect(page).toContain(
-      'Marca Ya la publiqué cuando la subas a Instagram: se marca una sola vez, no por red. La tarjeta queda pálida hasta que tocas Actualizar; después pasa a "Ya publicadas" por 24 horas, para llevarla a otras redes, y no vuelve en 14 días salvo que baje 3% o más.'
+      'En Subida en , toca cada red donde la subiste: Instagram y Facebook y TikTok . Si te equivocas, tócala de nuevo y se desmarca. La tarjeta queda pálida hasta que tocas Actualizar; después pasa a "Ya publicadas" por 24 horas, para marcar la red que falte, y no vuelve en 14 días salvo que baje 3% o más.'
     );
+    expect(page).toContain('A Facebook no la subas: Instagram la comparte sola.');
     // Y cómo leer la línea de la revisión antes de subir.
     expect(page).toContain('Si dice ✓ Mismo precio que en Mercado Libre , súbela.');
   });

@@ -72,7 +72,15 @@ function story(over: Partial<StoryItem> = {}): StoryItem {
 }
 
 function posted(over: Partial<PostedStory> = {}): PostedStory {
-  return { ...story(), postId: 900 + seq, postedAt: new Date(T0 - 2 * HOUR).toISOString(), postedPrice: 49_990, onSale: true, ...over };
+  return {
+    ...story(),
+    postId: 900 + seq,
+    postedAt: new Date(T0 - 2 * HOUR).toISOString(),
+    marks: { instagram: 900 + seq },
+    postedPrice: 49_990,
+    onSale: true,
+    ...over,
+  };
 }
 
 const answered = (result: LiveCheck, at = T0, pending = false): CardCheck => ({ last: { result, at }, pending });

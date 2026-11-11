@@ -11,6 +11,7 @@ import { mlCheckUrl } from '@/lib/social/live-price';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { ANY_FORMAT_REPEAT_DAYS, readPublishedAnyFormat, stillPublished } from '@/lib/social/published-any';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
+import { STORY_NETWORKS, isStoryNetwork, type StoryMarks } from '@/lib/social/story-networks';
 import {
   GAMING_EMPHASIS,
   isOnSale,
@@ -34,7 +35,8 @@ import {
  * Las historias llevan su propia cuenta de "ya publicado", aparte de la del
  * plan de publicaciones: una historia dura un día y lleva su link, así que
  * no le quita productos al feed ni el feed a las historias. Se anotan en
- * social_posts con STORY_MARK en `caption`.
+ * social_posts con STORY_MARK en `caption`, una fila por red
+ * (lib/social/story-networks): subida en cualquiera, cuenta como subida.
  */
 
 export const STORY_RULES: PickRules & { repeatAfterDays: number } = {
@@ -74,12 +76,12 @@ interface StoryRow {
   posted_at: string;
 }
 
-/** Las historias marcadas como publicadas desde `since`, por producto. Sin la tabla, ninguna. */
+/** Las historias marcadas como publicadas desde `since` (en cualquier red), por producto. Sin la tabla, ninguna. */
 export async function readStoryHistory(admin: SupabaseClient, since: Date): Promise<Map<string, StoryHistory>> {
   const { data, error } = await admin
     .from('social_posts')
     .select('product_id, posted_price, posted_at')
-    .eq('channel', 'instagram')
+    .in('channel', [...STORY_NETWORKS])
     .eq('caption', STORY_MARK)
     .neq('status', 'error')
     .gte('posted_at', since.toISOString())
@@ -267,8 +269,12 @@ export const STORY_LIFETIME_MS = 24 * 3600_000;
 
 /** Una historia ya marcada como publicada, con lo necesario para compartirla de nuevo o deshacer la marca. */
 export interface PostedStory extends StoryItem {
+  /** La marca más nueva, de cualquier red. */
   postId: number;
+  /** Cuándo se anotó esa marca. */
   postedAt: string;
+  /** En qué redes está marcada: el id de la marca por red. */
+  marks: StoryMarks;
   /** El precio con que se subió. La imagen que se entrega ahora lleva el precio de ahora. */
   postedPrice: number | null;
   /**
@@ -283,6 +289,7 @@ export interface PostedStory extends StoryItem {
 interface PostedRow {
   id: number;
   product_id: string | null;
+  channel: string;
   posted_price: number | null;
   posted_at: string;
 }
@@ -290,16 +297,16 @@ interface PostedRow {
 /**
  * Las historias marcadas en las últimas 24 horas, de la más nueva a la más
  * antigua: la misma historia se sube a mano en cada red, así que después de
- * Instagram hay que tenerla a mano para las demás. Una por producto (la
- * última marca). Lo que ya no está a la venta viene con `onSale: false`: su
+ * la primera hay que tenerla a mano para las demás. Una por producto, con sus
+ * marcas por red. Lo que ya no está a la venta viene con `onSale: false`: su
  * historia sigue arriba y hay que borrarla. Solo lee.
  */
 export async function readPostedStories(admin: SupabaseClient, now: Date, key: Buffer): Promise<PostedStory[]> {
   const since = new Date(now.getTime() - STORY_LIFETIME_MS);
   const { data, error } = await admin
     .from('social_posts')
-    .select('id, product_id, posted_price, posted_at')
-    .eq('channel', 'instagram')
+    .select('id, product_id, channel, posted_price, posted_at')
+    .in('channel', [...STORY_NETWORKS])
     .eq('caption', STORY_MARK)
     .eq('status', 'publicado')
     .gte('posted_at', since.toISOString())
@@ -310,9 +317,15 @@ export async function readPostedStories(admin: SupabaseClient, now: Date, key: B
     throw new Error(`No se pudo leer las historias publicadas: ${error.message}`);
   }
 
+  // De la más nueva a la más antigua: la primera de cada producto es su última marca, y la primera de cada red, la de esa red.
   const latest = new Map<string, PostedRow>();
+  const marksOf = new Map<string, StoryMarks>();
   for (const row of (data ?? []) as PostedRow[]) {
-    if (row.product_id && !latest.has(row.product_id)) latest.set(row.product_id, row);
+    if (!row.product_id || !isStoryNetwork(row.channel)) continue;
+    if (!latest.has(row.product_id)) latest.set(row.product_id, row);
+    const marks = marksOf.get(row.product_id) ?? {};
+    if (!marks[row.channel]) marks[row.channel] = row.id;
+    marksOf.set(row.product_id, marks);
   }
   if (latest.size === 0) return [];
 
@@ -332,7 +345,14 @@ export async function readPostedStories(admin: SupabaseClient, now: Date, key: B
     if (!product) continue;
     const item = buildStoryItem({ product, discount: captionDiscount(product), drop: null, score: null }, { now, settings, key });
     if (!item) continue;
-    stories.push({ ...item, postId: row.id, postedAt: row.posted_at, postedPrice: row.posted_price, onSale: isOnSale(product) });
+    stories.push({
+      ...item,
+      postId: row.id,
+      postedAt: row.posted_at,
+      marks: marksOf.get(productId) ?? {},
+      postedPrice: row.posted_price,
+      onSale: isOnSale(product),
+    });
   }
   return stories;
 }

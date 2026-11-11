@@ -1,10 +1,12 @@
 import type { StoryItem } from '@/lib/social/stories';
+import type { StoryNetwork } from '@/lib/social/story-networks';
 import type { markStoryPublished, undoStoryPublished } from './actions';
 import { shareGate, type CardCheck, type Gate } from './rules';
 
 /**
  * Lo que pasa al tocar un botón de /admin/historias: compartir, guardar la
- * imagen, copiar el link, marcar y deshacer.
+ * imagen, copiar el link y marcar o desmarcar en qué red se subió (como en
+ * /admin/videos: un botón por red, que se toca de nuevo para deshacer).
  *
  * Va fuera del componente y recibe de afuera todo lo que toca del navegador
  * (la hoja de compartir, el portapapeles, el reloj), del servidor (las
@@ -40,12 +42,10 @@ export interface StoryUi {
   note(key: string, note: Note | null): void;
   /** El botón de copiar que muestra su confirmación. */
   copied(key: string, on: boolean): void;
-  /** La tarjeta cuya marca está viajando al servidor, o null. */
+  /** El botón (busyKey: tarjeta y red) cuya marca está viajando al servidor, o null. */
   busy(key: string | null): void;
-  /** Una oferta quedó marcada (con el id de su marca) o desmarcada (null). */
-  published(item: StoryItem, postId: number | null): void;
-  /** Una historia ya subida se desmarcó: sale de la lista. */
-  unposted(postId: number): void;
+  /** Una red quedó marcada (con el id de su marca) o desmarcada (null). */
+  marked(item: StoryItem, network: StoryNetwork, postId: number | null): void;
   /** Corre la llamada al servidor (en la página, dentro de una transición). */
   run(job: () => Promise<void>): void;
 }
@@ -68,14 +68,18 @@ export interface StoryGestures {
   /** true si se deja guardar la imagen; si no, la tarjeta dice por qué. */
   save(key: string, item: StoryItem): boolean;
   copyLink(key: string, item: StoryItem): Promise<void>;
-  mark(item: StoryItem): void;
-  undoOffer(item: StoryItem, postId: number): void;
-  undoPosted(key: string, postId: number): void;
+  /** Marca la red si `postId` no viene; si viene, la desmarca. */
+  toggle(key: string, item: StoryItem, network: StoryNetwork, postId: number | undefined): void;
+}
+
+/** El botón de una red en una tarjeta: lo que dice "Guardando…". Puro. */
+export function busyKey(key: string, network: StoryNetwork): string {
+  return `${key}|${network}`;
 }
 
 /** Dos toques más seguidos que esto son un doble toque, no dos pedidos. */
 const SHARE_GAP_MS = 1500;
-/** "Deshacer" queda donde estaba "Ya la publiqué": un segundo toque seguido no debe deshacer. */
+/** El botón de la red deshace con el mismo toque que marca: un segundo toque seguido no debe deshacer. */
 const UNDO_AFTER_MARK_MS = 1000;
 const COPIED_MS = 2500;
 
@@ -85,7 +89,7 @@ export const RELOAD_HINT = 'Revisa tu conexión; si sigue igual, toca Actualizar
 export const SHARE_ERROR = 'No se pudo abrir Compartir. Toca Guardar imagen y súbela desde la app.';
 /** Marcar siempre se deja (puede que ya la haya subido), pero si Mercado Libre muestra otra cosa, se dice. */
 export const MARKED_BUT_CHANGED =
-  'Quedó marcada, pero en Mercado Libre cambió: si ya la subiste, bórrala de Instagram y toca Actualizar.';
+  'Quedó marcada, pero en Mercado Libre cambió: si ya la subiste, bórrala de esa red y toca Actualizar.';
 
 /**
  * Lo que la acción de marcar avisa si el precio del sitio ya no es el de la
@@ -181,27 +185,27 @@ export function createStoryGestures(env: StoryEnv, actions: StoryActions, ui: St
     });
   }
 
-  function mark(item: StoryItem) {
+  function mark(key: string, item: StoryItem, network: StoryNetwork) {
     if (inFlight) return;
     inFlight = true;
-    ui.busy(item.id);
-    clear(item.id);
+    ui.busy(busyKey(key, network));
+    clear(key);
     ui.run(async () => {
       try {
         // Con el precio de la tarjeta, que es el que lleva la imagen compartida.
-        const result = await actions.mark(item.id, item.price);
+        const result = await actions.mark(item.id, item.price, network);
         if (!result.ok) {
-          fail(item.id, result.error);
+          fail(key, result.error);
           return;
         }
         lastMark = env.now();
-        ui.published(item, result.postId);
+        ui.marked(item, network, result.postId);
         const live = config.checkOf(item.id)?.last?.result.status;
         const notice =
           markNotice(result, item.price) ?? (live === 'changed' || live === 'unavailable' ? MARKED_BUT_CHANGED : null);
-        if (notice) say(item.id, { tone: 'warn', text: notice });
+        if (notice) say(key, { tone: 'warn', text: notice });
       } catch {
-        fail(item.id, `No se pudo guardar. ${RELOAD_HINT}`);
+        fail(key, `No se pudo guardar. ${RELOAD_HINT}`);
       } finally {
         inFlight = false;
         ui.busy(null);
@@ -209,11 +213,11 @@ export function createStoryGestures(env: StoryEnv, actions: StoryActions, ui: St
     });
   }
 
-  /** Deshace una marca. `after` corre solo si se deshizo. */
-  function undo(key: string, postId: number, after: () => void) {
+  /** Deshace la marca de una red. */
+  function undo(key: string, item: StoryItem, network: StoryNetwork, postId: number) {
     if (inFlight) return;
     inFlight = true;
-    ui.busy(key);
+    ui.busy(busyKey(key, network));
     clear(key);
     ui.run(async () => {
       try {
@@ -222,7 +226,7 @@ export function createStoryGestures(env: StoryEnv, actions: StoryActions, ui: St
           fail(key, result.error);
           return;
         }
-        after();
+        ui.marked(item, network, null);
       } catch {
         fail(key, `No se pudo deshacer. ${RELOAD_HINT}`);
       } finally {
@@ -238,13 +242,13 @@ export function createStoryGestures(env: StoryEnv, actions: StoryActions, ui: St
       return allowed(key, item);
     },
     copyLink,
-    mark,
-    undoOffer(item, postId) {
+    toggle(key, item, network, postId) {
+      if (postId === undefined) {
+        mark(key, item, network);
+        return;
+      }
       if (env.now() - lastMark < UNDO_AFTER_MARK_MS) return;
-      undo(item.id, postId, () => ui.published(item, null));
-    },
-    undoPosted(key, postId) {
-      undo(key, postId, () => ui.unposted(postId));
+      undo(key, item, network, postId);
     },
   };
 }

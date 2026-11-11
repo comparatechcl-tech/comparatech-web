@@ -83,7 +83,15 @@ function story(over: Partial<StoryItem> = {}): StoryItem {
 }
 
 function posted(over: Partial<PostedStory> = {}): PostedStory {
-  return { ...story(), postId: 900 + seq, postedAt: new Date(T0 - 2 * HOUR).toISOString(), postedPrice: 49_990, onSale: true, ...over };
+  return {
+    ...story(),
+    postId: 900 + seq,
+    postedAt: new Date(T0 - 2 * HOUR).toISOString(),
+    marks: { instagram: 900 + seq },
+    postedPrice: 49_990,
+    onSale: true,
+    ...over,
+  };
 }
 
 interface El {
@@ -233,9 +241,9 @@ describe('StoryList: la revisión en vivo', () => {
     await settle();
     expect(asked()).toEqual([[offer.id, a.id, b.id]]);
 
-    // "No la publiqué: deshacer" en la primera.
+    // Se desmarca la única red de la primera ("no la publiqué"): sale de la lista.
     const { cards } = list.pass();
-    cards[0].gestures.undoPosted(`publicada-${a.postId}`, a.postId);
+    cards[0].gestures.toggle(`publicada-${a.id}`, a, 'instagram', a.marks.instagram);
     await settle();
     const after = list.pass();
     expect(after.cards.map((card) => card.item.id)).toEqual([offer.id, b.id]);

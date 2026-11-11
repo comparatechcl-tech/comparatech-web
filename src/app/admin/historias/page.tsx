@@ -125,10 +125,14 @@ export default async function HistoriasPage() {
           precio, en el espacio vacío.
         </li>
         <li>
-          Marca <strong>Ya la publiqué</strong> cuando la subas a Instagram: se marca una sola vez, no por red. La
-          tarjeta queda pálida hasta que tocas Actualizar; después pasa a &quot;Ya publicadas&quot; por{' '}
-          {lifetimeHours} horas, para llevarla a otras redes, y no vuelve en {days} días salvo que baje {dropPct}% o
-          más.
+          Para TikTok, toca <strong>Compartir</strong> otra vez y elige TikTok, Historia. Ahí el link no se puede
+          tocar: va solo la imagen. A Facebook no la subas: Instagram la comparte sola.
+        </li>
+        <li>
+          En <strong>Subida en</strong>, toca cada red donde la subiste: <strong>Instagram y Facebook</strong> y{' '}
+          <strong>TikTok</strong>. Si te equivocas, tócala de nuevo y se desmarca. La tarjeta queda pálida hasta que
+          tocas Actualizar; después pasa a &quot;Ya publicadas&quot; por {lifetimeHours} horas, para marcar la red que
+          falte, y no vuelve en {days} días salvo que baje {dropPct}% o más.
         </li>
       </ol>
 

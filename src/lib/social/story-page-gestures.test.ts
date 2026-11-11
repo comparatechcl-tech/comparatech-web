@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   COPY_ERROR,
   MARKED_BUT_CHANGED,
+  busyKey,
   SHARE_ERROR,
   createStoryGestures,
   markNotice,
@@ -119,8 +120,7 @@ function setup(opts: { checks?: Record<string, CardCheck>; openedAt?: number; fi
     }),
     copied: vi.fn(),
     busy: vi.fn(),
-    published: vi.fn(),
-    unposted: vi.fn(),
+    marked: vi.fn(),
     run: vi.fn((job: () => Promise<void>) => {
       void job();
     }),
@@ -415,15 +415,25 @@ describe('Guardar imagen y Copiar link', () => {
   });
 });
 
-describe('Ya la publiqué: siempre se deja marcar', () => {
-  it('marca con el precio de la tarjeta, aunque Mercado Libre muestre otro, y lo avisa', async () => {
+describe('Subida en (un botón por red): siempre se deja marcar', () => {
+  it('marca la red con el precio de la tarjeta, aunque Mercado Libre muestre otro, y lo avisa', async () => {
     const item = story();
     const t = setup({ checks: { [item.id]: changed(T0) } });
-    t.gestures.mark(item);
+    t.gestures.toggle(item.id, item, 'instagram', undefined);
     await settle();
-    expect(t.actions.mark).toHaveBeenCalledWith(item.id, 49_990);
-    expect(t.ui.published).toHaveBeenCalledWith(item, 501);
+    expect(t.actions.mark).toHaveBeenCalledWith(item.id, 49_990, 'instagram');
+    expect(t.ui.marked).toHaveBeenCalledWith(item, 'instagram', 501);
+    expect(t.ui.busy).toHaveBeenCalledWith(busyKey(item.id, 'instagram'));
     expect(t.notes[item.id]).toEqual({ tone: 'warn', text: MARKED_BUT_CHANGED });
+  });
+
+  it('TikTok se marca aparte, con su propia red', async () => {
+    const item = story();
+    const t = setup({ checks: { [item.id]: same(T0) } });
+    t.gestures.toggle(item.id, item, 'tiktok', undefined);
+    await settle();
+    expect(t.actions.mark).toHaveBeenCalledWith(item.id, 49_990, 'tiktok');
+    expect(t.ui.marked).toHaveBeenCalledWith(item, 'tiktok', 501);
   });
 
   it('si la acción avisa que el precio del sitio ya es otro, la tarjeta lo muestra', async () => {
@@ -434,7 +444,7 @@ describe('Ya la publiqué: siempre se deja marcar', () => {
       postId: 502,
       warning: 'El precio del sitio ya es $45.990: si la subiste a $49.990, bórrala y súbela de nuevo.',
     } as never);
-    t.gestures.mark(item);
+    t.gestures.toggle(item.id, item, 'instagram', undefined);
     await settle();
     expect(t.notes[item.id]).toEqual({
       tone: 'warn',
@@ -445,9 +455,9 @@ describe('Ya la publiqué: siempre se deja marcar', () => {
   it('con el precio igual no avisa nada', async () => {
     const item = story();
     const t = setup({ checks: { [item.id]: same(T0) } });
-    t.gestures.mark(item);
+    t.gestures.toggle(item.id, item, 'instagram', undefined);
     await settle();
-    expect(t.ui.published).toHaveBeenCalledWith(item, 501);
+    expect(t.ui.marked).toHaveBeenCalledWith(item, 'instagram', 501);
     expect(t.notes[item.id] ?? null).toBeNull();
   });
 
@@ -455,34 +465,45 @@ describe('Ya la publiqué: siempre se deja marcar', () => {
     const item = story();
     const t = setup();
     t.actions.mark.mockResolvedValueOnce({ ok: false, error: 'Ese producto ya no está a la venta en el sitio.' } as never);
-    t.gestures.mark(item);
+    t.gestures.toggle(item.id, item, 'instagram', undefined);
     await settle();
-    expect(t.ui.published).not.toHaveBeenCalled();
+    expect(t.ui.marked).not.toHaveBeenCalled();
     expect(t.notes[item.id]?.text).toBe('Ese producto ya no está a la venta en el sitio.');
   });
 
-  it('"Deshacer" justo después de marcar no deshace (es el mismo botón); un rato después sí', async () => {
+  it('tocar de nuevo justo después de marcar no deshace (es el mismo botón); un rato después sí', async () => {
     const item = story();
     const t = setup();
-    t.gestures.mark(item);
+    t.gestures.toggle(item.id, item, 'instagram', undefined);
     await settle();
     t.advance(500);
-    t.gestures.undoOffer(item, 501);
+    t.gestures.toggle(item.id, item, 'instagram', 501);
     await settle();
     expect(t.actions.undo).not.toHaveBeenCalled();
     t.advance(1000);
-    t.gestures.undoOffer(item, 501);
+    t.gestures.toggle(item.id, item, 'instagram', 501);
     await settle();
     expect(t.actions.undo).toHaveBeenCalledWith(501);
-    expect(t.ui.published).toHaveBeenLastCalledWith(item, null);
+    expect(t.ui.marked).toHaveBeenLastCalledWith(item, 'instagram', null);
   });
 
-  it('"No la publiqué: deshacer" saca la historia ya subida', async () => {
+  it('en una ya subida, desmarcar una red usa la llave de su tarjeta', async () => {
+    const item = story();
     const t = setup();
-    t.gestures.undoPosted('publicada-77', 77);
+    t.gestures.toggle('publicada-x', item, 'tiktok', 77);
     await settle();
     expect(t.actions.undo).toHaveBeenCalledWith(77);
-    expect(t.ui.unposted).toHaveBeenCalledWith(77);
+    expect(t.ui.busy).toHaveBeenCalledWith(busyKey('publicada-x', 'tiktok'));
+    expect(t.ui.marked).toHaveBeenCalledWith(item, 'tiktok', null);
+  });
+
+  it('de a una marca a la vez: un segundo toque mientras viaja la primera no hace nada', async () => {
+    const item = story();
+    const t = setup();
+    t.gestures.toggle(item.id, item, 'instagram', undefined);
+    t.gestures.toggle(item.id, item, 'tiktok', undefined);
+    await settle();
+    expect(t.actions.mark).toHaveBeenCalledTimes(1);
   });
 
   it('markNotice entiende un precio actual distinto aunque venga sin frase, e ignora lo demás', () => {

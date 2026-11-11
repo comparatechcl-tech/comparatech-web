@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import {
   AlertTriangle,
   Check,
+  Circle,
   Copy,
   Download,
   ExternalLink,
@@ -11,17 +12,24 @@ import {
   RefreshCw,
   Share2,
   TrendingDown,
-  Undo2,
 } from 'lucide-react';
 import { formatPrice } from '@/lib/content/captions';
 import { formatDayMonth } from '@/lib/format';
 import { LIVE_TEXT } from '@/lib/social/live-price';
 import type { PostedStory, StoryItem } from '@/lib/social/stories';
+import {
+  STORY_NETWORKS,
+  STORY_NETWORK_LABELS,
+  anyMarked,
+  storyMissingLine,
+  type StoryMarks,
+  type StoryNetwork,
+} from '@/lib/social/story-networks';
 import { explainWarning } from '@/lib/social/warning-help';
 import { checkLivePrices } from '@/app/admin/live-price-actions';
 import { WarningGuide } from '../WarningGuide';
 import { markStoryPublished, undoStoryPublished } from './actions';
-import { createStoryGestures, type Note, type StoryEnv, type StoryGestures } from './gestures';
+import { busyKey, createStoryGestures, type Note, type StoryEnv, type StoryGestures } from './gestures';
 import { createLiveChecker } from './live-checks';
 import {
   checkTargets,
@@ -60,9 +68,9 @@ import {
 export type FileState = 'cargando' | 'lista' | 'error';
 
 /**
- * Lo marcado en esta sesión (dirección de la pieza → id de la marca) y la
- * hora en que cada lista se vio por primera vez (hora del servidor en que
- * se armó → hora de este teléfono).
+ * Lo marcado y desmarcado en esta sesión ("dirección de la pieza|red" → id de
+ * la marca, o null si se deshizo) y la hora en que cada lista se vio por
+ * primera vez (hora del servidor en que se armó → hora de este teléfono).
  *
  * Fuera del componente a propósito: al ir a otra pestaña del admin y volver
  * con "atrás", Next muestra la misma lista sin pedirla de nuevo y monta el
@@ -70,7 +78,7 @@ export type FileState = 'cargando' | 'lista' | 'error';
  * (sin "Deshacer") y una lista vieja parecería recién cargada. En el
  * servidor no se guarda nada: ahí este módulo lo comparten todas las visitas.
  */
-const marks = new Map<string, number>();
+const marks = new Map<string, number | null>();
 const firstSeen = new Map<number, number>();
 
 /** Lo que dura una historia en Instagram, si la página no dice otra cosa. */
@@ -80,6 +88,24 @@ const TICK_MS = 30_000;
 
 const BUTTON =
   'flex min-h-11 items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-fg transition hover:border-accent/50 disabled:opacity-50';
+/** Una red ya marcada (como en Videos): clase aparte, para que no compitan dos colores de texto. */
+const BUTTON_MARKED =
+  'flex min-h-11 items-center justify-center gap-2 rounded-md border border-accent/60 bg-accent/10 px-3 py-2 text-sm font-medium text-accent transition disabled:opacity-50';
+
+/** Lo marcado de una tarjeta: lo que trajo la página, con los cambios de esta visita encima. Puro. */
+export function cardMarks(
+  item: StoryItem | PostedStory,
+  base: StoryMarks,
+  changes: Record<string, number | null>
+): StoryMarks {
+  const out: StoryMarks = {};
+  for (const network of STORY_NETWORKS) {
+    const key = `${item.id}|${network}`;
+    const value = key in changes ? changes[key] : base[network];
+    if (value) out[network] = value;
+  }
+  return out;
+}
 
 const timeFmt = new Intl.DateTimeFormat('es-CL', {
   timeZone: 'America/Santiago',
@@ -130,11 +156,11 @@ export interface StoryCardProps {
   /** null hasta saber si este aparato puede compartir archivos. */
   canShare: boolean | null;
   copied: string | null;
-  /** La tarjeta cuya marca está viajando al servidor, de cualquier tarjeta. */
+  /** El botón (tarjeta y red, gestures.busyKey) cuya marca está viajando al servidor, de cualquier tarjeta. */
   busy: string | null;
   note: Note | undefined;
-  /** La oferta se marcó como publicada en esta visita: el id de su marca. */
-  publishedId?: number;
+  /** En qué redes está marcada ahora: lo que trajo la página más lo marcado en esta visita. */
+  marks: StoryMarks;
   gestures: StoryGestures;
 }
 
@@ -155,14 +181,16 @@ export function StoryCard({
   copied,
   busy,
   note,
-  publishedId,
+  marks,
   gestures,
 }: StoryCardProps) {
   const posted = kind === 'posted' ? (item as PostedStory) : null;
   // Ya subida y sin venta: la historia sigue en Instagram, pero no hay imagen que dar ni nada que revisar.
   const gone = posted?.onSale === false;
   const state: FileState = gone ? 'error' : (fileState ?? 'cargando');
-  const done = kind === 'offer' && publishedId !== undefined;
+  const done = kind === 'offer' && anyMarked(marks);
+  // Lo que ya no se vende no se pide subir a la red que falta.
+  const missing = gone ? null : storyMissingLine(marks);
   const mlUrl = safeMlUrl(item.mlUrl);
   const line = liveLine(check, now, mlUrl !== null);
   const gate = shareGate(check, { now, openedAt, checkedAt: item.checkedAt, maxPriceAgeMs });
@@ -266,7 +294,7 @@ export function StoryCard({
           {posted && (
             <>
               <p className="mt-2 text-xs text-muted">
-                Subida a Instagram el {formatDayMonth(posted.postedAt)} a las {timeFmt.format(new Date(posted.postedAt))}
+                Marcada el {formatDayMonth(posted.postedAt)} a las {timeFmt.format(new Date(posted.postedAt))}
                 {posted.postedPrice !== null && posted.postedPrice > 0 ? `, a ${formatPrice(posted.postedPrice)}.` : '.'}
               </p>
               {alert && (
@@ -334,37 +362,46 @@ export function StoryCard({
               <Download size={15} aria-hidden /> Guardar imagen
             </button>
           )}
-          {kind === 'offer' ? (
-            done ? (
-              <button
-                type="button"
-                onClick={() => gestures.undoOffer(item, publishedId as number)}
-                disabled={busy !== null}
-                className={`${BUTTON} border-accent/50 text-accent sm:col-span-2`}
-              >
-                <Check size={15} aria-hidden /> {busy === cardKey ? 'Deshaciendo…' : 'Publicada · Deshacer'}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => gestures.mark(item)}
-                disabled={busy !== null}
-                className={`${BUTTON} sm:col-span-2`}
-              >
-                {busy === cardKey ? 'Guardando…' : 'Ya la publiqué'}
-              </button>
-            )
-          ) : (
-            <button
-              type="button"
-              onClick={() => gestures.undoPosted(cardKey, (item as PostedStory).postId)}
-              disabled={busy !== null}
-              className={`${BUTTON} sm:col-span-2`}
-            >
-              <Undo2 size={15} aria-hidden /> {busy === cardKey ? 'Deshaciendo…' : 'No la publiqué: deshacer'}
-            </button>
-          )}
         </div>
+
+        {/*
+          En qué redes ya está, como en Videos: un botón por red, que se toca de
+          nuevo para deshacer. Instagram la comparte sola en Facebook.
+        */}
+        {!gone || anyMarked(marks) ? (
+          <div role="group" aria-labelledby={`subida-${cardKey}`}>
+            <p id={`subida-${cardKey}`} className="text-xs font-medium text-muted">
+              Subida en:
+            </p>
+            {/* La misma grilla antes y después de marcar: si la tarjeta cambiara de alto, las de abajo se correrían bajo el dedo. */}
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
+              {STORY_NETWORKS.map((network: StoryNetwork) => {
+                const postId = marks[network];
+                const marked = Boolean(postId);
+                return (
+                  <button
+                    key={network}
+                    type="button"
+                    aria-pressed={marked}
+                    onClick={() => gestures.toggle(cardKey, item, network, postId)}
+                    // Lo que ya no se vende no se marca (la acción lo rechaza); sí se puede deshacer.
+                    disabled={busy !== null || (gone && !marked)}
+                    className={marked ? BUTTON_MARKED : BUTTON}
+                  >
+                    {/* El visto y el círculo vacío dicen el estado sin depender del color. */}
+                    {marked ? (
+                      <Check size={15} className="shrink-0" aria-hidden />
+                    ) : (
+                      <Circle size={15} className="shrink-0 text-muted" aria-hidden />
+                    )}
+                    {busy === busyKey(cardKey, network) ? 'Guardando…' : STORY_NETWORK_LABELS[network]}
+                  </button>
+                );
+              })}
+            </div>
+            {missing && <p className="mt-1.5 text-xs font-semibold text-amber-300">{missing}</p>}
+          </div>
+        ) : null}
 
         {/* Completo y seleccionable: es el respaldo si el teléfono no deja copiar con el botón. */}
         {!gone && (
@@ -448,15 +485,19 @@ export function StoryList({
   /** null hasta saber si este aparato puede compartir archivos. */
   const [canShare, setCanShare] = useState<boolean | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  /** Ofertas marcadas en esta visita: id del producto → id de la marca, para poder deshacerla. */
-  const [published, setPublished] = useState<Record<string, number>>(() => {
-    const known: Record<string, number> = {};
-    for (const item of initial) {
-      const postId = marks.get(item.image);
-      if (postId) known[item.id] = postId;
+  /** Lo marcado o desmarcado en esta visita: "producto|red" → id de la marca, o null si se deshizo. */
+  const [changes, setChanges] = useState<Record<string, number | null>>(() => {
+    const known: Record<string, number | null> = {};
+    for (const item of [...initial, ...initialPosted]) {
+      for (const network of STORY_NETWORKS) {
+        const key = `${item.image}|${network}`;
+        if (marks.has(key)) known[`${item.id}|${network}`] = marks.get(key) ?? null;
+      }
     }
     return known;
   });
+  /** Lo mismo, al día dentro de un toque (el estado llega en el dibujo siguiente). */
+  const changesNow = useRef(changes);
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, Note>>({});
   const [checks, setChecks] = useState<Record<string, CardCheck>>({});
@@ -493,12 +534,16 @@ export function StoryList({
         note: (key, note) => setNotes((n) => (note ? { ...n, [key]: note } : without(n, key))),
         copied: (key, on) => setCopied((c) => (on ? key : c === key ? null : c)),
         busy: (key) => setBusy(key),
-        published: (item, postId) => {
-          if (postId) marks.set(item.image, postId);
-          else marks.delete(item.image);
-          setPublished((p) => (postId ? { ...p, [item.id]: postId } : without(p, item.id)));
+        marked: (item, network, postId) => {
+          marks.set(`${item.image}|${network}`, postId);
+          const next = { ...changesNow.current, [`${item.id}|${network}`]: postId };
+          changesNow.current = next;
+          setChanges(next);
+          // Una ya subida que quedó sin ninguna red ("no la publiqué") sale de la lista y deja de revisarse.
+          if (postId === null) {
+            setPosted((list) => list.filter((p) => p.id !== item.id || anyMarked(cardMarks(p, p.marks ?? {}, next))));
+          }
         },
-        unposted: (postId) => setPosted((list) => list.filter((p) => p.postId !== postId)),
         run: (job) => startTransition(job),
       },
       {
@@ -582,7 +627,8 @@ export function StoryList({
   }, [items, initialPosted]);
 
   const card = (item: StoryItem | PostedStory, kind: 'offer' | 'posted') => {
-    const key = kind === 'offer' ? item.id : `publicada-${(item as PostedStory).postId}`;
+    const key = kind === 'offer' ? item.id : `publicada-${item.id}`;
+    const base = kind === 'posted' ? ((item as PostedStory).marks ?? {}) : {};
     return (
       <StoryCard
         key={key}
@@ -598,7 +644,7 @@ export function StoryList({
         copied={copied}
         busy={busy}
         note={notes[key]}
-        publishedId={kind === 'offer' ? published[item.id] : undefined}
+        marks={cardMarks(item, base, changes)}
         gestures={gestures}
       />
     );

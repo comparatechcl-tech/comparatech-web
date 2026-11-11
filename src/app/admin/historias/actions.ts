@@ -7,6 +7,7 @@ import { logAdminEvent } from '@/lib/admin-audit';
 import { markPriceWarning } from '@/lib/social/live-price';
 import { STORY_MARK } from '@/lib/social/networks';
 import { STORY_RULES } from '@/lib/social/stories';
+import { STORY_NETWORKS, STORY_NETWORK_LABELS, isStoryNetwork, type StoryNetwork } from '@/lib/social/story-networks';
 import { isOnSale, selectSocialProducts } from '@/lib/social/telegram';
 
 /**
@@ -29,8 +30,10 @@ type MarkResult = { ok: true; postId: number; priceNow?: number; warning?: strin
 type UndoResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Anota que la historia de un producto ya se subió: así no vuelve a
- * ofrecerse en 14 días, salvo que baje de precio.
+ * Anota que la historia de un producto ya se subió a una red (Instagram, que
+ * la pasa sola a Facebook, o TikTok): así no vuelve a ofrecerse en 14 días,
+ * salvo que baje de precio. Sin `network`, Instagram (una pestaña abierta con
+ * la versión anterior de la página).
  *
  * `shownPrice` es el precio que llevaba la imagen compartida. Es el que se
  * anota, y no el de la base en este instante: la lista de la página no se
@@ -39,9 +42,14 @@ type UndoResult = { ok: true } | { ok: false; error: string };
  * warning). Opcional, para que una pestaña abierta con la versión anterior
  * siga funcionando.
  */
-export async function markStoryPublished(productId: string, shownPrice?: number): Promise<MarkResult> {
+export async function markStoryPublished(
+  productId: string,
+  shownPrice?: number,
+  network: StoryNetwork = 'instagram'
+): Promise<MarkResult> {
   const actor = await requireAdmin();
   if (typeof productId !== 'string' || !UUID_RE.test(productId)) return { ok: false, error: 'Producto no válido' };
+  if (!isStoryNetwork(network)) return { ok: false, error: 'Red no válida' };
 
   const admin = getSupabaseAdmin();
   if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
@@ -53,7 +61,7 @@ export async function markStoryPublished(productId: string, shownPrice?: number)
   if (!isOnSale(product)) {
     return {
       ok: false,
-      error: 'Ese producto ya no está a la venta en el sitio, así que no hace falta marcarla. Si ya la subiste, bórrala de Instagram.',
+      error: `Ese producto ya no está a la venta en el sitio, así que no hace falta marcarla. Si ya la subiste, bórrala de ${STORY_NETWORK_LABELS[network]}.`,
     };
   }
 
@@ -74,7 +82,7 @@ export async function markStoryPublished(productId: string, shownPrice?: number)
     .from('social_posts')
     .select('id')
     .eq('product_id', product.id)
-    .eq('channel', 'instagram')
+    .eq('channel', network)
     .eq('caption', STORY_MARK)
     .eq('status', 'publicado')
     .eq('posted_price', price)
@@ -89,7 +97,7 @@ export async function markStoryPublished(productId: string, shownPrice?: number)
     .from('social_posts')
     .insert({
       product_id: product.id,
-      channel: 'instagram',
+      channel: network,
       posted_price: price,
       caption: STORY_MARK,
       status: 'publicado',
@@ -107,7 +115,7 @@ export async function markStoryPublished(productId: string, shownPrice?: number)
     actor,
     action: 'marcar_rrss',
     target: product.id,
-    after: { historia: 'publicada', precio: price },
+    after: { historia: 'publicada', red: network, precio: price },
   });
   return { ok: true, postId: (data as { id: number }).id, ...changed };
 }
@@ -127,7 +135,7 @@ export async function undoStoryPublished(postId: number): Promise<UndoResult> {
     .from('social_posts')
     .update({ status: 'error', error: 'Marcada por error', updated_at: new Date().toISOString() })
     .eq('id', postId)
-    .eq('channel', 'instagram')
+    .in('channel', [...STORY_NETWORKS])
     .eq('caption', STORY_MARK)
     .eq('status', 'publicado')
     .select('product_id');

@@ -217,7 +217,8 @@ describe('readStoryHistory', () => {
     expect(history.size).toBe(2);
 
     expect(calls).toContainEqual(['from', 'social_posts']);
-    expect(calls).toContainEqual(['eq', 'channel', 'instagram']);
+    // Subida en cualquier red de historias cuenta (Instagram, que la pasa a Facebook, o TikTok).
+    expect(calls).toContainEqual(['in', 'channel', ['instagram', 'tiktok']]);
     expect(calls).toContainEqual(['eq', 'caption', STORY_MARK]);
     expect(calls).toContainEqual(['neq', 'status', 'error']);
     expect(calls).toContainEqual(['gte', 'posted_at', since.toISOString()]);
@@ -838,9 +839,10 @@ describe('readPostedStories', () => {
     return { admin, asked };
   }
 
-  const mark = (id: number, productId: string, price: number | null, hoursAgo: number) => ({
+  const mark = (id: number, productId: string, price: number | null, hoursAgo: number, channel = 'instagram') => ({
     id,
     product_id: productId,
+    channel,
     posted_price: price,
     posted_at: new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString(),
   });
@@ -871,6 +873,19 @@ describe('readPostedStories', () => {
     expect(stories[2].link).toBe('https://www.mercadolibre.cl/p/MLC123?matt_word=comparatech&matt_tool=12345');
     // La ficha limpia, para mirar el precio.
     expect(stories[2].mlUrl).toBe('https://www.mercadolibre.cl/p/MLC123');
+    // La marca por red: la más nueva de cada una.
+    expect(stories[2].marks).toEqual({ instagram: 11 });
+  });
+
+  it('junta las marcas de cada red en la misma historia; la de una red que no es de historias no cuenta', async () => {
+    const a = product();
+    const { admin } = fakeTables({
+      social_posts: [mark(42, a.id, 80_000, 1, 'tiktok'), mark(41, a.id, 80_000, 2, 'instagram'), mark(40, a.id, 80_000, 3, 'youtube')],
+      products: [a],
+    });
+    const stories = await readPostedStories(admin, NOW, KEY);
+    expect(stories).toHaveLength(1);
+    expect(stories[0]).toMatchObject({ postId: 42, marks: { instagram: 41, tiktok: 42 } });
   });
 
   it('ocultado, en pausa o marcado como borrado viene con onSale false; borrado de la base no viene', async () => {

@@ -131,11 +131,24 @@ describe('markStoryPublished', () => {
       actor: 'cristopher',
       action: 'marcar_rrss',
       target: PRODUCT,
-      after: { historia: 'publicada', precio: 49_990 },
+      after: { historia: 'publicada', red: 'instagram', precio: 49_990 },
     });
     // No regenera páginas: la lista no se rearma bajo el dedo.
     expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
     expect(vi.mocked(revalidateTag)).not.toHaveBeenCalled();
+  });
+
+  it('cada red lleva su marca: Instagram y TikTok son dos filas, y una red que no es de historias se rechaza', async () => {
+    const ig = await markStoryPublished(PRODUCT, 49_990, 'instagram');
+    const tt = await markStoryPublished(PRODUCT, 49_990, 'tiktok');
+    expect(ig).toMatchObject({ ok: true });
+    expect(tt).toMatchObject({ ok: true });
+    expect(posts().map((p) => p.channel).sort()).toEqual(['instagram', 'tiktok']);
+    // Un segundo toque en TikTok no la anota de nuevo.
+    expect(await markStoryPublished(PRODUCT, 49_990, 'tiktok')).toEqual(tt);
+    expect(posts()).toHaveLength(2);
+    expect(await markStoryPublished(PRODUCT, 49_990, 'youtube' as never)).toEqual({ ok: false, error: 'Red no válida' });
+    expect(posts()).toHaveLength(2);
   });
 
   it('si el precio cambió, anota la de la tarjeta (es la que se subió) y la respuesta trae el de ahora y el aviso', async () => {
@@ -171,7 +184,7 @@ describe('markStoryPublished', () => {
   it('un producto que ya no está a la venta no se marca, y dice qué hacer con la historia ya subida', async () => {
     const gone = {
       ok: false,
-      error: 'Ese producto ya no está a la venta en el sitio, así que no hace falta marcarla. Si ya la subiste, bórrala de Instagram.',
+      error: 'Ese producto ya no está a la venta en el sitio, así que no hace falta marcarla. Si ya la subiste, bórrala de Instagram y Facebook.',
     };
     for (const state of [{ is_active: false }, { is_hidden: true }, { deleted_at: '2026-10-12T10:00:00.000Z' }]) {
       db.tables.products = [product(state)];
