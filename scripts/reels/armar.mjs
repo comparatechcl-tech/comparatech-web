@@ -122,9 +122,10 @@ function pintarEnHilos(trabajo, fps, cuadros, hilos, escribir) {
  * foto no se puede leer, falla aquí y no se arma nada). Devuelve lo que se va a decir en pantalla, para
  * mostrarlo antes de armar, y `armar(...)`, que es lo que de verdad pinta y comprime.
  *
- * `producto` es lo que devuelve resolverProducto o leerProducto (datos.mjs).
+ * `producto` es lo que devuelve resolverProducto o leerProducto (datos.mjs). `variante` (solo "navidad", para armar
+ * muestras a mano) elige otra versión de la plantilla; sin ella, va la que la plantilla tiene encendida.
  */
-export async function prepararReel(producto, { plantilla = PLANTILLA_POR_DEFECTO, cta = null, zonas = false, musica = null } = {}) {
+export async function prepararReel(producto, { plantilla = PLANTILLA_POR_DEFECTO, cta = null, zonas = false, musica = null, variante = null } = {}) {
   const P = await cargarPlantilla(plantilla);
   const llamada = limpia(cta ?? '', 800) || P.CTA_POR_DEFECTO;
   revisarLlamada(llamada);
@@ -134,7 +135,7 @@ export async function prepararReel(producto, { plantilla = PLANTILLA_POR_DEFECTO
     if (problema) throw new Error(`No se puede usar la música ${musica}: ${problema}.`);
   }
 
-  const escena = await sinRed(() => P.preparar(producto, llamada, { zonas }));
+  const escena = await sinRed(() => P.preparar(producto, llamada, variante ? { zonas, variante } : { zonas }));
   const T = P.tiempos(escena);
   const cuadros = Math.round(T.fin * P.FPS);
 

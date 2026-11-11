@@ -166,6 +166,85 @@ export function pintarAmpolletas(dst, t, lista, yMax = H) {
   }
 }
 
+// --- La nieve acumulada en el borde de la hoja (variantes "gorro" y "producida") -------------------------------
+// Un montón de nieve parejo a lo largo del borde de arriba de la hoja azul noche, como nieve sobre un techo: se ve
+// desde el primer cuadro y en la portada. Mide hasta 20 px sobre el borde (la foto termina 30 px más arriba: no la
+// toca) y cuelga unos pocos px sobre la hoja (lo escrito empieza 40 px o más bajo el borde).
+const NIEVE_ALTO_MAX = 20;
+/** Los montones: siempre los mismos. Cada uno es una loma de radio `r` que asoma `alto` (en fracción de r). */
+export function nieveDelBorde() {
+  const al = azar(73);
+  const lomas = [];
+  for (let x = -14; x < W + 14; ) {
+    const r = 12 + 16 * al();
+    lomas.push({ x, r, alto: 0.32 + 0.38 * al() });
+    x += r * (0.75 + 0.6 * al());
+  }
+  // Por columna: cuánto sube la nieve sobre el borde y cuánto cuelga bajo él (las gotas que se descuelgan).
+  const arriba = new Float32Array(W);
+  const abajo = new Float32Array(W);
+  for (const l of lomas) {
+    for (let x = Math.max(0, Math.floor(l.x - l.r)); x < Math.min(W, Math.ceil(l.x + l.r)); x++) {
+      const u = (x + 0.5 - l.x) / l.r;
+      if (Math.abs(u) >= 1) continue;
+      arriba[x] = Math.max(arriba[x], Math.min(NIEVE_ALTO_MAX, 4 + l.r * l.alto * Math.sqrt(1 - u * u)));
+    }
+  }
+  for (let x = 0; x < W; x++) abajo[x] = 3 + 2.5 * (0.5 + 0.5 * Math.sin(x / 23 + 1.3 * Math.sin(x / 61)));
+  for (let i = 0; i < 9; i++) {
+    const cx = 40 + al() * (W - 80);
+    const r = 5 + 5 * al();
+    const largo = 6 + 8 * al();
+    for (let x = Math.max(0, Math.floor(cx - r)); x < Math.min(W, Math.ceil(cx + r)); x++) {
+      const u = (x + 0.5 - cx) / r;
+      if (Math.abs(u) < 1) abajo[x] = Math.max(abajo[x], 3 + largo * Math.sqrt(1 - u * u));
+    }
+  }
+  return { arriba, abajo };
+}
+
+/**
+ * Pinta la nieve acumulada sobre el borde de la hoja (su borde de arriba en la fila `borde`, con esquinas de radio
+ * `radio`). La luz viene de arriba: la loma es blanca arriba y azulada abajo, y lo que cuelga sobre la hoja queda
+ * en sombra.
+ */
+export function pintarNieveDelBorde(dst, borde, radio, nieve) {
+  if (borde + radio + 30 < 0 || borde - NIEVE_ALTO_MAX > H) return;
+  const ALTO = [252, 253, 255];
+  const BAJO = [196, 210, 232];
+  const SOMBRA = [150, 168, 198];
+  for (let x = 0; x < W; x++) {
+    const lado = x < radio ? radio - x - 0.5 : x > W - radio ? x + 0.5 - (W - radio) : 0;
+    if (lado >= radio) continue;
+    const curva = radio - Math.sqrt(radio * radio - lado * lado); // el borde baja en las esquinas redondas
+    const e = borde + curva;
+    const enEsquina = 1 - lado / radio; // en la esquina la nieve se desliza: menos alta
+    const sube = nieve.arriba[x] * (0.35 + 0.65 * enEsquina);
+    const cuelga = nieve.abajo[x] * (0.5 + 0.5 * enEsquina);
+    // La pendiente de la loma (para que el lado que mira a la luz quede más claro).
+    const pend = x > 0 && x < W - 1 ? (nieve.arriba[x + 1] - nieve.arriba[x - 1]) / 2 : 0;
+    const y0 = Math.max(0, Math.floor(e - sube));
+    const y1 = Math.min(H - 1, Math.ceil(e + cuelga));
+    for (let y = y0; y <= y1; y++) {
+      const yc = y + 0.5;
+      // Cuánto cubre el punto: borde suave arriba y abajo.
+      const cubre = limitar(yc - (e - sube) + 0.5) * limitar(e + cuelga - yc + 0.5);
+      if (cubre <= 0) continue;
+      let color;
+      if (yc <= e) {
+        const u = limitar((e - yc) / Math.max(1, sube)); // 0 en el borde, 1 en lo alto de la loma
+        const k = limitar(0.25 + 0.75 * u ** 0.6 + 0.08 * pend);
+        color = [0, 1, 2].map((c) => BAJO[c] + (ALTO[c] - BAJO[c]) * k);
+      } else {
+        const u = limitar((yc - e) / Math.max(1, cuelga));
+        color = [0, 1, 2].map((c) => BAJO[c] + (SOMBRA[c] - BAJO[c]) * u);
+      }
+      const d = (y * W + x) * 3;
+      for (let c = 0; c < 3; c++) dst[d + c] = Math.round(dst[d + c] + (color[c] - dst[d + c]) * cubre);
+    }
+  }
+}
+
 // --- La nieve -------------------------------------------------------------------------------------------------
 /** Los copos: siempre los mismos, cada uno con su lugar de partida, su velocidad, su tamaño y su vaivén. */
 export function copos(cuantos = 90) {

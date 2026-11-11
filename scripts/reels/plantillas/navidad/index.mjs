@@ -6,6 +6,9 @@
 //
 // El dueño la aprobó el 09-11-2026: va en el reel diario alternada con "impacto" (VIDEO_TEMPLATES en
 // src/lib/social/videos.ts). Se saca de ahí cuando termine la temporada.
+//
+// Tiene variantes para comparar (11-11-2026: el gorro grande y la cinta al pasar al cierre): la que sale es la de
+// VARIANTE en escena.mjs; las otras se arman a mano con `hacer.mjs ... --plantilla navidad --variante gorro`.
 import { FPS, CTA_POR_DEFECTO, preparar, tiempos as tiemposSegunGancho, momentos, pintor } from './escena.mjs';
 
 export { FPS, CTA_POR_DEFECTO };
@@ -28,6 +31,6 @@ export function describir(escena, cta) {
   const m = escena.medidas;
   return [
     `foto ${m.foto === 'fundida' ? 'sobre blanco' : 'en lámina'}, producto de ${m.original.w}x${m.original.h} px, mostrado a ${m.gancho ? `${m.gancho} (gancho), ` : ''}${m.nombre} (nombre) y ${m.precio} px (precio)`,
-    `precio en ${m.precioTam} px, llamada "${cta}" en ${m.llamadaTam} px, con adornos de Navidad`,
+    `precio en ${m.precioTam} px, llamada "${cta}" en ${m.llamadaTam} px, con adornos de Navidad${escena.variante && escena.variante !== 'hoy' ? ` (variante "${escena.variante}")` : ''}`,
   ];
 }

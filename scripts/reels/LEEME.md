@@ -94,6 +94,7 @@ node scripts/reels/hacer.mjs <productos.json> <número> <salida.mp4> [opciones]
 | `--portada foto.jpg` | Guarda además la escena del precio completa como imagen, para subirla de portada. |
 | `--hoja hoja.jpg` | Guarda además una hoja con 8 cuadros del video ya armado, para revisarlo de un vistazo. |
 | `--zonas` | Pinta en rojo lo que tapan las apps. Es para revisar: ese video no se publica. |
+| `--variante gorro` | Solo con `--plantilla navidad`: arma otra versión para comparar (`hoy`, `gorro` o `producida`; ver más abajo). Sin esta opción va la que la plantilla tiene encendida. |
 | `--musica archivo` | Usa ese audio en vez del silencio: lo recorta al largo del video (si es más corto, lo repite), con entrada y salida suaves. |
 | `--volumen 0.6` | Volumen de la música, de 0 a 1. |
 | `--hilos N` | Cuántos hilos pintan (por defecto, la mitad de los núcleos, hasta 6). |
@@ -141,6 +142,25 @@ Pascuero con su saco de regalos (a la izquierda) y un arbolito con un bastón de
 en SVG (`plantillas/navidad/dibujos.mjs`). El dueño la aprobó el 09-11: desde ese día está en
 `VIDEO_TEMPLATES`, alternada con `impacto`. Los dibujos (moño, gorro, Viejito Pascuero, arbolito) son los mismos de
 las historias de Navidad: `node scripts/piezas/navidad.mjs > src/lib/content/christmas-art.ts` los pasa a PNG.
+
+**Variantes de `navidad`** (11-11-2026, muestras para el dueño: "pondría un gorro navideño real más gigante en vez de
+eso loguito pequeño, o haría un cambio o corte de imagen algo más producido"). La que sale es la de `VARIANTE` en
+`plantillas/navidad/escena.mjs` (hoy, `'hoy'`); para cambiarla se cambia esa línea y se publica.
+
+- `hoy`: la de siempre, con el gorrito chico en el logo.
+- `gorro`: un gorro grande y con volumen (`plantillas/navidad/gorro.mjs`), pintado punto por punto: terciopelo rojo
+  con luz y sombra, piel blanca hecha de cientos de mechones y un pompón, y su sombra blanda sobre el logo. En el
+  cierre el logo crece a 240 px y el gorro cae desde arriba, se aplasta al posarse, da dos saltitos y se balancea; el
+  bloque del cierre sube lo justo para que la llamada termine sobre el Viejito Pascuero (y=1200) y la letra chica
+  sobre el arbolito (y=1310), sin que el gorro entre en la franja de arriba. Uno igual, chico y con la punta a la
+  izquierda, va en la pastilla de arriba, y desde el primer cuadro hay nieve acumulada en el borde de la hoja.
+- `producida`: lo de `gorro` y, al pasar del precio al cierre, una cinta de raso rojo con filete dorado que barre la
+  pantalla en 0,45 s (`plantillas/navidad/cinta.mjs`): delante queda el precio y detrás ya está el cierre, que entra
+  0,1 s antes (así lo escrito queda a la vista un poco más, no menos).
+
+Las tres duran lo mismo y su cierre se lee igual: las pruebas revisan que lo escrito quede entero y quieto los últimos
+2 segundos, que el gorro no lo tape ni entre en las zonas de las apps y que la cinta termine antes de que entre
+"ComparaTech". El gorro grande demora como 1 s en dibujarse; se dibuja una vez por proceso.
 
 `estudio` se acomoda sola de dos maneras según la forma de la foto:
 

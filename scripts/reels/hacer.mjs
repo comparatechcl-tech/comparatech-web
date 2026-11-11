@@ -8,6 +8,7 @@
 //   --portada foto.jpg    guarda además la escena del precio completa como imagen, para usarla de portada
 //   --hoja hoja.jpg       guarda además una hoja con 8 cuadros del video ya armado, para revisarlo de un vistazo
 //   --zonas               pinta en rojo lo que tapan las apps (solo para revisar: ese video no se publica)
+//   --variante gorro      con "navidad": arma otra versión para comparar (hoy, gorro o producida; ver su escena.mjs)
 //   --musica archivo      usa ese audio en vez del silencio (recortado al largo del video, entra y sale suave)
 //   --volumen 0.6         volumen de la música, de 0 a 1 (por defecto, 1)
 //   --hilos N             cuántos hilos pintan (por defecto, según el equipo)
@@ -19,8 +20,10 @@ import path from 'node:path';
 import { leerProducto, precio as formatoPrecio } from './datos.mjs';
 import { PLANTILLA_POR_DEFECTO, revisarPlantilla } from './plantillas/index.mjs';
 
-const USO = 'Uso: node scripts/reels/hacer.mjs <productos.json> <número de producto> <salida.mp4> [--plantilla estudio] [--cta "texto"] [--portada portada.jpg] [--hoja hoja.jpg] [--zonas] [--musica archivo] [--volumen 0.6]';
-const CON_VALOR = ['plantilla', 'cta', 'portada', 'hoja', 'musica', 'volumen', 'hilos'];
+const USO = 'Uso: node scripts/reels/hacer.mjs <productos.json> <número de producto> <salida.mp4> [--plantilla estudio] [--cta "texto"] [--portada portada.jpg] [--hoja hoja.jpg] [--zonas] [--musica archivo] [--volumen 0.6] [--variante gorro]';
+const CON_VALOR = ['plantilla', 'cta', 'portada', 'hoja', 'musica', 'volumen', 'hilos', 'variante'];
+// Solo "navidad" tiene variantes (muestras para el dueño): con otra plantilla, --variante es un error.
+const CON_VARIANTES = ['navidad'];
 const coma = (n, d = 1) => n.toFixed(d).replace('.', ',');
 
 /** Lee la línea de comando. Una opción que no se conoce es un error: mejor avisar que ignorarla. */
@@ -58,8 +61,10 @@ function argumentos(argv) {
     if (!Number.isInteger(hilos) || hilos < 1 || hilos > 16) throw new Error(`--hilos va de 1 a 16 (llegó "${op.hilos}").`);
   }
   for (const k of ['portada', 'hoja']) if (op[k] !== undefined && !/\.jpe?g$/i.test(op[k])) throw new Error(`--${k} tiene que terminar en .jpg (llegó "${op[k]}").`);
+  const plantilla = op.plantilla ?? PLANTILLA_POR_DEFECTO;
+  if (op.variante !== undefined && !CON_VARIANTES.includes(plantilla)) throw new Error(`--variante solo sirve con --plantilla ${CON_VARIANTES.join(' o ')} (llegó "${plantilla}").`);
   const ruta = (r) => (r === undefined ? null : path.resolve(r));
-  return { json: path.resolve(sueltos[0]), numero, salida: path.resolve(sueltos[2]), plantilla: op.plantilla ?? PLANTILLA_POR_DEFECTO, cta: op.cta, portada: ruta(op.portada), hoja: ruta(op.hoja), musica: ruta(op.musica), volumen, hilos, zonas: op.zonas };
+  return { json: path.resolve(sueltos[0]), numero, salida: path.resolve(sueltos[2]), plantilla, cta: op.cta, portada: ruta(op.portada), hoja: ruta(op.hoja), musica: ruta(op.musica), volumen, hilos, zonas: op.zonas, variante: op.variante ?? null };
 }
 
 async function main() {
@@ -74,7 +79,7 @@ async function main() {
   revisarPlantilla(a.plantilla);
   const producto = leerProducto(a.json, a.numero);
   const { prepararReel, PESO_MAX } = await import('./armar.mjs');
-  const reel = await prepararReel(producto, { plantilla: a.plantilla, cta: a.cta, zonas: a.zonas, musica: a.musica });
+  const reel = await prepararReel(producto, { plantilla: a.plantilla, cta: a.cta, zonas: a.zonas, musica: a.musica, variante: a.variante });
   const tPreparar = (Date.now() - inicio) / 1000;
   console.log(`Producto ${a.numero}: ${producto.nombre} · ${formatoPrecio(producto.precio)}`);
   console.log(`  En pantalla: ${reel.escrito.join(' | ')}`);

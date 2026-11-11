@@ -273,6 +273,176 @@ describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el
   }, SLOW);
 });
 
+describe('plantillas: "navidad", variantes "gorro" y "producida" (muestras del 11-11-2026)', () => {
+  type Capa = { w: number; h: number; data: Uint8Array; dx: number; dy: number };
+  const W = 1080;
+  const H = 1920;
+  const fetchAntes = globalThis.fetch;
+  beforeAll(() => {
+    globalThis.fetch = () => Promise.reject(new Error('Sin red'));
+  });
+  afterAll(() => {
+    globalThis.fetch = fetchAntes;
+  });
+  /** Las capas de los adornos, con las de las variantes (que no están en todas las escenas). */
+  const adornos = (escena: { N: object }) => escena.N as Record<string, Capa | undefined>;
+  /** Lo escrito del cierre: cada renglón con su capa y dónde queda quieto. */
+  const escritoDelCierre = (Z: { marca: Capa; marcaY: number; llamada: Capa[]; llamadaY: number; llamadaAlto: number; pie: Capa[]; pieY: number }) => [
+    { capa: Z.marca, x: Math.round(W / 2 - Z.marca.w / 2), y: Z.marcaY },
+    ...Z.llamada.map((capa, i) => ({ capa, x: Math.round(W / 2 - capa.w / 2), y: Z.llamadaY + i * Z.llamadaAlto })),
+    ...Z.pie.map((capa, i) => ({ capa, x: Math.round(W / 2 - capa.w / 2), y: Z.pieY + i * 44 })),
+  ];
+
+  it('la de hoy es la de siempre, y una variante que no existe es un error antes de armar nada', async () => {
+    const { VARIANTES, preparar, CTA_POR_DEFECTO } = await import('./plantillas/navidad/escena.mjs');
+    expect(VARIANTES).toEqual(['hoy', 'gorro', 'producida']);
+    await expect(preparar(leerProducto(DATA, 1), CTA_POR_DEFECTO, { variante: 'neon' })).rejects.toThrow('No existe la variante "neon" de la plantilla navidad. Las que hay: hoy, gorro, producida.');
+    // El gorro grande y la nieve del borde son solo de las variantes.
+    const hoy = await preparar(leerProducto(DATA, 1), CTA_POR_DEFECTO, { variante: 'hoy' });
+    expect(adornos(hoy).gorroReal).toBeUndefined();
+    expect(adornos(hoy).nieveBorde).toBeUndefined();
+    expect(hoy.Z.lado).toBe(200);
+  }, SLOW);
+
+  it('duran lo mismo que hoy (de 9 a 11 s); la cinta dura de 0,3 a 0,5 s y todo termina antes de que entre lo escrito del cierre', async () => {
+    const navidad = await cargarPlantilla('navidad');
+    const { tiemposDeVariante } = await import('./plantillas/navidad/escena.mjs');
+    for (const A of [{}, null]) {
+      const T = navidad.tiempos({ A, variante: 'producida' });
+      expect(T).toEqual(navidad.tiempos({ A, variante: 'hoy' }));
+      expect(T.fin).toBeGreaterThanOrEqual(9);
+      expect(T.fin).toBeLessThanOrEqual(11);
+      expect(T.fin - (T.cierre + 1.1)).toBeGreaterThanOrEqual(2);
+      const V = tiemposDeVariante(T);
+      expect(V.cinta[1] - V.cinta[0]).toBeGreaterThanOrEqual(0.3);
+      expect(V.cinta[1] - V.cinta[0]).toBeLessThanOrEqual(0.5);
+      expect(V.cinta[0]).toBeGreaterThan(T.portada); // la portada sigue siendo la escena del precio limpia
+      // "ComparaTech" empieza a entrar 0,36 s después de que sube el cierre (en "producida", antes por el adelanto).
+      expect(V.cinta[1]).toBeLessThanOrEqual(T.cierre + 0.36 - V.adelanto);
+      expect(V.adelanto).toBeGreaterThanOrEqual(0); // el cierre entra antes, nunca después: no pierde tiempo de lectura
+      expect(V.gorro[1]).toBeLessThan(T.cierre + 1.1); // el gorro se posa antes de que termine de entrar lo escrito
+    }
+  });
+
+  it('en las tres, lo escrito del cierre queda entero, quieto y sin nada encima los últimos 2 segundos', async () => {
+    const P = await cargarPlantilla('navidad');
+    for (const variante of ['hoy', 'gorro', 'producida']) {
+      for (const n of [1, 6]) {
+        const escena = await P.preparar(leerProducto(DATA, n), P.CTA_POR_DEFECTO, { variante });
+        const T = P.tiempos(escena);
+        const pintar = P.pintor(escena, T);
+        const lienzo = new Uint8Array(W * H * 3);
+        const renglones = escritoDelCierre(escena.Z);
+        for (let t = T.fin - 2; t < T.fin; t += 0.25) {
+          pintar(lienzo, t);
+          let distintos = 0;
+          let revisados = 0;
+          for (const { capa, x, y } of renglones) {
+            for (let v = 0; v < capa.h; v++) {
+              for (let u = 0; u < capa.w; u++) {
+                const s = (v * capa.w + u) * 4;
+                if (capa.data[s + 3] !== 255) continue;
+                const d = ((y + v) * W + x + u) * 3;
+                revisados++;
+                if (lienzo[d] !== capa.data[s] || lienzo[d + 1] !== capa.data[s + 1] || lienzo[d + 2] !== capa.data[s + 2]) distintos++;
+              }
+            }
+          }
+          expect(revisados, `${variante}, producto ${n}`).toBeGreaterThan(5000);
+          expect(distintos, `${variante}, producto ${n}, ${t.toFixed(2)} s`).toBe(0);
+        }
+      }
+    }
+  }, 120_000);
+
+  it('el gorro grande (en el cierre y en la pastilla) no tapa lo escrito ni entra donde las apps ponen lo suyo', async () => {
+    const P = await cargarPlantilla('navidad');
+    const { SEGURO, lugarGorroCierre, lugarGorroPastilla } = await import('./plantillas/navidad/escena.mjs');
+    for (const n of [1, 5, 6]) {
+      const escena = await P.preparar(leerProducto(DATA, n), P.CTA_POR_DEFECTO, { variante: 'gorro' });
+      const { Z, L } = escena;
+      const N = adornos(escena);
+      expect(Z.lado).toBe(210);
+      // Dónde hay letra en el cierre.
+      const letra = new Uint8Array(W * H);
+      for (const { capa, x, y } of escritoDelCierre(Z)) {
+        for (let v = 0; v < capa.h; v++) for (let u = 0; u < capa.w; u++) if (capa.data[(v * capa.w + u) * 4 + 3] > 0) letra[(y + v) * W + x + u] = 1;
+      }
+      // El gorro del cierre, quieto y con el logo ya acercado del todo (3% más grande hacia el final).
+      const g = N.gorroReal as Capa;
+      const lugar = lugarGorroCierre(escena);
+      let encima = 0;
+      let arriba = Infinity;
+      let x0 = Infinity;
+      let x1 = -Infinity;
+      for (let v = 0; v < g.h; v++) {
+        for (let u = 0; u < g.w; u++) {
+          if (g.data[(v * g.w + u) * 4 + 3] < 24) continue;
+          for (const k of [1, 1.03]) {
+            const x = Math.round(W / 2 + (lugar.x + u - W / 2) * k);
+            const y = Math.round(Z.logoY + (lugar.y + v - Z.logoY) * k);
+            if (letra[y * W + x]) encima++;
+            arriba = Math.min(arriba, y);
+            x0 = Math.min(x0, x);
+            x1 = Math.max(x1, x);
+          }
+        }
+      }
+      expect(encima, `producto ${n}`).toBe(0);
+      // Es adorno: puede entrar hasta 40 px en la franja de arriba que tapan las apps, no más.
+      expect(arriba).toBeGreaterThanOrEqual(SEGURO.arriba - 40);
+      expect(x0).toBeGreaterThan(0);
+      expect(x1).toBeLessThan(SEGURO.derecha);
+      // Lo escrito del cierre termina bien arriba del Viejito Pascuero (su cabeza asoma desde y=1272).
+      for (const { capa, y } of escritoDelCierre(Z)) expect(y + capa.h).toBeLessThanOrEqual(1180);
+      // El gorro de la pastilla: no pisa "ComparaTech" (la letra empieza 68 px adentro de la pastilla, que va en
+      // x=72, y=226) ni baja hasta la foto (y=324).
+      const gp = N.gorroPastilla as Capa;
+      const lp = lugarGorroPastilla(gp);
+      const marca: Capa = L.marca;
+      let pisa = 0;
+      let abajo = 0;
+      for (let v = 0; v < gp.h; v++) {
+        for (let u = 0; u < gp.w; u++) {
+          if (gp.data[(v * gp.w + u) * 4 + 3] < 24) continue;
+          const mx = lp.x + u - 72;
+          const my = lp.y + v - 226;
+          abajo = Math.max(abajo, lp.y + v);
+          if (mx >= 64 && mx < marca.w && my >= 0 && my < marca.h && marca.data[(my * marca.w + mx) * 4 + 3] > 0) {
+            const s = (my * marca.w + mx) * 4;
+            if (marca.data[s] + marca.data[s + 1] + marca.data[s + 2] > 300) pisa++; // letra (blanca o cian), no el fondo de la pastilla
+          }
+        }
+      }
+      expect(pisa, `producto ${n}`).toBe(0);
+      expect(abajo).toBeLessThan(324);
+    }
+  }, SLOW);
+
+  it('"producida": a mitad de camino la cinta cruza la pantalla y, al terminar, ya está el cierre', async () => {
+    const P = await cargarPlantilla('navidad');
+    const { tiemposDeVariante } = await import('./plantillas/navidad/escena.mjs');
+    const escena = await P.preparar(leerProducto(DATA, 1), P.CTA_POR_DEFECTO, { variante: 'producida' });
+    const T = P.tiempos(escena);
+    const V = tiemposDeVariante(T);
+    const pintar = P.pintor(escena, T);
+    const lienzo = new Uint8Array(W * H * 3);
+    const rojos = () => {
+      let n = 0;
+      for (let i = 0; i < lienzo.length; i += 3) if (lienzo[i] > 150 && lienzo[i + 1] < 70 && lienzo[i + 2] < 90) n++;
+      return n;
+    };
+    pintar(lienzo, (V.cinta[0] + V.cinta[1]) / 2);
+    expect(rojos()).toBeGreaterThan(150_000); // la cinta mide 420 px de ancho y cruza la pantalla
+    pintar(lienzo, V.cinta[1]);
+    expect(rojos()).toBeLessThan(5_000);
+    // Sin la cinta, "gorro" pasa al cierre como hoy: la hoja sube (lo rojo es el gorro de la pastilla).
+    const gorro = await P.preparar(leerProducto(DATA, 1), P.CTA_POR_DEFECTO, { variante: 'gorro' });
+    P.pintor(gorro, T)(lienzo, (V.cinta[0] + V.cinta[1]) / 2);
+    expect(rojos()).toBeLessThan(5_000);
+  }, SLOW);
+});
+
 function hacer(...args: string[]) {
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/reels/hacer.mjs'), ...args], { cwd: DIR, encoding: 'utf8' });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
@@ -311,6 +481,14 @@ describe('hacer.mjs: cuando no se puede armar', () => {
     const r = hacer(DATA, '1', 'salida.mp4', '--plantilla', 'neon');
     expect(r.code).toBe(1);
     expect(r.out).toContain('No existe la plantilla "neon". Las que hay: estudio, bloques, impacto, navidad.');
+    expect(leftovers()).toEqual([]);
+  }, SLOW);
+
+  it('--variante solo sirve con la plantilla "navidad"', () => {
+    const r = hacer(DATA, '1', 'salida.mp4', '--plantilla', 'impacto', '--variante', 'gorro');
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('--variante solo sirve con --plantilla navidad (llegó "impacto").');
+    expect(hacer(DATA, '1', 'salida.mp4', '--variante', 'gorro').code).toBe(1); // sin --plantilla es "estudio"
     expect(leftovers()).toEqual([]);
   }, SLOW);
 

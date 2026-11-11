@@ -26,10 +26,26 @@ import { leerFoto, prepararFoto, achicar } from '../../foto.mjs';
 import { W, H, fase, mezcla, suave, rgb, limitar, poner, ponerConBrillo, ponerEscalada, rectangulo, ponerFoto, sombraDeApoyo, resplandor } from '../../pintar.mjs';
 import { fondoEstudio, hojaOscura, destelloHoja } from '../impacto/fondos.mjs';
 import { fraseDePrecio } from '../impacto/escena.mjs';
-import { capasDeAdornos, pintarCable, ampolletas, pintarAmpolletas, copos, pintarNieve, GORRO_EN_LOGO } from './adornos.mjs';
+import { capasDeAdornos, pintarCable, ampolletas, pintarAmpolletas, copos, pintarNieve, GORRO_EN_LOGO, nieveDelBorde, pintarNieveDelBorde } from './adornos.mjs';
+import { gorroParaLogo, ponerGirada, APOYO_EN_LOGO } from './gorro.mjs';
+import { pintarCinta, chispasDeCinta } from './cinta.mjs';
 
 export const FPS = 30;
 export const CTA_POR_DEFECTO = 'Guárdalo para tus compras de Navidad';
+
+// --- Variantes (muestras del 11-11-2026 para el dueño, en _local/redes/navidad/v3) ------------------------------
+// El dueño: "pondría un gorro navideño real más gigante en vez de eso loguito pequeño, o haría un cambio o corte de
+// imagen algo más producido".
+//   'hoy'        lo que sale desde el 09-11: el gorrito chico (dibujos.mjs) sobre el logo.
+//   'gorro'      (A) un gorro grande y con volumen (terciopelo rojo y piel blanca, gorro.mjs) que cae y rebota
+//                sobre el logo del cierre, que crece de 200 a 210 px; uno igual, chico, sobre el logo de la pastilla
+//                de arriba, y nieve acumulada en el borde de la hoja azul noche desde el primer cuadro.
+//   'producida'  (B) lo de A y, al pasar del precio al cierre, una cinta roja con filete dorado que barre la
+//                pantalla en 0,45 s (cinta.mjs).
+// El guion (tiempos) es el mismo en las tres: el cierre se lee unos 2 s con todo puesto (en "producida", 0,1 s más).
+// Para encender una variante se cambia esta línea y se publica. `hacer.mjs --variante` arma las otras para comparar.
+export const VARIANTE = 'hoy';
+export const VARIANTES = ['hoy', 'gorro', 'producida'];
 
 // --- Zonas seguras (Reels, TikTok, Shorts) ----------------------------------------------------------------
 // Las apps tapan los 220 px de arriba, los 420 de abajo y, de la mitad hacia abajo, lo que queda a la derecha
@@ -62,6 +78,28 @@ const ADORNOS_PISO = SEGURO.abajo + 60; // 1560
 const CIERRE_ABAJO = 1180;
 const VIEJITO = { x: 30 }; // 280x308: de x=30 a 310 (la letra chica del cierre empieza más a la derecha)
 const RINCON = { x: 700 }; // 200x170: de x=700 a 900 (los botones de las apps empiezan en x=924)
+// Variantes con el gorro grande: el logo del cierre se muestra a 210 px (no 200) y el bloque del cierre, con el gorro
+// encima, no cabe centrado: sube hasta terminar en CIERRE_ABAJO, y la punta del gorro puede entrar 40 px en la
+// franja de arriba que tapan las apps (es adorno). Así lo escrito queda lejos del Viejito Pascuero (el dueño,
+// 12-11-2026: "salen muy acoplados al texto").
+const LOGO_GRANDE_GORRO = 420;
+const GORRO_TOPE = SEGURO.arriba - 40; // 180
+// El gorro de la pastilla de arriba (con la punta a la izquierda: a la derecha está "ComparaTech"), corrido unos px
+// a la izquierda para que el ala no toque la "C".
+const GORRO_PASTILLA = { corrX: -5, f: 4 };
+
+/** Cuándo pasa cada cosa propia de las variantes, a partir del guion (los tiempos son los mismos en todas). */
+export function tiemposDeVariante(T) {
+  return {
+    gorro: [T.cierre + 0.5, T.cierre + 0.82], // el gorro grande cae (desde arriba de la pantalla) y aquí se posa
+    cinta: [T.cierre - 0.2, T.cierre + 0.25], // la cinta de "producida" barre la pantalla (0,45 s)...
+    adelanto: 0.1, // ...y detrás de ella el cierre entra 0,1 s antes que en las otras (gorro incluido)
+  };
+}
+
+function revisarVariante(variante) {
+  if (!VARIANTES.includes(variante)) throw new Error(`No existe la variante "${variante}" de la plantilla navidad. Las que hay: ${VARIANTES.join(', ')}.`);
+}
 
 /** Texto de la consola: 0,5 */
 const coma = (n, d = 1) => n.toFixed(d).replace('.', ',');
@@ -289,9 +327,12 @@ async function armarPrecio(producto, dicho) {
 }
 
 // --- Z. El cierre -------------------------------------------------------------------------------------------
-async function armarCierre(producto, cta, dicho) {
+async function armarCierre(producto, cta, dicho, gorro = null) {
   const Z = {};
-  Z.logo = await capas.logoGrande(LOGO_GRANDE); // se muestra a 200 px
+  // Con el gorro grande (variantes "gorro" y "producida") el logo va a 210 px y el gorro sube sobre él.
+  const ladoCapa = gorro ? LOGO_GRANDE_GORRO : LOGO_GRANDE;
+  Z.lado = ladoCapa / 2; // como se muestra
+  Z.logo = await capas.logoGrande(ladoCapa); // se muestra a la mitad
   Z.luz = resplandor(960, 960, 0.2);
   Z.marca = await capas.nombreMarca(96);
   // La llamada: en negrita, de 76 px o más si cabe en dos renglones; si es larga baja hasta 40 px y, si ni así,
@@ -310,10 +351,15 @@ async function armarCierre(producto, cta, dicho) {
   // El bloque entero va centrado en la zona que las apps dejan libre. navidad: entre ComparaTech y la llamada va
   // el moño (160x120) en vez de la línea cian de "impacto".
   const altoLlamada = Z.llamada.length * Z.llamadaAlto;
-  const total = 200 + 20 + Z.marca.h + 18 + MONO_ALTO + 22 + altoLlamada + 30 + Z.pie.length * 44;
+  // Con el gorro grande: lo que el gorro sube sobre el borde de arriba del logo (su capa empieza ahí).
+  const sobreLogo = gorro ? Math.max(0, Math.round(-gorro.dy)) : 0;
+  const total = sobreLogo + Z.lado + 20 + Z.marca.h + 18 + MONO_ALTO + 22 + altoLlamada + 30 + Z.pie.length * 44;
   let y = Math.round((SEGURO.arriba + CIERRE_ABAJO) / 2 - total / 2);
-  Z.logoY = y + 100; // centro del logo
-  y += 200 + 20;
+  // Con el gorro grande no cabe centrado: sube hasta terminar en CIERRE_ABAJO, sin que el gorro pase de y=180.
+  if (gorro) y = Math.max(GORRO_TOPE, Math.min(y, CIERRE_ABAJO - total));
+  y += sobreLogo;
+  Z.logoY = y + Z.lado / 2; // centro del logo
+  y += Z.lado + 20;
   Z.marcaY = y;
   y += Z.marca.h + 18;
   Z.monoY = y + MONO_ALTO / 2; // centro del moño
@@ -336,17 +382,26 @@ function caja(foto, arriba, abajo, anchoMax) {
  * Devuelve la escena (lo que necesita el pintor) con `dicho`: todo el texto que va a salir escrito (cada
  * entrada es un texto o { texto, nota }), en el orden en que aparece.
  */
-export async function preparar(producto, cta, { zonas = false } = {}) {
+export async function preparar(producto, cta, { zonas = false, variante = VARIANTE } = {}) {
+  revisarVariante(variante);
   const dicho = ['ComparaTech'];
   const leida = await leerFoto(producto.foto); // primero la foto: si no se puede leer, no se arma nada
   const apaisada = leida.proporcion >= PROPORCION_APAISADA;
   const L = { marca: await capas.pastillaMarca(MARCA_ALTO), luzBaja: resplandor(1500, 800, 0.17) };
+  // Variantes "gorro" y "producida": el gorro grande para el logo del cierre (210 px) y para el de la pastilla.
+  const conGorro = variante !== 'hoy';
+  const gorroGrande = conGorro ? gorroParaLogo(LOGO_GRANDE_GORRO / 2) : null;
   const A = await armarGancho(producto, apaisada, dicho);
   const B = await armarNombre(producto, apaisada, dicho);
   const C = await armarPrecio(producto, dicho);
-  const Z = await armarCierre(producto, cta, dicho);
+  const Z = await armarCierre(producto, cta, dicho, gorroGrande);
   // Los adornos (moño, chispas, gorros, Viejito Pascuero, arbolito): no son texto, no van en `dicho`.
   const N = await capasDeAdornos({ logoChico: LOGO_PASTILLA.lado, logoGrande: LOGO_GRANDE });
+  if (conGorro) {
+    N.gorroReal = gorroGrande;
+    N.gorroPastilla = gorroParaLogo(LOGO_PASTILLA.lado, { espejo: true, f: GORRO_PASTILLA.f });
+    N.nieveBorde = nieveDelBorde();
+  }
   const escenas = { A, B, C };
   const claves = A ? ['A', 'B', 'C'] : ['B', 'C'];
 
@@ -402,6 +457,7 @@ export async function preparar(producto, cta, { zonas = false } = {}) {
 
   return {
     L, A, B, C, Z, N, tope, des, cajas, foto, fotoC, apaisada, zonas, dicho, avisos,
+    variante,
     medidas: {
       foto: leida.modo,
       original: leida.original,
@@ -463,13 +519,20 @@ export function momentos(T) {
  * a otro, así que los cuadros se pueden pintar en cualquier orden y en varios hilos a la vez.
  */
 export function pintor(escena, T) {
-  const { L, A, B, C, Z, N, tope, des, cajas, foto, fotoC, apaisada, zonas } = escena;
+  const { L, A, B, C, Z, N, tope, des, cajas, foto, fotoC, apaisada, zonas, variante = 'hoy' } = escena;
+  const conGorro = variante !== 'hoy';
+  const conCinta = variante === 'producida';
+  const V = tiemposDeVariante(T);
   const fondo = fondoEstudio();
   pintarCable(fondo); // navidad: el cable de la guirnalda va pintado en el fondo; las ampolletas, cuadro a cuadro
   poner(fondo, L.marca, MARGEN, MARCA_Y);
-  // navidad: el gorro sobre el logo de la pastilla (asoma unos px por arriba de ella).
+  // navidad: el gorro sobre el logo de la pastilla (asoma unos px por arriba de ella). El gorro grande de las
+  // variantes se pinta cuadro a cuadro, después de las ampolletas (así su luz no lo tiñe).
   const logoY = MARCA_Y + (MARCA_ALTO - LOGO_PASTILLA.lado) / 2;
-  poner(fondo, N.gorroChico, MARGEN + LOGO_PASTILLA.x + GORRO_EN_LOGO.x * LOGO_PASTILLA.lado, logoY + GORRO_EN_LOGO.y * LOGO_PASTILLA.lado);
+  if (!conGorro) poner(fondo, N.gorroChico, MARGEN + LOGO_PASTILLA.x + GORRO_EN_LOGO.x * LOGO_PASTILLA.lado, logoY + GORRO_EN_LOGO.y * LOGO_PASTILLA.lado);
+  const gorroPastilla = conGorro ? { capa: N.gorroPastilla, ...lugarGorroPastilla(N.gorroPastilla) } : null;
+  const chispasCinta = conCinta ? chispasDeCinta() : null;
+  let otro = null; // el cuadro del cierre mientras pasa la cinta (uno por hilo: cada hilo tiene su pintor)
   const hoja = hojaOscura({ radio: RADIO });
   const luces = ampolletas();
   const nieve = copos();
@@ -514,10 +577,14 @@ export function pintor(escena, T) {
     else poner(dst, capa, xx, yy, opacidad);
   };
 
-  return function pintar(dst, t) {
+  /**
+   * Pinta el cuadro del segundo `t`. `modo` es 'todo' (lo normal), 'precio' (la escena del precio sin irse: lo que
+   * queda delante de la cinta) o 'cierre' (el cierre ya puesto, sin la hoja subiendo: lo que queda detrás).
+   */
+  function cuadro(dst, t, modo) {
     const pAB = T.cambio ? suave.entraSale(fase(t, T.cambio[0], T.cambio[1])) : 1;
     const pBC = suave.entraSale(fase(t, T.subida[0], T.subida[1]));
-    const pZ = suave.entraSale(fase(t, T.cierre, T.cierre + 0.55));
+    const pZ = modo === 'precio' ? 0 : modo === 'cierre' ? 1 : suave.entraSale(fase(t, T.cierre, T.cierre + 0.55));
     const g = t - T.golpe; // segundos desde que pegó el precio
     const sacudida = g >= 0 && g < 0.6 ? 7 * Math.exp(-9 * g) * Math.cos(26 * g) : 0;
     const borde = Math.round(mezcla(mezcla(mezcla(tope.A, tope.B, pAB), tope.C, pBC) + sacudida, -120, pZ));
@@ -527,6 +594,8 @@ export function pintor(escena, T) {
     dst.set(fondo.subarray(0, filas * W * 3));
     // navidad: las ampolletas de la guirnalda, que titilan. La hoja las tapa cuando sube del todo.
     if (filas > 0) pintarAmpolletas(dst, t, luces, filas);
+    // Variantes: el gorro grande de la pastilla (la hoja lo tapa cuando sube).
+    if (gorroPastilla && filas > gorroPastilla.y) poner(dst, gorroPastilla.capa, gorroPastilla.x, gorroPastilla.y, 1, [0, 0, W, filas]);
 
     // 2. La foto: se acerca despacio todo el tiempo y se acomoda cuando la hoja cambia de alto.
     if (filas > FOTO_ARRIBA - 40) {
@@ -549,10 +618,12 @@ export function pintor(escena, T) {
     if (g >= 0 && g < 0.45) destelloHoja(dst, borde, RADIO, DESTELLO, 0.24 * (1 - g / 0.45) ** 2);
     // navidad: la nieve cae sobre la hoja (nunca sobre la foto ni el fondo claro), detrás de lo escrito.
     pintarNieve(dst, t, nieve, borde + 8, avanceNieve);
+    // Variantes: la nieve acumulada sobre el borde de la hoja (sube con ella).
+    if (conGorro) pintarNieveDelBorde(dst, borde, RADIO, N.nieveBorde);
 
-    // 4. Lo que dice la hoja. Todo cuelga de su borde de arriba.
+    // 4. Lo que dice la hoja. Todo cuelga de su borde de arriba. En el modo 'cierre' no hay nada de esto.
     // A. El gancho: está completo desde el cuadro 0. El número late una vez y lo cruza un brillo; después se va.
-    if (A && t < T.ganchoSale + 0.4) {
+    if (A && t < T.ganchoSale + 0.4 && modo !== 'cierre') {
       const o = borde + des.A;
       const sale = suave.entra(fase(t, T.ganchoSale, T.ganchoSale + 0.2));
       if (sale < 1) {
@@ -574,7 +645,7 @@ export function pintor(escena, T) {
 
     // B. La marca y el nombre: suben desde detrás de su línea. Se van justo antes de que suba el precio.
     const saleB = suave.entra(fase(t, T.nombreSale, T.nombreSale + 0.16));
-    if (t >= T.nombre && saleB < 1) {
+    if (t >= T.nombre && saleB < 1 && modo !== 'cierre') {
       const o = borde + des.B - saleB * 24;
       if (B.kicker) {
         const p = suave.sale(fase(t, T.nombre, T.nombre + 0.32));
@@ -591,8 +662,8 @@ export function pintor(escena, T) {
     }
 
     // C. El precio. Se apaga cuando la hoja sube al cierre.
-    const dentro = 1 - fase(t, T.cierre - 0.04, T.cierre + 0.2);
-    if (t >= T.sube && dentro > 0) {
+    const dentro = modo === 'precio' ? 1 : 1 - fase(t, T.cierre - 0.04, T.cierre + 0.2);
+    if (t >= T.sube && dentro > 0 && modo !== 'cierre') {
       const o = borde + des.C;
       C.nombre.forEach(({ capa, y }, i) => asomar(dst, capa, x, o + y, fase(t, T.sube + 0.12 + 0.05 * i, T.sube + 0.4 + 0.05 * i), 14, dentro));
 
@@ -655,57 +726,111 @@ export function pintor(escena, T) {
       });
     }
 
-    // Z. El cierre: logo, ComparaTech, el moño, la llamada y la letra chica. Todo centrado.
-    if (t > T.cierre + 0.15) {
-      const c0 = T.cierre;
-      const pLogo = fase(t, c0 + 0.25, c0 + 0.75);
-      if (pLogo > 0) {
-        poner(dst, Z.luz, W / 2 - Z.luz.w / 2, Z.logoY - Z.luz.h / 2, suave.sale(pLogo));
-        const deriva = 1 + 0.03 * fase(t, c0 + 0.25, T.fin); // sigue acercándose apenas: el cierre no queda congelado
-        const k = 0.5 * (0.6 + 0.4 * suave.rebote(pLogo)) * deriva;
-        ponerEscalada(dst, Z.logo, W / 2, Z.logoY, k, Math.min(1, pLogo * 3.5));
+    // Z. El cierre. En "producida" (modo 'cierre') entra un poco antes: la cinta ya lo destapó y así no queda un
+    // momento vacío (lo escrito queda a la vista más tiempo, no menos).
+    const tz = modo === 'cierre' ? t + V.adelanto : t;
+    if (tz > T.cierre + 0.15 && modo !== 'precio') pintarCierre(dst, tz);
+  }
+
+  /** Z. El cierre en el segundo `t`: logo, ComparaTech, el moño, la llamada y la letra chica. Todo centrado. */
+  function pintarCierre(dst, t) {
+    const c0 = T.cierre;
+    const pLogo = fase(t, c0 + 0.25, c0 + 0.75);
+    if (pLogo > 0) {
+      poner(dst, Z.luz, W / 2 - Z.luz.w / 2, Z.logoY - Z.luz.h / 2, suave.sale(pLogo));
+      const deriva = 1 + 0.03 * fase(t, c0 + 0.25, T.fin); // sigue acercándose apenas: el cierre no queda congelado
+      const k = 0.5 * (0.6 + 0.4 * suave.rebote(pLogo)) * deriva;
+      ponerEscalada(dst, Z.logo, W / 2, Z.logoY, k, Math.min(1, pLogo * 3.5));
+      if (conGorro) pintarGorroGrande(dst, t, k / 0.5);
+      else {
         // navidad: el gorro va pegado al logo, con su misma escala (su centro, en fracciones del lado del logo).
         const g = N.gorroGrande;
         const cx = (GORRO_EN_LOGO.x - 0.5) * LOGO_GRANDE + g.w / 2;
         const cy = (GORRO_EN_LOGO.y - 0.5) * LOGO_GRANDE + g.h / 2;
         ponerEscalada(dst, g, W / 2 + cx * k, Z.logoY + cy * k, k, Math.min(1, pLogo * 3.5));
       }
-      // navidad: el Viejito Pascuero sube saludando desde abajo a la izquierda y el arbolito aparece a su lado.
-      const pViejito = fase(t, c0 + 0.62, c0 + 1.12);
-      if (pViejito > 0) {
-        const v = N.viejito;
-        const vaiven = 3 * Math.sin(2 * Math.PI * 0.9 * (t - c0 - 1.12)) * fase(t, c0 + 1.12, c0 + 1.4);
-        poner(dst, v, VIEJITO.x, ADORNOS_PISO - v.h + (1 - suave.sale(pViejito)) * 70 + vaiven, Math.min(1, pViejito * 2.5));
-      }
-      const pRincon = fase(t, c0 + 0.78, c0 + 1.16);
-      if (pRincon > 0) {
-        const r = N.rincon;
-        ponerEscalada(dst, r, RINCON.x + r.w / 2, ADORNOS_PISO, 0.7 + 0.3 * suave.rebote(pRincon), Math.min(1, pRincon * 3), [0.5, 1]);
-      }
-      const pMarca = fase(t, c0 + 0.36, c0 + 0.86);
-      if (pMarca > 0) {
-        const m = Z.marca;
-        const e = suave.saleFuerte(pMarca);
-        const xx = Math.round(W / 2 - m.w / 2);
-        poner(dst, m, xx, Z.marcaY + (1 - e) * m.h * 0.8, Math.min(1, pMarca * 3), [xx, Z.marcaY, xx + m.w, Z.marcaY + m.h]);
-      }
-      // navidad: el moño salta a su lugar (donde "impacto" lleva la línea cian) y a sus lados brillan dos chispas.
-      const pMono = fase(t, c0 + 0.45, c0 + 0.9);
-      if (pMono > 0) ponerEscalada(dst, N.mono, W / 2, Z.monoY, 0.5 * (0.55 + 0.45 * suave.rebote(pMono)), Math.min(1, pMono * 3.5));
-      for (const [lado, desde, capa] of [[-1, c0 + 0.85, N.chispaOro], [1, c0 + 1.0, N.chispaBlanca], [-1, c0 + 1.35, N.chispaBlanca], [1, c0 + 1.45, N.chispaOro]]) {
-        const p = fase(t, desde, desde + 0.6);
-        if (p > 0 && p < 1) ponerEscalada(dst, capa, W / 2 + lado * 112, Z.monoY - 30 + (desde > c0 + 1.2 ? 40 : 0), 0.42 * (0.35 + 0.65 * suave.sale(p)), Math.sin(Math.PI * p));
-      }
-      Z.llamada.forEach((capa, i) => {
-        const p = fase(t, c0 + 0.52 + 0.08 * i, c0 + 0.52 + 0.08 * i + 0.45);
-        if (p <= 0) return;
-        const e = suave.saleFuerte(p);
-        const xx = Math.round(W / 2 - capa.w / 2);
-        const yy = Z.llamadaY + i * Z.llamadaAlto;
-        poner(dst, capa, xx, yy + (1 - e) * capa.h * 0.8, Math.min(1, p * 3.5), [xx, yy, xx + capa.w, yy + capa.h]);
-      });
-      Z.pie.forEach((capa, i) => asomar(dst, capa, Math.round(W / 2 - capa.w / 2), Z.pieY + i * 44, fase(t, c0 + 0.7 + 0.06 * i, c0 + 1.05 + 0.06 * i), 12));
     }
+    // navidad: el Viejito Pascuero sube saludando desde abajo a la izquierda y el arbolito aparece a su lado.
+    const pViejito = fase(t, c0 + 0.62, c0 + 1.12);
+    if (pViejito > 0) {
+      const v = N.viejito;
+      const vaiven = 3 * Math.sin(2 * Math.PI * 0.9 * (t - c0 - 1.12)) * fase(t, c0 + 1.12, c0 + 1.4);
+      poner(dst, v, VIEJITO.x, ADORNOS_PISO - v.h + (1 - suave.sale(pViejito)) * 70 + vaiven, Math.min(1, pViejito * 2.5));
+    }
+    const pRincon = fase(t, c0 + 0.78, c0 + 1.16);
+    if (pRincon > 0) {
+      const r = N.rincon;
+      ponerEscalada(dst, r, RINCON.x + r.w / 2, ADORNOS_PISO, 0.7 + 0.3 * suave.rebote(pRincon), Math.min(1, pRincon * 3), [0.5, 1]);
+    }
+    const pMarca = fase(t, c0 + 0.36, c0 + 0.86);
+    if (pMarca > 0) {
+      const m = Z.marca;
+      const e = suave.saleFuerte(pMarca);
+      const xx = Math.round(W / 2 - m.w / 2);
+      poner(dst, m, xx, Z.marcaY + (1 - e) * m.h * 0.8, Math.min(1, pMarca * 3), [xx, Z.marcaY, xx + m.w, Z.marcaY + m.h]);
+    }
+    // navidad: el moño salta a su lugar (donde "impacto" lleva la línea cian) y a sus lados brillan dos chispas.
+    const pMono = fase(t, c0 + 0.45, c0 + 0.9);
+    if (pMono > 0) ponerEscalada(dst, N.mono, W / 2, Z.monoY, 0.5 * (0.55 + 0.45 * suave.rebote(pMono)), Math.min(1, pMono * 3.5));
+    for (const [lado, desde, capa] of [[-1, c0 + 0.85, N.chispaOro], [1, c0 + 1.0, N.chispaBlanca], [-1, c0 + 1.35, N.chispaBlanca], [1, c0 + 1.45, N.chispaOro]]) {
+      const p = fase(t, desde, desde + 0.6);
+      if (p > 0 && p < 1) ponerEscalada(dst, capa, W / 2 + lado * 112, Z.monoY - 30 + (desde > c0 + 1.2 ? 40 : 0), 0.42 * (0.35 + 0.65 * suave.sale(p)), Math.sin(Math.PI * p));
+    }
+    Z.llamada.forEach((capa, i) => {
+      const p = fase(t, c0 + 0.52 + 0.08 * i, c0 + 0.52 + 0.08 * i + 0.45);
+      if (p <= 0) return;
+      const e = suave.saleFuerte(p);
+      const xx = Math.round(W / 2 - capa.w / 2);
+      const yy = Z.llamadaY + i * Z.llamadaAlto;
+      poner(dst, capa, xx, yy + (1 - e) * capa.h * 0.8, Math.min(1, p * 3.5), [xx, yy, xx + capa.w, yy + capa.h]);
+    });
+    Z.pie.forEach((capa, i) => asomar(dst, capa, Math.round(W / 2 - capa.w / 2), Z.pieY + i * 44, fase(t, c0 + 0.7 + 0.06 * i, c0 + 1.05 + 0.06 * i), 12));
+  }
+
+  /**
+   * Variantes: el gorro grande sobre el logo del cierre. Cae desde arriba de la pantalla (algo ladeado, se endereza
+   * al caer), se posa con un aplastón y dos saltitos, se balancea y queda con un vaivén apenas visible. `s` es la
+   * escala del logo respecto de su tamaño quieto (el logo sigue acercándose apenas: el gorro va con él).
+   */
+  function pintarGorroGrande(dst, t, s) {
+    const [cae, posa] = V.gorro;
+    if (t < cae) return;
+    const g = N.gorroReal;
+    const lado = Z.lado;
+    // El punto de apoyo: el medio del ala, en la pantalla y en la capa.
+    const ax = W / 2 + (APOYO_EN_LOGO.x - 0.5) * lado * s;
+    const ay = Z.logoY + (APOYO_EN_LOGO.y - 0.5) * lado * s;
+    const ancla = [(APOYO_EN_LOGO.x * lado - g.dx) / g.w, (APOYO_EN_LOGO.y * lado - g.dy) / g.h];
+    let sx = s;
+    let sy = s;
+    let y = ay;
+    let angulo = 0;
+    if (t < posa) {
+      const p = fase(t, cae, posa);
+      y = ay - (ay + 140) * (1 - p) ** 2; // cae acelerando: al empezar está entero sobre la pantalla
+      angulo = 0.24 * (1 - p) ** 1.5;
+    } else {
+      const r = t - posa;
+      const golpe = Math.exp(-6.5 * r) * Math.cos(16 * r);
+      sy *= 1 - 0.12 * golpe; // se aplasta al posarse y se estira de vuelta
+      sx *= 1 + 0.07 * golpe;
+      y = ay - 18 * Math.exp(-5 * r) * Math.abs(Math.sin(10 * r));
+      angulo = 0.07 * Math.exp(-3.2 * r) * Math.sin(9 * r) + 0.012 * Math.sin(2 * Math.PI * 0.55 * (r - 1)) * fase(r, 1, 1.6);
+    }
+    ponerGirada(dst, g, ax, y, { sx, sy, angulo, ancla });
+  }
+
+  return function pintar(dst, t) {
+    // "producida": mientras pasa la cinta, delante queda el precio y detrás el cierre; después, el cierre ya puesto
+    // (sin la hoja subiendo: la cinta la reemplaza).
+    if (conCinta && t >= V.cinta[0]) {
+      if (t < V.cinta[1]) {
+        cuadro(dst, t, 'precio');
+        otro ??= new Uint8Array(W * H * 3);
+        cuadro(otro, t, 'cierre');
+        pintarCinta(dst, otro, fase(t, V.cinta[0], V.cinta[1]), chispasCinta, N);
+      } else cuadro(dst, t, 'cierre');
+    } else cuadro(dst, t, 'todo');
 
     // Para revisar (--zonas): en rojo, lo que tapan las apps.
     if (zonas) {
@@ -715,4 +840,17 @@ export function pintor(escena, T) {
       rectangulo(dst, SEGURO.derecha, SEGURO.mitad, W - SEGURO.derecha, SEGURO.abajo - SEGURO.mitad, ROJO, 0.38);
     }
   };
+}
+
+/** Variantes: dónde va el gorro grande de la pastilla de arriba (la esquina de arriba a la izquierda de su capa). */
+export function lugarGorroPastilla(capa) {
+  const lx = MARGEN + LOGO_PASTILLA.x;
+  const ly = MARCA_Y + (MARCA_ALTO - LOGO_PASTILLA.lado) / 2;
+  return { x: Math.round(lx + capa.dx + GORRO_PASTILLA.corrX), y: Math.round(ly + capa.dy) };
+}
+
+/** Variantes: dónde queda, quieto, el gorro grande del cierre (la esquina de arriba a la izquierda de su capa). */
+export function lugarGorroCierre(escena) {
+  const { Z, N } = escena;
+  return { x: W / 2 - Z.lado / 2 + N.gorroReal.dx, y: Z.logoY - Z.lado / 2 + N.gorroReal.dy };
 }
