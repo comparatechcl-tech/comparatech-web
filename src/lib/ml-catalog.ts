@@ -334,7 +334,8 @@ export interface CatalogSearchHit {
  */
 export async function searchCatalogProducts(
   query: string,
-  domainId: string,
+  /** null: en todos los tipos (más lento, ~2 s). */
+  domainId: string | null,
   token: string,
   limit = 10
 ): Promise<MlListResult<CatalogSearchHit>> {
@@ -342,9 +343,9 @@ export async function searchCatalogProducts(
     status: 'active',
     site_id: 'MLC',
     q: query,
-    domain_id: domainId,
     limit: String(limit),
   });
+  if (domainId) params.set('domain_id', domainId);
   const result = await requestJson(`${API}/products/search?${params}`, token);
   if (!result.ok) return { status: 'error', failure: result.failure };
   type Raw = {

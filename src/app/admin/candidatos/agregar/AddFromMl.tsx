@@ -65,7 +65,8 @@ function CopyLink({ url }: { url: string }) {
   );
 }
 
-function ProductCard({ item }: { item: ProductPreview }) {
+/** `onDone`: avisa cuando se agregó o publicó (lo usa /admin/historias/aviso para armar la historia). */
+export function ProductCard({ item, onDone }: { item: ProductPreview; onDone?: (result: Done) => void }) {
   const [state, setState] = useState<CardState>({ status: 'idle' });
   const [, startTransition] = useTransition();
 
@@ -75,6 +76,7 @@ function ProductCard({ item }: { item: ProductPreview }) {
       try {
         const result = await addFromMl(item.id, publish);
         setState(result.ok ? { status: 'done', result } : { status: 'error', message: result.error });
+        if (result.ok) onDone?.(result);
       } catch {
         setState({ status: 'error', message: 'No se pudo guardar. Revisa la conexión e intenta de nuevo.' });
       }
