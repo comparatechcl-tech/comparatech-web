@@ -175,11 +175,11 @@ describe('plantillas: "impacto" (la de todos los días desde el 05-11-2026)', ()
 });
 
 describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el 09-11-2026)', () => {
-  it('entrega lo mismo que "impacto", con sus mismos tiempos, y llama a regalar', async () => {
+  it('entrega lo mismo que "impacto", con sus mismos tiempos, y llama a guardarlo para Navidad', async () => {
     const impacto = await cargarPlantilla('impacto');
     const navidad = await cargarPlantilla('navidad');
     expect(Object.keys(navidad).sort()).toEqual(Object.keys(impacto).sort());
-    expect(navidad.CTA_POR_DEFECTO).toBe('Mándaselo a quien le quieras regalar');
+    expect(navidad.CTA_POR_DEFECTO).toBe('Guárdalo para tus compras de Navidad');
     expect(prohibidasEn(navidad.CTA_POR_DEFECTO)).toEqual([]);
     for (const A of [{}, null]) {
       expect(navidad.tiempos({ A })).toEqual(impacto.tiempos({ A }));
@@ -198,10 +198,10 @@ describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el
       const lienzo = new Uint8Array(1080 * 1920 * 3);
       P.pintor(escena, T)(lienzo, T.fin - 0.05);
       const px = (x: number, y: number) => lienzo.slice((y * 1080 + x) * 3, (y * 1080 + x) * 3 + 3);
-      // El Viejito Pascuero (x=30 a 310) y el arbolito (x=700 a 900) están abajo, sobre y=1500.
+      // El Viejito Pascuero (x=30 a 310) y el arbolito (x=700 a 900) están abajo, sobre y=1560.
       let rojo = false;
       let verde = false;
-      for (let y = 1192; y < 1500; y += 3) {
+      for (let y = 1252; y < 1560; y += 3) {
         for (let x = 30; x < 310; x += 3) if (px(x, y)[0] > 180 && px(x, y)[1] < 90) rojo = true;
         for (let x = 700; x < 900; x += 3) if (px(x, y)[1] > 120 && px(x, y)[0] < 90) verde = true;
       }
@@ -215,17 +215,16 @@ describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el
           expect(Math.max(r, g, b) - Math.min(r, g, b), `${x},${y}`).toBeLessThan(70);
         }
       }
-      // Lo escrito del cierre (centrado) no se cruza con ellos: lo que baja hasta donde está el Viejito Pascuero
-      // empieza a su derecha, y nada baja hasta el arbolito.
+      // Lo escrito del cierre termina bien arriba de ellos (el dueño, 12-11-2026: "salen muy acoplados al
+      // texto"): al menos 120 px sobre la cabeza del Viejito Pascuero (y=1252).
       const Z = escena.Z;
       const renglones = [
         ...Z.llamada.map((capa: { w: number; h: number }, i: number) => ({ capa, y: Z.llamadaY + i * Z.llamadaAlto })),
         ...Z.pie.map((capa: { w: number; h: number }, i: number) => ({ capa, y: Z.pieY + i * 44 })),
       ];
-      for (const { capa, y } of renglones) {
-        if (y + capa.h > 1500 - 308 + 20) expect(540 - capa.w / 2).toBeGreaterThan(310);
-        expect(y + capa.h).toBeLessThan(1500 - 170);
-      }
+      for (const { capa, y } of renglones) expect(y + capa.h).toBeLessThanOrEqual(1560 - 308 - 120);
+      // Y empieza bajo la franja que tapan las apps arriba.
+      expect(Z.logoY - 100).toBeGreaterThanOrEqual(220);
     } finally {
       globalThis.fetch = antes;
     }
@@ -247,7 +246,7 @@ describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el
     }
   });
 
-  it('dice solo lo que trae el dato, con el gancho de regalo y la llamada de regalar, y nada que la marca no diga', async () => {
+  it('dice solo lo que trae el dato, con el gancho de regalo y la llamada de Navidad, y nada que la marca no diga', async () => {
     const antes = globalThis.fetch;
     globalThis.fetch = () => Promise.reject(new Error('Sin red'));
     try {
@@ -258,7 +257,7 @@ describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el
         dicho[n] = escena.dicho.map((d: string | { texto: string }) => (typeof d === 'string' ? d : d.texto));
         expect(prohibidasEn(dicho[n].join(' | ')), `producto ${n}`).toEqual([]);
         expect(dicho[n][0]).toBe('ComparaTech');
-        expect(dicho[n][dicho[n].length - 1]).toBe('Mándaselo a quien le quieras regalar');
+        expect(dicho[n][dicho[n].length - 1]).toBe('Guárdalo para tus compras de Navidad');
         // Los adornos (moño, chispas, gorros, Viejito Pascuero y arbolito) son capas, no texto.
         for (const adorno of ['mono', 'chispaOro', 'gorroChico', 'gorroGrande', 'viejito', 'rincon']) expect(escena.N[adorno].w, adorno).toBeGreaterThan(0);
       }
@@ -267,7 +266,7 @@ describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el
       expect(dicho[5].slice(1, 4)).toEqual(['Regalo por menos de $330 mil', 'Bajó 12%', 'según nuestro historial']);
       expect(dicho[5].join(' | ')).not.toMatch(/descuento/);
       // Sin descuento ni baja no hay gancho, igual que en "impacto".
-      expect(dicho[6]).toEqual(['ComparaTech', 'Parlante Bluetooth portátil', '$29.990', 'Precio en Mercado Libre', 'Mándaselo a quien le quieras regalar']);
+      expect(dicho[6]).toEqual(['ComparaTech', 'Parlante Bluetooth portátil', '$29.990', 'Precio en Mercado Libre', 'Guárdalo para tus compras de Navidad']);
     } finally {
       globalThis.fetch = antes;
     }

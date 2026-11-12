@@ -2,8 +2,9 @@
 // momentos, mismos tiempos y mismo reparto de la pantalla; cambian tres textos y se suman los adornos:
 //   - el gancho dice "Regalo por menos de $X mil" (la misma cuenta de "impacto": el precio redondeado hacia
 //     arriba, así siempre es cierto);
-//   - el cierre llama a "Mándaselo a quien le quieras regalar" y lleva un moño rojo donde "impacto" lleva la
-//     línea cian;
+//   - el cierre llama a "Guárdalo para tus compras de Navidad" y lleva un moño rojo donde "impacto" lleva la
+//     línea cian (el 12-11-2026 el dueño descartó "Mándaselo a quien le quieras regalar": quien mira no
+//     necesariamente le va a regalar a otro);
 //   - una guirnalda de luces que titilan cuelga arriba (en la franja que tapan las apps), cae nieve sobre la hoja
 //     azul noche (nunca sobre la foto), cuando pega el precio saltan chispas doradas y, al subir la hoja para el
 //     cierre, la nieve se apura un momento;
@@ -28,7 +29,7 @@ import { fraseDePrecio } from '../impacto/escena.mjs';
 import { capasDeAdornos, pintarCable, ampolletas, pintarAmpolletas, copos, pintarNieve, GORRO_EN_LOGO } from './adornos.mjs';
 
 export const FPS = 30;
-export const CTA_POR_DEFECTO = 'Mándaselo a quien le quieras regalar';
+export const CTA_POR_DEFECTO = 'Guárdalo para tus compras de Navidad';
 
 // --- Zonas seguras (Reels, TikTok, Shorts) ----------------------------------------------------------------
 // Las apps tapan los 220 px de arriba, los 420 de abajo y, de la mitad hacia abajo, lo que queda a la derecha
@@ -53,8 +54,12 @@ const MONO_ALTO = 120; // el moño del cierre se muestra a 160x120 (la capa es d
 // El logo dentro de la pastilla de la marca (capas.pastillaMarca): 44 px, a 14 del borde y centrado en el alto.
 const LOGO_PASTILLA = { x: 14, lado: 44 };
 const LOGO_GRANDE = 400; // la capa del logo del cierre (se muestra a la mitad)
-// El Viejito Pascuero y el arbolito del cierre: abajo, sobre el borde de lo que dejan libre las apps (y=1500), a la
-// izquierda (los botones están a la derecha) y sin tocar lo escrito, que termina más arriba.
+// El Viejito Pascuero y el arbolito del cierre: abajo, a la izquierda (los botones están a la derecha) y bien
+// separados de lo escrito (el dueño, 12-11-2026: "salen muy acoplados al texto, bájalos más"). Se apoyan 60 px
+// bajo el borde de lo que dejan libre las apps: son adorno, no dicen nada, y la letra de las apps cae más abajo.
+// Lo escrito del cierre se centra más arriba, entre y=220 y CIERRE_ABAJO.
+const ADORNOS_PISO = SEGURO.abajo + 60; // 1560
+const CIERRE_ABAJO = 1180;
 const VIEJITO = { x: 30 }; // 280x308: de x=30 a 310 (la letra chica del cierre empieza más a la derecha)
 const RINCON = { x: 700 }; // 200x170: de x=700 a 900 (los botones de las apps empiezan en x=924)
 
@@ -306,7 +311,7 @@ async function armarCierre(producto, cta, dicho) {
   // el moño (160x120) en vez de la línea cian de "impacto".
   const altoLlamada = Z.llamada.length * Z.llamadaAlto;
   const total = 200 + 20 + Z.marca.h + 18 + MONO_ALTO + 22 + altoLlamada + 30 + Z.pie.length * 44;
-  let y = Math.round((SEGURO.arriba + SEGURO.abajo) / 2 - total / 2);
+  let y = Math.round((SEGURO.arriba + CIERRE_ABAJO) / 2 - total / 2);
   Z.logoY = y + 100; // centro del logo
   y += 200 + 20;
   Z.marcaY = y;
@@ -670,12 +675,12 @@ export function pintor(escena, T) {
       if (pViejito > 0) {
         const v = N.viejito;
         const vaiven = 3 * Math.sin(2 * Math.PI * 0.9 * (t - c0 - 1.12)) * fase(t, c0 + 1.12, c0 + 1.4);
-        poner(dst, v, VIEJITO.x, SEGURO.abajo - v.h + (1 - suave.sale(pViejito)) * 70 + vaiven, Math.min(1, pViejito * 2.5));
+        poner(dst, v, VIEJITO.x, ADORNOS_PISO - v.h + (1 - suave.sale(pViejito)) * 70 + vaiven, Math.min(1, pViejito * 2.5));
       }
       const pRincon = fase(t, c0 + 0.78, c0 + 1.16);
       if (pRincon > 0) {
         const r = N.rincon;
-        ponerEscalada(dst, r, RINCON.x + r.w / 2, SEGURO.abajo, 0.7 + 0.3 * suave.rebote(pRincon), Math.min(1, pRincon * 3), [0.5, 1]);
+        ponerEscalada(dst, r, RINCON.x + r.w / 2, ADORNOS_PISO, 0.7 + 0.3 * suave.rebote(pRincon), Math.min(1, pRincon * 3), [0.5, 1]);
       }
       const pMarca = fase(t, c0 + 0.36, c0 + 0.86);
       if (pMarca > 0) {

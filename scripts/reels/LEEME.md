@@ -132,8 +132,8 @@ la llamada "Mándaselo a quien lo esté buscando" y un cierre más corto: 9 segu
 arman a mano con `--plantilla` y vuelven a la lista si el dueño quiere variar.
 
 `navidad` (07-11-2026, muestras para el dueño) es `impacto` con adornos: mismos momentos, mismos tiempos y mismo
-reparto. Arriba dice "Regalo por menos de $300 mil" (la misma cuenta de `impacto`), el cierre llama a "Mándaselo
-a quien le quieras regalar" y lleva un moño rojo en vez de la línea cian, cuelga una guirnalda de luces que
+reparto. Arriba dice "Regalo por menos de $300 mil" (la misma cuenta de `impacto`), el cierre llama a "Guárdalo
+para tus compras de Navidad" y lleva un moño rojo en vez de la línea cian, cuelga una guirnalda de luces que
 titilan en la franja de arriba (la que tapan las apps), cae nieve sobre la hoja azul noche (nunca sobre la foto)
 y saltan chispas doradas cuando pega el precio. Desde el 09-11 (el dueño: "más navideño aún") el logo lleva el
 gorro del Viejito Pascuero, en la pastilla de arriba y en el cierre, y en el cierre se asoman abajo el Viejito
