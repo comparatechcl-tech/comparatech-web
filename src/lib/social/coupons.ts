@@ -170,6 +170,7 @@ const NOT_CODES = new Set([
   'OFF', 'USA', 'MELI', 'FULL', 'HOY', 'CUPON', 'CUPONES', 'CODIGO', 'CODIGOS', 'MERCADO', 'LIBRE', 'CHILE', 'ENVIO', 'GRATIS',
   'DESCUENTO', 'DESCUENTOS', 'TOPE', 'MINIMO', 'COMPRA', 'COMPRAS', 'DESDE', 'SOBRE', 'HASTA', 'NUEVO', 'NUEVOS', 'LINK', 'AQUI',
   'IMPORTANTE', 'OJO', 'ATENCION', 'PRODUCTOS', 'SELECCIONADOS', 'VALIDO', 'VIGENTE', 'CLP', 'PESOS', 'BLACK', 'FRIDAY', 'CYBER',
+  'AGOTADO', 'AGOTADOS', 'AGOTADA', 'AGOTADAS', 'RESUMEN', 'DISPONIBLE', 'DISPONIBLES', 'CATEGORIA', 'CATEGORIAS',
 ]);
 
 /** Fin de línea, o punto seguido de mayúscula, número o $ ("$500.000. GALAXIA20"; no "dcto. en"). */
@@ -197,38 +198,105 @@ export function isCouponNotice(text: string): boolean {
 }
 
 /**
- * "Con el cupón PICK11 queda en $279.990": el cupón de UN producto, y el monto
- * es lo que cuesta el producto con él, no el descuento. Sin esto salía
- * "PICK11: $279.990 de descuento" (avisos del 11-11-2026). Esos avisos van en
- * Recomendaciones del canal (/admin/historias/aviso), con el producto. Si el
- * aviso dice además cuánto da ("BELLEZA (10% extra): queda en $89.991"), se
- * lee ese descuento y el precio del producto no se cuenta.
+ * "Con el cupón PICK11 queda en $279.990": un producto con el cupón aplicado.
+ * El monto es lo que cuesta el producto con él, no el descuento: sin esto
+ * salía "PICK11: $279.990 de descuento" (avisos del 11-11-2026). El cupón
+ * suele ser general (el resumen del canal trae "PICK11: $30.000 en compras
+ * desde $300.000"), pero ese aviso no dice cuánto da. Si lo dice ("BELLEZA
+ * (10% extra): queda en $89.991"), se lee ese descuento y el precio del
+ * producto no se cuenta.
  */
 const PRODUCT_PRICE_RE = /\bqueda(?:n)?\s+(?:en|a)\b|\bte\s+queda\b|\bpagas\s+solo\b/i;
 /** La frase del precio con el cupón, para sacarla antes de leer el descuento. */
 const PRODUCT_PRICE_PART_RE =
   /\b(?:queda(?:n)?\s+(?:en|a)|te\s+queda|pagas\s+solo)\b\s*:?\s*(?:en\s+)?\$?\s?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:\s?(?:mil|k)\b)?/gi;
 
-/** Lo que se lee del aviso: los cupones generales y los códigos de cupones de un producto puntual. */
-function readCoupons(text: string): { coupons: Coupon[]; productCodes: string[] } {
-  const productCodes: string[] = [];
-  if (!isCouponNotice(text)) return { coupons: [], productCodes };
-  const src = strip(String(text ?? '')).slice(0, 4000);
+/** Montos: con $ adelante ("$45.000", "$45 mil", "$5k"), o con "mil" detrás ("15 mil"). Un número con "k" y sin "$" no es plata: "4K" es la resolución. */
+const AMOUNT_RE = /\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(\s?(?:mil|k)\b)?|(\d{1,3})\s?(mil)\b/gi;
+
+/** Una categoría al final de lo que da el cupón: "…tope $15.000 en Moda", "…desde $29.990 en Bebés y juguetes". */
+const CATEGORY_RE = /^\s*[,.]?\s*en\s+([A-Za-z]+(?: [A-Za-z]+){0,4})\s*[,.]?\s*$/;
+/** Lo que sigue a "en" y no es una categoría. */
+const NOT_CATEGORY_RE = /seleccionad|compra|mercado|libre|meli|pagar|cuota|\bapp\b|tienda|checkout/i;
+
+/** El pedazo de `original` que, sin tildes, es `plain` ("Bebes y juguetes" → "Bebés y juguetes"). */
+function withAccents(original: string, plain: string): string {
+  const flat = strip(original);
+  // Letra con tilde → letra sin tilde, una por una: si el largo no calza, no se puede ubicar.
+  if (flat.length !== original.length) return plain;
+  const at = flat.toLowerCase().indexOf(plain.toLowerCase());
+  return at < 0 ? plain : original.slice(at, at + plain.length);
+}
+
+/** "en Moda" si lo que da el cupón termina en una categoría; '' si no. */
+function categoryOf(terms: string, original: string): string {
+  const amounts = new RegExp(AMOUNT_RE.source, AMOUNT_RE.flags);
+  let last = -1;
+  let a: RegExpExecArray | null;
+  while ((a = amounts.exec(terms)) !== null) last = a.index + a[0].length;
+  if (last < 0) return '';
+  const tail = terms
+    .slice(last)
+    .replace(/[^A-Za-z\s,.]+/g, ' ')
+    .replace(/\s+/g, ' ');
+  const m = CATEGORY_RE.exec(tail);
+  if (!m || NOT_CATEGORY_RE.test(m[1])) return '';
+  const note = `en ${withAccents(original, m[1])}`;
+  return note.length <= COUPON_NOTE_MAX ? note : '';
+}
+
+/** La línea del texto donde está la posición `at`. */
+function lineAt(src: string, at: number): string {
+  const end = src.indexOf('\n', at);
+  return src.slice(src.lastIndexOf('\n', at - 1) + 1, end < 0 ? src.length : end);
+}
+
+/** Lo que se lee de un aviso de cupones pegado (readCouponNotice). */
+export interface CouponNotice {
+  /** Los cupones, primero los generales y al final los de una categoría. Puede haber más de COUPON_MAX. */
+  coupons: Coupon[];
+  /** Códigos que solo salen en el precio de un producto ("Con el cupón X queda en $Y"), sin decir cuánto descuentan. */
+  productCodes: string[];
+  /** Cupones que el aviso da por agotados ("🚨AGOTADO BELLEZA Y MASCOTA🚨"): no se publican. */
+  exhausted: string[];
+}
+
+/**
+ * Los cupones que se reconocen en el texto pegado, en orden. Solo si el aviso
+ * habla de cupones (isCouponNotice). Un código es una palabra en mayúsculas
+ * con algún número (ORBITA45), o de 6 letras o más que no sea una palabra
+ * común. Lo que dice cada uno se lee del pedazo de texto que va desde su
+ * código hasta el siguiente.
+ *
+ * Un código puede salir varias veces (el resumen del canal del 11-11-2026
+ * nombra LOCURASDD en una nota arriba y después con lo que da): vale la
+ * primera vez que trae montos.
+ */
+export function readCouponNotice(text: string): CouponNotice {
+  if (!isCouponNotice(text)) return { coupons: [], productCodes: [], exhausted: [] };
+  const original = String(text ?? '').normalize('NFC');
+  const src = strip(original).slice(0, 4000);
   const codeRe = /(^|[^A-Za-z0-9])([A-Z][A-Z0-9]{2,19})(?![A-Za-z0-9])/g;
   const found: { code: string; at: number; end: number }[] = [];
+  const soldOut = new Set<string>();
   let m: RegExpExecArray | null;
   while ((m = codeRe.exec(src)) !== null) {
     const code = m[2];
     if (NOT_CODES.has(code)) continue;
     if (!/\d/.test(code) && code.length < 6) continue;
-    if (found.some((f) => f.code === code)) continue;
     const at = m.index + m[1].length;
     found.push({ code, at, end: at + code.length });
+    if (/agotad/i.test(lineAt(src, at))) soldOut.add(code);
   }
 
-  const out: Coupon[] = [];
-  for (let i = 0; i < found.length && out.length < COUPON_MAX; i++) {
+  const general: Coupon[] = [];
+  const byCategory: Coupon[] = [];
+  const done = new Set<string>();
+  const product = new Set<string>();
+  const exhausted: string[] = [];
+  for (let i = 0; i < found.length; i++) {
     const f = found[i];
+    if (done.has(f.code)) continue;
     // Lo normal: el código y después lo que da ("ORBITA45: $45.000 sobre $500.000"),
     // hasta la frase que trae el primer monto: lo que sigue puede ser de otro cupón.
     const after = src.slice(f.end, i + 1 < found.length ? found[i + 1].at : src.length).slice(0, 300);
@@ -239,42 +307,46 @@ function readCoupons(text: string): { coupons: Coupon[]; productCodes: string[] 
     }
     // "queda en $X" es el precio de un producto con el cupón: no se lee como descuento.
     const productPrice = PRODUCT_PRICE_RE.test(terms);
-    let coupon = readTerms(f.code, productPrice ? terms.replace(PRODUCT_PRICE_PART_RE, ' ') : terms);
-    // Sin otro monto que el precio del producto, es el cupón de ese producto: no va en la imagen.
+    if (productPrice) terms = terms.replace(PRODUCT_PRICE_PART_RE, ' ');
+    let coupon = readTerms(f.code, terms);
+    // Sin otro monto que el precio del producto, el aviso no dice cuánto da el cupón.
     if (productPrice && !coupon.value) {
-      productCodes.push(f.code);
+      product.add(f.code);
       continue;
     }
     // Si no, la frase justo antes del código ("10% en compras internacionales, código USA10").
     if (!coupon.value) {
       const before = src.slice(i > 0 ? found[i - 1].end : 0, f.at).split(SENTENCE_RE);
-      coupon = readTerms(f.code, (before[before.length - 1] ?? '').slice(-300));
+      terms = (before[before.length - 1] ?? '').slice(-300);
+      coupon = readTerms(f.code, terms);
     }
     // Sin ningún número cerca no es un cupón: es una palabra en mayúsculas del aviso.
-    if (coupon.value) out.push(coupon);
+    if (!coupon.value) continue;
+    done.add(f.code);
+    if (soldOut.has(f.code)) {
+      exhausted.push(f.code);
+      continue;
+    }
+    const category = coupon.note ? '' : categoryOf(terms, original);
+    if (category) {
+      coupon.note = category;
+      byCategory.push(coupon);
+    } else {
+      general.push(coupon);
+    }
   }
-  if (out.length === 0 && productCodes.length === 0) {
+  const coupons = [...general, ...byCategory];
+  const productCodes = [...product].filter((code) => !done.has(code));
+  if (coupons.length === 0 && productCodes.length === 0 && exhausted.length === 0) {
     const noCode = readNoCodeCoupon(src);
-    if (noCode) out.push(noCode);
+    if (noCode) coupons.push(noCode);
   }
-  return { coupons: out, productCodes };
+  return { coupons, productCodes, exhausted };
 }
 
-/**
- * Los cupones que se reconocen en el texto pegado, en orden. Solo si el aviso
- * habla de cupones (isCouponNotice). Un código es una
- * palabra en mayúsculas con algún número (ORBITA45), o de 6 letras o más que
- * no sea una palabra común. Lo que dice cada uno se lee del pedazo de texto
- * que va desde su código hasta el siguiente. Los cupones de un producto
- * puntual ("queda en $X") no vienen: ver productCouponCodes.
- */
+/** Los primeros COUPON_MAX cupones del aviso (readCouponNotice): los que caben en la imagen. */
 export function parseCouponText(text: string): Coupon[] {
-  return readCoupons(text).coupons;
-}
-
-/** Los códigos de cupones de un producto puntual ("Con el cupón X queda en $Y"): no van en la imagen de cupones. */
-export function productCouponCodes(text: string): string[] {
-  return readCoupons(text).productCodes;
+  return readCouponNotice(text).coupons.slice(0, COUPON_MAX);
 }
 
 /**
@@ -305,9 +377,7 @@ function readTerms(code: string, segment: string): Coupon {
   const coupon: Coupon = { code, kind: 'monto', value: 0, cap: 0, min: 0, minWord: 'desde', note: '' };
 
   const pct = /(\d{1,2})\s?%/.exec(segment);
-  // Montos: con $ adelante ("$45.000", "$45 mil", "$5k"), o con "mil" detrás
-  // ("15 mil"). Un número con "k" y sin "$" no es plata: "4K" es la resolución.
-  const amountRe = /\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(\s?(?:mil|k)\b)?|(\d{1,3})\s?(mil)\b/gi;
+  const amountRe = new RegExp(AMOUNT_RE.source, AMOUNT_RE.flags);
   const amounts: { value: number; before: string; at: number }[] = [];
   let a: RegExpExecArray | null;
   while ((a = amountRe.exec(segment)) !== null) {

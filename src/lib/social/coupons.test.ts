@@ -11,7 +11,7 @@ import {
   isCouponNotice,
   parseCouponTargets,
   parseCouponText,
-  productCouponCodes,
+  readCouponNotice,
   toCoupons,
   type Coupon,
 } from './coupons';
@@ -241,8 +241,8 @@ describe('avisos que no son de cupones (05-11-2026)', () => {
   });
 });
 
-describe('cupones de un producto puntual (avisos del 11-11-2026)', () => {
-  // Tres mensajes del canal copiados juntos: dos cupones de un producto y uno general.
+describe('productos con el cupón aplicado (avisos del 11-11-2026)', () => {
+  // Tres mensajes del canal copiados juntos: dos productos con un cupón aplicado ("queda en") y un cupón con su monto.
   const notice = [
     '[11/11, 11:58] null: *🔥 DOREL 11/11: descuentos de hasta 67% OFF 🛒*',
     'Silla De Auto Convertible Poplar Stone Onyx Britax',
@@ -260,23 +260,93 @@ describe('cupones de un producto puntual (avisos del 11-11-2026)', () => {
     expect(parseCouponText(notice)).toEqual([
       coupon({ code: 'FECHADOBLE', kind: 'monto', value: 5_000, cap: 0, min: 34_990, minWord: 'sobre' }),
     ]);
-    expect(productCouponCodes(notice)).toEqual(['PICK11', 'LOCURASDD']);
+    expect(readCouponNotice(notice).productCodes).toEqual(['PICK11', 'LOCURASDD']);
   });
 
-  it('solo cupones de producto: ninguno general', () => {
+  it('solo un producto con cupón: no dice cuánto da el cupón', () => {
     const one = 'Con el cupón 🎟️ LOCURASDD queda en $84.990';
     expect(parseCouponText(one)).toEqual([]);
-    expect(productCouponCodes(one)).toEqual(['LOCURASDD']);
+    expect(readCouponNotice(one).productCodes).toEqual(['LOCURASDD']);
   });
 
   it('si además dice cuánto da, se lee ese descuento y no el precio del producto', () => {
     expect(parseCouponText('Con cupón BELLEZA (10% extra): queda en $89.991')).toEqual([
       coupon({ code: 'BELLEZA', kind: 'porcentaje', value: 10, cap: 0, min: 0, minWord: 'desde' }),
     ]);
-    expect(productCouponCodes('Con cupón BELLEZA (10% extra): queda en $89.991')).toEqual([]);
+    expect(readCouponNotice('Con cupón BELLEZA (10% extra): queda en $89.991').productCodes).toEqual([]);
   });
 
   it('un cupón general no se confunde', () => {
-    expect(productCouponCodes('🎟️FECHADOBLE: $5.000 off en compras sobre $34.990')).toEqual([]);
+    expect(readCouponNotice('🎟️FECHADOBLE: $5.000 off en compras sobre $34.990').productCodes).toEqual([]);
+  });
+});
+
+describe('el resumen de cupones del canal (11-11-2026)', () => {
+  // Como sale al copiarlo de WhatsApp: negritas con *, el boleto 🎟️ y una nota arriba que nombra dos códigos.
+  const resumen = [
+    '🔥 *¡RESUMEN CUPONES DISPONIBLES!* 🔥',
+    '',
+    'NOTA: EL CUPÓN 🎟️ *LOCURASDEAFFI* no va ❎ Se fondeó más el 🎟️ *LOCURASDD*',
+    '',
+    '🎟️ *LOCURA* : $45.000 en compras desde $500.000',
+    '🎟️ *PICK11* : $30.000 en compras desde $300.000',
+    '🎟️ *FRENESI:* $15.000 en compras desde $125.000',
+    '🎟️ *LOCURASDD:* $5.000 en compras desde $49.990',
+    '🎟️ *FECHADOBLE* : $5.000 off en compras sobre $34.990',
+    '',
+    'Por categoría:',
+    '👗 *TODO11* : 15% de descuento en compras desde $39.990, tope $15.000 en Moda',
+    '🔗https://tinyurl.com/4sf4ux5p',
+    '🎟️ *CASTILLO:* $5.000 en compras desde $29.990 en Bebés y juguetes',
+    '🔗https://tinyurl.com/dfc4neuz',
+    '',
+    '🚨*AGOTADO BELLEZA Y MASCOTA*🚨',
+  ].join('\n');
+  const monitor = [
+    '¡Lo más vendido en Tecnología! ⚡',
+    'Monitor Portátil Bitbyte 15.6 Full Hd Ips Con Parlante Color Negro',
+    'Con el cupón 🎟️ *FECHADOBLE* queda en $64.926',
+    '🔗https://www.mercadolibre.cl/p/MLC53155059',
+  ].join('\n');
+  const todos = [
+    coupon({ code: 'LOCURA', value: 45_000, min: 500_000, minWord: 'desde' }),
+    coupon({ code: 'PICK11', value: 30_000, min: 300_000, minWord: 'desde' }),
+    coupon({ code: 'FRENESI', value: 15_000, min: 125_000, minWord: 'desde' }),
+    coupon({ code: 'LOCURASDD', value: 5_000, min: 49_990, minWord: 'desde' }),
+    coupon({ code: 'FECHADOBLE', value: 5_000, min: 34_990, minWord: 'sobre' }),
+    coupon({ code: 'TODO11', kind: 'porcentaje', value: 15, cap: 15_000, min: 39_990, minWord: 'desde', note: 'en Moda' }),
+    coupon({ code: 'CASTILLO', value: 5_000, min: 29_990, minWord: 'desde', note: 'en Bebés y juguetes' }),
+  ];
+
+  it('lee los siete, cada uno de su línea (LOCURASDD no se pierde por la nota de arriba), y la categoría con tildes', () => {
+    expect(readCouponNotice(resumen)).toEqual({ coupons: todos, productCodes: [], exhausted: [] });
+    // En la imagen caben COUPON_MAX: los primeros, que son los generales.
+    expect(parseCouponText(resumen)).toEqual(todos.slice(0, COUPON_MAX));
+  });
+
+  it('con el aviso del monitor pegado antes, FECHADOBLE sigue siendo un cupón con su monto', () => {
+    expect(readCouponNotice(monitor)).toEqual({ coupons: [], productCodes: ['FECHADOBLE'], exhausted: [] });
+    expect(readCouponNotice(`${monitor}\n\n${resumen}`)).toEqual({ coupons: todos, productCodes: [], exhausted: [] });
+  });
+
+  it('los de una categoría van al final, aunque el aviso los traiga primero', () => {
+    const text = ['Cupones:', 'TODO11: 15% en compras desde $39.990, tope $15.000 en Moda', 'FECHADOBLE: $5.000 off en compras sobre $34.990'].join('\n');
+    expect(readCouponNotice(text).coupons.map((c) => c.code)).toEqual(['FECHADOBLE', 'TODO11']);
+  });
+
+  it('un cupón que el aviso da por agotado no se publica, y se dice cuál', () => {
+    const text = `${resumen}\n🎟️ *BELLEZA:* 10% de descuento, tope $10.000 en Belleza`;
+    const read = readCouponNotice(text);
+    expect(read.exhausted).toEqual(['BELLEZA']);
+    expect(read.coupons.map((c) => c.code)).not.toContain('BELLEZA');
+    // "hasta agotar stock" no es "agotado".
+    expect(parseCouponText('Cupón ORBITA45: $45.000 OFF en compras sobre $500.000, hasta agotar stock')).toEqual([coupon()]);
+  });
+
+  it('lo que sigue a "en" y no es una categoría no se anota', () => {
+    for (const tail of ['en productos seleccionados', 'en Mercado Libre', 'en tu primera compra']) {
+      expect(parseCouponText(`Cupón ORBITA45: $45.000 OFF en compras sobre $500.000 ${tail}`)[0].note, tail).toBe('');
+    }
+    expect(parseCouponText('Cupón TECNO10: $10.000 en compras desde $100.000 en Tecnología')[0].note).toBe('en Tecnología');
   });
 });

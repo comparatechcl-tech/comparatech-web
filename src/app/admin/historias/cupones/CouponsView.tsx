@@ -8,9 +8,12 @@ import {
   COUPON_NOTE_MAX,
   COUPON_TARGETS,
   COUPON_TARGET_LABEL,
+  couponCodeLabel,
+  couponConditionText,
+  couponDiscountText,
+  couponProblem,
   isCouponNotice,
-  parseCouponText,
-  productCouponCodes,
+  readCouponNotice,
   type Coupon,
   type CouponTarget,
 } from '@/lib/social/coupons';
@@ -65,6 +68,8 @@ export function CouponsView({ metaReady }: { metaReady: boolean }) {
   const [text, setText] = useState('');
   const [rows, setRows] = useState<Row[]>([{ ...EMPTY }]);
   const [readNote, setReadNote] = useState<string | null>(null);
+  // Cupones del aviso que no cupieron en la imagen (o que se quitaron): se agregan con un toque.
+  const [spare, setSpare] = useState<Coupon[]>([]);
   const [prepared, setPrepared] = useState<PreparedCoupons | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,32 +88,54 @@ export function CouponsView({ metaReady }: { metaReady: boolean }) {
   const edit = (i: number, patch: Partial<Row>) => change(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   function readText() {
+    setSpare([]);
     if (text.trim() && !isCouponNotice(text)) {
       change([{ ...EMPTY }]);
       setReadNote('Este aviso no es de cupones: no dice "cupón" ni "código". Los avisos de productos en oferta no van aquí.');
       return;
     }
-    const found = parseCouponText(text);
-    // "Con el cupón X queda en $Y": cupones de un producto puntual. Van con su producto, no en la imagen de cupones.
-    const product = productCouponCodes(text);
+    const { coupons, productCodes, exhausted } = readCouponNotice(text);
+    const list = (codes: string[]) => codes.join(', ').replace(/, ([^,]*)$/, ' y $1');
+    // "Con el cupón X queda en $Y": un producto con el cupón, sin decir cuánto descuenta el cupón.
     const productNote =
-      product.length === 0
+      productCodes.length === 0
         ? ''
-        : ` ${product.join(' y ')} ${product.length === 1 ? 'es un cupón' : 'son cupones'} de un producto puntual ` +
-          '(dicen "queda en $…"): no van aquí. Si el producto es de tecnología, pega ese aviso en Recomendaciones del ' +
-          'canal y su historia sale con el cupón anotado.';
-    if (found.length === 0) {
-      setReadNote(
-        product.length > 0
-          ? productNote.trim()
-          : 'No encontré códigos en el texto. Escríbelos abajo, uno por cupón.'
-      );
+        : ` ${list(productCodes)} ${productCodes.length === 1 ? 'sale' : 'salen'} solo en un aviso de producto ` +
+          '("queda en $…") y ahí no dice cuánto descuenta: pega también el resumen de cupones del canal, que trae el monto. ' +
+          'El producto, si es de tecnología, va en Recomendaciones del canal.';
+    const soldOutNote =
+      exhausted.length === 0
+        ? ''
+        : ` ${list(exhausted)} ${exhausted.length === 1 ? 'está agotado' : 'están agotados'} según el aviso: no ${exhausted.length === 1 ? 'lo' : 'los'} puse.`;
+    if (coupons.length === 0) {
+      const notes = `${productNote}${soldOutNote}`.trim();
+      setReadNote(notes || 'No encontré códigos en el texto. Escríbelos abajo, uno por cupón.');
       return;
     }
+    const extra = coupons.length - COUPON_MAX;
+    const fitNote =
+      extra > 0
+        ? ` En la imagen caben ${COUPON_MAX}: puse los primeros, y ${extra === 1 ? 'el otro queda' : `los otros ${extra} quedan`} abajo por si quieres cambiar alguno.`
+        : '';
     setReadNote(
-      `Encontré ${found.length} ${found.length === 1 ? 'cupón' : 'cupones'}. Revisa que cada dato calce con el aviso y, si el aviso dice a qué aplica, escríbelo en "A qué aplica".${productNote}`
+      `Encontré ${coupons.length} ${coupons.length === 1 ? 'cupón' : 'cupones'}.${fitNote} Revisa que cada dato calce con el aviso y, si dice a qué aplica y no salió, escríbelo en "A qué aplica".${productNote}${soldOutNote}`
     );
-    change(found.map(toRow));
+    change(coupons.slice(0, COUPON_MAX).map(toRow));
+    setSpare(coupons.slice(COUPON_MAX));
+  }
+
+  // Quitar un cupón bien escrito lo deja entre los otros, para volver a agregarlo con un toque.
+  function remove(i: number) {
+    const gone = toCoupon(rows[i]);
+    if (gone.code && couponProblem(gone) === null && !spare.some((c) => c.code === gone.code)) setSpare([gone, ...spare]);
+    change(rows.filter((_, j) => j !== i));
+  }
+
+  function addSpare(i: number) {
+    if (rows.length >= COUPON_MAX) return;
+    const blank = rows.length === 1 && rows[0].code === '' && rows[0].value === '';
+    change([...(blank ? [] : rows), toRow(spare[i])]);
+    setSpare(spare.filter((_, j) => j !== i));
   }
 
   async function prepare() {
@@ -261,7 +288,7 @@ export function CouponsView({ metaReady }: { metaReady: boolean }) {
               {rows.length > 1 && (
                 <button
                   type="button"
-                  onClick={() => change(rows.filter((_, j) => j !== i))}
+                  onClick={() => remove(i)}
                   className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-sm text-red-400"
                 >
                   <Trash2 size={15} aria-hidden /> Quitar este cupón
@@ -274,6 +301,35 @@ export function CouponsView({ metaReady }: { metaReady: boolean }) {
           <button type="button" onClick={() => change([...rows, { ...EMPTY }])} className={`${BUTTON} mt-3 w-full sm:w-auto`}>
             <Plus size={15} aria-hidden /> Agregar otro cupón
           </button>
+        )}
+        {spare.length > 0 && (
+          <div className="mt-4">
+            <p className="text-sm text-muted">
+              Otros cupones del aviso
+              {rows.length >= COUPON_MAX ? ': para poner uno, quita primero uno de arriba.' : ': toca uno para agregarlo.'}
+            </p>
+            <ul className="mt-2 flex flex-col gap-2">
+              {spare.map((c, i) => {
+                const condition = couponConditionText(c);
+                return (
+                  <li key={c.code || `sin-codigo-${i}`}>
+                    <button
+                      type="button"
+                      onClick={() => addSpare(i)}
+                      disabled={rows.length >= COUPON_MAX}
+                      className={`${BUTTON.replace('justify-center', 'justify-start')} w-full text-left`}
+                    >
+                      <Plus size={15} className="shrink-0" aria-hidden />
+                      <span>
+                        <span className="font-semibold">{couponCodeLabel(c)}</span>: {couponDiscountText(c)}
+                        {condition ? ` ${condition}` : ''}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
       </section>
 

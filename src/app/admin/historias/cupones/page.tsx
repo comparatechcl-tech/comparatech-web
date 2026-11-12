@@ -30,19 +30,21 @@ export default async function CuponesPage() {
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         <li>
-          En WhatsApp, mantén apretado el aviso de cupones del canal y toca <strong>Copiar</strong>. Puedes copiar
-          varios mensajes juntos: caben hasta 4 cupones por imagen. Sirven los generales (un código para muchas compras,
-          como &quot;$5.000 en compras sobre $34.990&quot;) y los de tecnología; los de belleza o ropa se saltan.
+          En WhatsApp, mantén apretado el <strong>resumen de cupones</strong> del canal (o el aviso de un cupón) y toca{' '}
+          <strong>Copiar</strong>. Puedes copiar varios mensajes juntos. Caben 4 cupones por imagen: si el aviso trae
+          más, los otros quedan abajo para cambiarlos con un toque. Sirven los generales (un código para muchas compras,
+          como &quot;$5.000 en compras sobre $34.990&quot;) y los de tecnología; los de moda, belleza o juguetes se saltan.
         </li>
         <li>
-          Los que dicen &quot;con el cupón X <strong>queda en</strong> $…&quot; son de un solo producto: esos no van aquí.
-          Pégalos en <strong>Recomendaciones del canal</strong> y la historia de ese producto sale con el cupón anotado.
+          Los que dicen &quot;con el cupón X <strong>queda en</strong> $…&quot; son un producto con el cupón ya aplicado,
+          y no dicen cuánto descuenta el cupón. El producto va en <strong>Recomendaciones del canal</strong> (su historia
+          sale con el cupón anotado); el cupón se publica aquí desde el resumen, que trae el monto.
         </li>
         <li>
           Pégalo abajo y toca <strong>Leer cupones</strong>. Revisa que cada código, monto y compra mínima calce con el
           aviso. Si no los leyó bien, corrígelos a mano. Si el cupón no trae código (se aplica solo al pagar), deja el
-          código vacío. Si el aviso dice a qué aplica (&quot;en celulares&quot;, &quot;en electro&quot;), escríbelo en{' '}
-          <strong>A qué aplica</strong>: sale junto al cupón en la imagen y en el texto.
+          código vacío. Si el aviso dice a qué aplica (&quot;en Moda&quot;, &quot;en celulares&quot;), el sitio lo pone
+          en <strong>A qué aplica</strong>; si no salió, escríbelo tú. Sale junto al cupón en la imagen y en el texto.
         </li>
         <li>
           Toca <strong>Armar imágenes</strong> y mira cómo quedaron.
