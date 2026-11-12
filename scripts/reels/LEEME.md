@@ -145,7 +145,8 @@ las historias de Navidad: `node scripts/piezas/navidad.mjs > src/lib/content/chr
 
 **Variantes de `navidad`** (11-11-2026, muestras para el dueño: "pondría un gorro navideño real más gigante en vez de
 eso loguito pequeño, o haría un cambio o corte de imagen algo más producido"). La que sale es la de `VARIANTE` en
-`plantillas/navidad/escena.mjs` (hoy, `'hoy'`); para cambiarla se cambia esa línea y se publica.
+`plantillas/navidad/escena.mjs`: desde el 12-11-2026, `'regalo'` (el dueño eligió el papel de regalo rasgado); para
+cambiarla se cambia esa línea y se publica. Los videos ya hechos ese día no se rehacen.
 
 - `hoy`: la de siempre, con el gorrito chico en el logo.
 - `gorro`: un gorro grande y con volumen (`plantillas/navidad/gorro.mjs`), pintado punto por punto: terciopelo rojo

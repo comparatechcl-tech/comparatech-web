@@ -48,7 +48,8 @@ export const CTA_POR_DEFECTO = 'Guárdalo para tus compras de Navidad';
 //                para mostrar el cierre, en 0,62 s (papel.mjs).
 // El guion (tiempos) es el mismo en las tres: el cierre se lee unos 2 s con todo puesto (en "producida", 0,1 s más).
 // Para encender una variante se cambia esta línea y se publica. `hacer.mjs --variante` arma las otras para comparar.
-export const VARIANTE = 'hoy';
+// El dueño eligió la C el 12-11-2026 ("me gustó el barrido nuevo del papel de regalo rasgado").
+export const VARIANTE = 'regalo';
 export const VARIANTES = ['hoy', 'gorro', 'producida', 'regalo'];
 
 // --- Zonas seguras (Reels, TikTok, Shorts) ----------------------------------------------------------------

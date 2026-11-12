@@ -193,38 +193,43 @@ describe('plantillas: "navidad" (la de Navidad, alternada con "impacto" desde el
     globalThis.fetch = () => Promise.reject(new Error('Sin red'));
     try {
       const P = await cargarPlantilla('navidad');
-      const escena = await P.preparar(leerProducto(DATA, 1), P.CTA_POR_DEFECTO);
-      const T = P.tiempos(escena);
-      const lienzo = new Uint8Array(1080 * 1920 * 3);
-      P.pintor(escena, T)(lienzo, T.fin - 0.05);
-      const px = (x: number, y: number) => lienzo.slice((y * 1080 + x) * 3, (y * 1080 + x) * 3 + 3);
-      // El Viejito Pascuero (x=30 a 310) y el arbolito (x=700 a 900) están abajo, sobre y=1560.
-      let rojo = false;
-      let verde = false;
-      for (let y = 1252; y < 1560; y += 3) {
-        for (let x = 30; x < 310; x += 3) if (px(x, y)[0] > 180 && px(x, y)[1] < 90) rojo = true;
-        for (let x = 700; x < 900; x += 3) if (px(x, y)[1] > 120 && px(x, y)[0] < 90) verde = true;
-      }
-      expect(rojo).toBe(true);
-      expect(verde).toBe(true);
-      // A la derecha de x=924, de la mitad para abajo (la columna de botones), solo el fondo y la nieve: nada rojo
-      // ni verde.
-      for (let y = 960; y < 1500; y += 4) {
-        for (let x = 930; x < 1080; x += 4) {
-          const [r, g, b] = px(x, y);
-          expect(Math.max(r, g, b) - Math.min(r, g, b), `${x},${y}`).toBeLessThan(70);
+      // La de antes ("hoy", gorrito chico) y la que sale desde el 12-11 ("regalo", con el gorro grande).
+      for (const variante of ['hoy', 'regalo']) {
+        const escena = await P.preparar(leerProducto(DATA, 1), P.CTA_POR_DEFECTO, { variante });
+        const T = P.tiempos(escena);
+        const lienzo = new Uint8Array(1080 * 1920 * 3);
+        P.pintor(escena, T)(lienzo, T.fin - 0.05);
+        const px = (x: number, y: number) => lienzo.slice((y * 1080 + x) * 3, (y * 1080 + x) * 3 + 3);
+        // El Viejito Pascuero (x=30 a 310) y el arbolito (x=700 a 900) están abajo, sobre y=1560.
+        let rojo = false;
+        let verde = false;
+        for (let y = 1252; y < 1560; y += 3) {
+          for (let x = 30; x < 310; x += 3) if (px(x, y)[0] > 180 && px(x, y)[1] < 90) rojo = true;
+          for (let x = 700; x < 900; x += 3) if (px(x, y)[1] > 120 && px(x, y)[0] < 90) verde = true;
         }
+        expect(rojo, variante).toBe(true);
+        expect(verde, variante).toBe(true);
+        // A la derecha de x=924, de la mitad para abajo (la columna de botones), solo el fondo y la nieve: nada
+        // rojo ni verde.
+        for (let y = 960; y < 1500; y += 4) {
+          for (let x = 930; x < 1080; x += 4) {
+            const [r, g, b] = px(x, y);
+            expect(Math.max(r, g, b) - Math.min(r, g, b), `${variante} ${x},${y}`).toBeLessThan(70);
+          }
+        }
+        // Lo escrito del cierre termina bien arriba de ellos (el dueño, 12-11-2026: "salen muy acoplados al
+        // texto"): en "hoy", al menos 120 px sobre la cabeza del Viejito Pascuero (y=1252). Con el gorro grande el
+        // bloque es más alto y termina en y=1180 a más tardar (lo que el dueño vio en la muestra C y aprobó).
+        const Z = escena.Z;
+        const renglones = [
+          ...Z.llamada.map((capa: { w: number; h: number }, i: number) => ({ capa, y: Z.llamadaY + i * Z.llamadaAlto })),
+          ...Z.pie.map((capa: { w: number; h: number }, i: number) => ({ capa, y: Z.pieY + i * 44 })),
+        ];
+        const limite = variante === 'hoy' ? 1560 - 308 - 120 : 1180;
+        for (const { capa, y } of renglones) expect(y + capa.h, variante).toBeLessThanOrEqual(limite);
+        // Y empieza bajo la franja que tapan las apps arriba.
+        expect(Z.logoY - Z.lado / 2, variante).toBeGreaterThanOrEqual(220);
       }
-      // Lo escrito del cierre termina bien arriba de ellos (el dueño, 12-11-2026: "salen muy acoplados al
-      // texto"): al menos 120 px sobre la cabeza del Viejito Pascuero (y=1252).
-      const Z = escena.Z;
-      const renglones = [
-        ...Z.llamada.map((capa: { w: number; h: number }, i: number) => ({ capa, y: Z.llamadaY + i * Z.llamadaAlto })),
-        ...Z.pie.map((capa: { w: number; h: number }, i: number) => ({ capa, y: Z.pieY + i * 44 })),
-      ];
-      for (const { capa, y } of renglones) expect(y + capa.h).toBeLessThanOrEqual(1560 - 308 - 120);
-      // Y empieza bajo la franja que tapan las apps arriba.
-      expect(Z.logoY - 100).toBeGreaterThanOrEqual(220);
     } finally {
       globalThis.fetch = antes;
     }

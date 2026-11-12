@@ -7,8 +7,9 @@
 // El dueño la aprobó el 09-11-2026: va en el reel diario alternada con "impacto" (VIDEO_TEMPLATES en
 // src/lib/social/videos.ts). Se saca de ahí cuando termine la temporada.
 //
-// Tiene variantes para comparar (11-11-2026: el gorro grande y la cinta al pasar al cierre): la que sale es la de
-// VARIANTE en escena.mjs; las otras se arman a mano con `hacer.mjs ... --plantilla navidad --variante gorro`.
+// Tiene variantes (11 y 12-11-2026: el gorro grande, la cinta y el papel de regalo al pasar al cierre): la que sale
+// es la de VARIANTE en escena.mjs (desde el 12-11, "regalo"); las otras se arman a mano con
+// `hacer.mjs ... --plantilla navidad --variante gorro`.
 import { FPS, CTA_POR_DEFECTO, preparar, tiempos as tiemposSegunGancho, momentos, pintor } from './escena.mjs';
 
 export { FPS, CTA_POR_DEFECTO };
