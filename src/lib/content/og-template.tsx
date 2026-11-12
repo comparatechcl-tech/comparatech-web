@@ -176,14 +176,17 @@ export function ProductOgTemplate({
   format,
   photo,
   theme = null,
+  at,
 }: {
   product: OgProduct;
   format: OgFormat;
   photo: string | null;
   /** Temática de la historia y el feed (lib/content/christmas). El pin y la vista previa de links no la usan. */
   theme?: OfferTheme | null;
+  /** Cuándo se dibuja (la cuenta de días del listón de Navidad); por defecto, ahora. */
+  at?: Date;
 }) {
-  if (format === 'story' || format === 'feed') return <OfferTemplate product={product} photo={photo} format={format} theme={theme} />;
+  if (format === 'story' || format === 'feed') return <OfferTemplate product={product} photo={photo} format={format} theme={theme} at={at} />;
 
   const L = LAYOUTS[format];
   const { width, height } = OG_SIZES[format];

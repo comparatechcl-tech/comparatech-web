@@ -2,53 +2,38 @@ import { describe, expect, it } from 'vitest';
 import { ImageResponse } from 'next/og';
 import { renderToStaticMarkup } from 'react-dom/server';
 import sharp from 'sharp';
-import { CHRISTMAS_WINDOW, chileDay, giftBudgetBand, isValidChristmasWindow, offerThemeAt, snowFor } from '@/lib/content/christmas';
+import { CHRISTMAS_WINDOW, chileDay, christmasRibbon, isValidChristmasWindow, offerThemeAt, snowFor } from '@/lib/content/christmas';
 import { OG_SIZES, ProductOgTemplate, ogFonts, type OgProduct } from '@/lib/content/og-template';
 import { OfferTemplate, type OfferFormat } from '@/lib/content/offer-template';
 
 /**
- * La temática de Navidad de las piezas: el rango de "Idea de regalo" tiene
- * que ser siempre cierto, se enciende solo dentro de su ventana (apagada
- * hasta que el dueño apruebe) y la pieza sigue respetando sus reglas.
+ * La temática de Navidad de las piezas: la cuenta de días del listón, que
+ * se enciende solo dentro de su ventana y que la pieza sigue respetando sus
+ * reglas.
  */
 
-describe('giftBudgetBand: el rango de "Idea de regalo"', () => {
-  it('reparte por precio, con las puntas en el rango correcto', () => {
-    expect(giftBudgetBand(1)).toBe('Menos de $50 mil');
-    expect(giftBudgetBand(43_870)).toBe('Menos de $50 mil');
-    expect(giftBudgetBand(49_990)).toBe('Menos de $50 mil');
-    expect(giftBudgetBand(49_999)).toBe('Menos de $50 mil');
-    // $50.000 justo no es "menos de $50 mil".
-    expect(giftBudgetBand(50_000)).toBe('$50 a $100 mil');
-    expect(giftBudgetBand(94_990)).toBe('$50 a $100 mil');
-    expect(giftBudgetBand(99_990)).toBe('$50 a $100 mil');
-    expect(giftBudgetBand(100_000)).toBe('$50 a $100 mil');
-    expect(giftBudgetBand(100_001)).toBe('$100 a $300 mil');
-    expect(giftBudgetBand(115_910)).toBe('$100 a $300 mil');
-    expect(giftBudgetBand(299_990)).toBe('$100 a $300 mil');
-    expect(giftBudgetBand(300_000)).toBe('$100 a $300 mil');
-    expect(giftBudgetBand(300_001)).toBe('Más de $300 mil');
-    expect(giftBudgetBand(746_255)).toBe('Más de $300 mil');
-    expect(giftBudgetBand(12_345_678)).toBe('Más de $300 mil');
+describe('christmasRibbon: "Navidad 2026 · Faltan N días" (el dueño, 12-11-2026)', () => {
+  it('cuenta los días que faltan para el 25, según el día de Chile', () => {
+    // En noviembre y diciembre Chile está en UTC-3.
+    expect(christmasRibbon(new Date('2026-11-12T15:00:00Z'))).toEqual({ title: 'Navidad 2026', countdown: 'Faltan 43 días' });
+    expect(christmasRibbon(new Date('2026-11-13T02:59:00Z'))?.countdown).toBe('Faltan 43 días'); // 12-11 a las 23:59
+    expect(christmasRibbon(new Date('2026-11-13T03:00:00Z'))?.countdown).toBe('Faltan 42 días'); // 13-11 a las 00:00
+    expect(christmasRibbon(new Date('2026-12-01T12:00:00Z'))?.countdown).toBe('Faltan 24 días');
+    expect(christmasRibbon(new Date('2026-12-23T12:00:00Z'))?.countdown).toBe('Faltan 2 días');
+    expect(christmasRibbon(new Date('2026-12-24T12:00:00Z'))?.countdown).toBe('Falta 1 día');
+    expect(christmasRibbon(new Date('2026-12-25T12:00:00Z'))?.countdown).toBe('Hoy es Navidad');
   });
 
-  it('sin un precio válido no hay rango', () => {
-    for (const price of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(giftBudgetBand(price), String(price)).toBeNull();
+  it('después del 25, o con una fecha inválida, no hay listón', () => {
+    expect(christmasRibbon(new Date('2026-12-26T03:00:00Z'))).toBeNull(); // 26-12 a las 00:00 en Chile
+    expect(christmasRibbon(new Date('no es fecha'))).toBeNull();
   });
 
-  it('lo que dice el rango es cierto para cualquier precio', () => {
-    // Se lee la frase y se comprueba contra el precio: "Menos de $X mil", "$A a $B mil" o "Más de $X mil".
-    const holds = (label: string, price: number) => {
-      const less = /^Menos de \$(\d+) mil$/.exec(label);
-      if (less) return price < Number(less[1]) * 1000;
-      const range = /^\$(\d+) a \$(\d+) mil$/.exec(label);
-      if (range) return price >= Number(range[1]) * 1000 && price <= Number(range[2]) * 1000;
-      const more = /^Más de \$(\d+) mil$/.exec(label);
-      if (more) return price > Number(more[1]) * 1000;
-      return false;
-    };
-    for (let price = 990; price <= 1_500_000; price += 997) expect(holds(giftBudgetBand(price)!, price), String(price)).toBe(true);
-    for (const price of [49_999, 50_000, 50_001, 99_999, 100_000, 100_001, 299_999, 300_000, 300_001]) expect(holds(giftBudgetBand(price)!, price), String(price)).toBe(true);
+  it('dentro de la ventana encendida siempre hay listón', () => {
+    if (!CHRISTMAS_WINDOW) return;
+    for (let t = Date.parse(`${CHRISTMAS_WINDOW.from}T15:00:00Z`); chileDay(new Date(t)) <= CHRISTMAS_WINDOW.until; t += 86_400_000) {
+      expect(christmasRibbon(new Date(t)), chileDay(new Date(t))).not.toBeNull();
+    }
   });
 });
 
@@ -103,32 +88,38 @@ const product = (over: Partial<OgProduct> = {}): OgProduct => ({
   ...over,
 });
 
+/** Un día con la temática encendida: las pruebas no dependen de la fecha en que corren. */
+const DRAWN_AT = new Date('2026-12-01T15:00:00Z');
+
 /** Lo que la marca no dice nunca, sin tildes ni mayúsculas. */
 const FORBIDDEN = [/recomendad/, /mejor precio/, /mas barat/, /imperdible/, /solo hoy/, /precio de lista/, /antes \$/, /rebajad/, /precio normal/, /verificad/, /publicidad/];
 const plain = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const visibleText = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
 describe('la pieza con la temática de Navidad', () => {
-  it('dice "Idea de regalo" con el rango del precio, sin palabras que la marca no usa; sin tema, no lo dice', () => {
-    for (const [price, band] of [[43_870, 'Menos de $50 mil'], [94_990, '$50 a $100 mil'], [115_910, '$100 a $300 mil'], [746_255, 'Más de $300 mil']] as const) {
+  it('dice "Navidad 2026" y los días que faltan, sin palabras que la marca no usa; sin tema, no lo dice', () => {
+    for (const [at, countdown] of [['2026-11-12T15:00:00Z', 'Faltan 43 días'], ['2026-12-24T15:00:00Z', 'Falta 1 día']] as const) {
       for (const format of ['story', 'feed'] as OfferFormat[]) {
-        const text = visibleText(renderToStaticMarkup(<ProductOgTemplate product={product({ price, original_price: null })} format={format} photo={null} theme="navidad" />));
-        expect(text).toContain('Idea de regalo');
-        expect(text).toContain(band);
+        const text = visibleText(
+          renderToStaticMarkup(<ProductOgTemplate product={product({ original_price: null })} format={format} photo={null} theme="navidad" at={new Date(at)} />)
+        );
+        expect(text).toContain('Navidad 2026');
+        expect(text).toContain(countdown);
+        expect(text).not.toContain('Idea de regalo');
         expect(FORBIDDEN.filter((re) => re.test(plain(text))).map(String)).toEqual([]);
       }
     }
     const normal = visibleText(renderToStaticMarkup(<ProductOgTemplate product={product()} format="story" photo={null} />));
-    expect(normal).not.toContain('Idea de regalo');
+    expect(normal).not.toContain('Navidad 2026');
     // Los datos de siempre siguen ahí: el descuento, la cifra tachada como "sin descuento" y la hora del precio.
-    const xmas = visibleText(renderToStaticMarkup(<OfferTemplate product={product()} format="story" photo={null} theme="navidad" />));
+    const xmas = visibleText(renderToStaticMarkup(<OfferTemplate product={product()} format="story" photo={null} theme="navidad" at={DRAWN_AT} />));
     expect(xmas).toContain('−37%');
     expect(xmas).toContain('sin descuento $69.641');
     expect(xmas).toContain('Precio revisado 07/11 11:00');
   });
 
   it('la historia sigue terminando su tarjeta en y=1420, con el listón rojo arriba y el lugar del sticker libre', async () => {
-    const response = new ImageResponse(<OfferTemplate product={product()} photo={null} format="story" theme="navidad" />, {
+    const response = new ImageResponse(<OfferTemplate product={product()} photo={null} format="story" theme="navidad" at={DRAWN_AT} />, {
       ...OG_SIZES.story,
       fonts: await ogFonts('story'),
     });

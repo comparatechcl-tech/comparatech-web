@@ -1,8 +1,9 @@
 /**
  * La temática de Navidad de las piezas de redes (la historia y la
  * publicación del feed, lib/content/offer-template): un listón rojo de lado a
- * lado con un moño y la etiqueta "Idea de regalo" con el rango de precio
- * ("Menos de $50 mil", "$50 a $100 mil"...), el gorro del Viejito Pascuero
+ * lado con un moño y "Navidad 2026 · Faltan 43 días" (christmasRibbon; el
+ * dueño eligió esa frase el 12-11-2026, en vez de "Idea de regalo" con el
+ * rango de precio), el gorro del Viejito Pascuero
  * sobre el logo y nieve suave en los bordes. En la historia, además, el
  * Viejito Pascuero se asoma abajo a la derecha y un arbolito con un bastón de
  * dulce adorna la esquina de abajo a la izquierda; el centro, donde va el
@@ -52,21 +53,24 @@ export function offerThemeAt(at: Date = new Date(), window: ChristmasWindow | nu
   return day >= window.from && day <= window.until ? 'navidad' : null;
 }
 
-export type GiftBudget = 'Menos de $50 mil' | '$50 a $100 mil' | '$100 a $300 mil' | 'Más de $300 mil';
+/** Lo que dice el listón de Navidad: "Navidad 2026" y la cuenta regresiva ("Faltan 43 días"). */
+export interface ChristmasRibbon {
+  title: string;
+  countdown: string;
+}
 
 /**
- * El rango de presupuesto de un regalo, según el precio. Siempre cierto:
- * "Menos de $50 mil" es menos de $50.000 (un precio de $50.000 justo ya va
- * en "$50 a $100 mil"), los rangos incluyen sus dos puntas ($100.000 va en
- * "$50 a $100 mil" y $300.000 en "$100 a $300 mil") y "Más de $300 mil"
- * empieza en $300.001. Sin un precio válido no hay rango.
+ * El listón para el día de Chile de `at`. Cuenta los días que faltan para
+ * el 25 de diciembre de ese año: "Faltan 2 días", "Falta 1 día" y, el 25,
+ * "Hoy es Navidad". Después del 25 (o con una fecha inválida) no hay listón.
  */
-export function giftBudgetBand(price: number): GiftBudget | null {
-  if (!Number.isFinite(price) || price <= 0) return null;
-  if (price < 50_000) return 'Menos de $50 mil';
-  if (price <= 100_000) return '$50 a $100 mil';
-  if (price <= 300_000) return '$100 a $300 mil';
-  return 'Más de $300 mil';
+export function christmasRibbon(at: Date): ChristmasRibbon | null {
+  if (Number.isNaN(at.getTime())) return null;
+  const [year, month, day] = chileDay(at).split('-').map(Number);
+  const left = Math.round((Date.UTC(year, 11, 25) - Date.UTC(year, month - 1, day)) / 86_400_000);
+  if (left < 0) return null;
+  const countdown = left === 0 ? 'Hoy es Navidad' : left === 1 ? 'Falta 1 día' : `Faltan ${left} días`;
+  return { title: `Navidad ${year}`, countdown };
 }
 
 /** Un copo de la nieve de la pieza: centro, radio y opacidad. */

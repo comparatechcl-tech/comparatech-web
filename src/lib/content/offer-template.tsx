@@ -24,7 +24,7 @@
  */
 import { socialProductName } from '@/lib/content/social-name';
 import { captionDiscount, chileDateTime, formatPrice } from '@/lib/content/captions';
-import { giftBudgetBand, snowFor, type OfferTheme } from '@/lib/content/christmas';
+import { christmasRibbon, snowFor, type OfferTheme } from '@/lib/content/christmas';
 import { CHRISTMAS_BOW_PNG, CHRISTMAS_CORNER_PNG, CHRISTMAS_HAT_PNG, CHRISTMAS_SANTA_PNG } from '@/lib/content/christmas-art';
 import type { OgProduct } from '@/lib/content/og-template';
 
@@ -98,7 +98,7 @@ const PANEL_H = 172; // bloque del precio...
 const PANEL_CHIPS_H = 252; // ...y con la fila de etiquetas, con aire arriba y abajo (el dueño, 20-10-2026)
 
 // Temática de Navidad (lib/content/christmas): un listón rojo de lado a lado entre la cabecera y el nombre,
-// con "Idea de regalo" y el rango de precio, y el moño a la derecha. La tarjeta termina en el mismo punto: lo
+// con "Navidad 2026 · Faltan 43 días", y el moño a la derecha. La tarjeta termina en el mismo punto: lo
 // que ocupa el listón lo cede la foto.
 const RIBBON_TOP_GAP = 24; // de la cabecera al listón (el moño asoma 17 px por arriba y por abajo)
 const RIBBON_H = 64;
@@ -201,18 +201,21 @@ export function OfferTemplate({
   photo,
   format,
   theme = null,
+  at = new Date(),
 }: {
   product: OgProduct;
   photo: string | null;
   format: OfferFormat;
-  /** 'navidad': el listón con "Idea de regalo" y la nieve (lib/content/christmas). Sin tema, la pieza de siempre. */
+  /** 'navidad': el listón con "Navidad 2026 · Faltan N días" y la nieve (lib/content/christmas). Sin tema, la pieza de siempre. */
   theme?: OfferTheme | null;
+  /** El momento en que se dibuja la pieza: de ahí sale la cuenta de días del listón. */
+  at?: Date;
 }) {
   const frame = FRAMES[format];
-  // Navidad: el rango sale del mismo precio que muestra la pieza. Sin un precio válido no hay listón.
-  const giftBudget = theme === 'navidad' ? giftBudgetBand(product.price) : null;
+  // Navidad: la cuenta regresiva sale del día en que se dibuja la pieza (en Chile).
+  const ribbon = theme === 'navidad' ? christmasRibbon(at) : null;
   const ribbonTop = frame.top + HEADER_H + RIBBON_TOP_GAP;
-  const snow = giftBudget ? snowFor(frame.height, { top: frame.top, cardBottom: frame.cardBottom, sticker: frame.glow }) : [];
+  const snow = ribbon ? snowFor(frame.height, { top: frame.top, cardBottom: frame.cardBottom, sticker: frame.glow }) : [];
   const discount = captionDiscount(product);
   const hasList = discount > 0 && !!product.original_price;
   const checked = chileDateTime(product.price_checked_at);
@@ -236,7 +239,7 @@ export function OfferTemplate({
   const priceSize = Math.min(PRICE_MAX, Math.floor((INNER_W - CARD_PAD * 2) / priceEm));
 
   // La tarjeta empieza donde termina el nombre y acaba siempre en el mismo punto; la foto ocupa lo que quede.
-  const titleGap = giftBudget ? RIBBON_TOP_GAP + RIBBON_H + RIBBON_GAP : TITLE_GAP;
+  const titleGap = ribbon ? RIBBON_TOP_GAP + RIBBON_H + RIBBON_GAP : TITLE_GAP;
   const cardH = frame.cardBottom - (frame.top + HEADER_H + titleGap + titleH + CARD_GAP);
   const bandH = hasList ? BAND_H : RULE_H;
   const panelH = hasChips ? PANEL_CHIPS_H : PANEL_H;
@@ -275,33 +278,33 @@ export function OfferTemplate({
       {snow.map((f, i) => (
         <div key={`s${i}`} style={{ display: 'flex', position: 'absolute', left: f.x - f.r, top: f.y - f.r, width: f.r * 2, height: f.r * 2, borderRadius: f.r, backgroundColor: `rgba(255,255,255,${f.a})` }} />
       ))}
-      {/* Navidad: el listón de lado a lado, con "Idea de regalo" y el rango de precio, y el moño a la derecha */}
-      {giftBudget ? (
+      {/* Navidad: el listón de lado a lado, con "Navidad 2026 · Faltan N días", y el moño a la derecha */}
+      {ribbon ? (
         <div style={{ display: 'flex', flexDirection: 'column', position: 'absolute', left: 0, top: ribbonTop, width: 1080, height: RIBBON_H }}>
           <div style={{ display: 'flex', width: 1080, height: RIBBON_EDGE, backgroundImage: XMAS.gold }} />
           <div style={{ display: 'flex', alignItems: 'center', width: 1080, height: RIBBON_H - RIBBON_EDGE * 2, paddingLeft: MARGIN, backgroundImage: XMAS.ribbon }}>
-            <div style={{ display: 'flex', fontSize: 27, fontWeight: 800, letterSpacing: 3, color: XMAS.cream, textTransform: 'uppercase' }}>Idea de regalo</div>
+            <div style={{ display: 'flex', fontSize: 27, fontWeight: 800, letterSpacing: 3, color: XMAS.cream, textTransform: 'uppercase' }}>{ribbon.title}</div>
             <div style={{ display: 'flex', width: 9, height: 9, margin: '0 18px', borderRadius: 5, backgroundColor: XMAS.goldDot }} />
-            <div style={{ display: 'flex', fontSize: 32, fontWeight: 600, letterSpacing: -0.4, color: COLORS.white }}>{giftBudget}</div>
+            <div style={{ display: 'flex', fontSize: 32, fontWeight: 600, letterSpacing: -0.4, color: COLORS.white }}>{ribbon.countdown}</div>
           </div>
           <div style={{ display: 'flex', width: 1080, height: RIBBON_EDGE, backgroundImage: XMAS.gold }} />
         </div>
       ) : null}
-      {giftBudget ? (
+      {ribbon ? (
         <img src={CHRISTMAS_BOW_PNG} alt="" width={BOW_W} height={BOW_H} style={{ position: 'absolute', left: 1080 - MARGIN - BOW_W, top: ribbonTop + RIBBON_H / 2 - BOW_H / 2 }} />
       ) : null}
       {/* Navidad, solo en la historia: el arbolito a la izquierda y el Viejito Pascuero a la derecha, abajo */}
-      {giftBudget && frame.glow ? (
+      {ribbon && frame.glow ? (
         <img src={CHRISTMAS_CORNER_PNG} alt="" width={CORNER.w} height={CORNER.h} style={{ position: 'absolute', left: CORNER.left, top: ART_BOTTOM - CORNER.h }} />
       ) : null}
-      {giftBudget && frame.glow ? (
+      {ribbon && frame.glow ? (
         <img src={CHRISTMAS_SANTA_PNG} alt="" width={SANTA.w} height={SANTA.h} style={{ position: 'absolute', left: SANTA.left, top: ART_BOTTOM - SANTA.h }} />
       ) : null}
 
       {/* Marca a la izquierda, datos del precio a la derecha */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: HEADER_H, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          {giftBudget ? (
+          {ribbon ? (
             // Navidad: el logo con el gorro del Viejito Pascuero
             <div style={{ display: 'flex', position: 'relative', width: 62, height: 62 }}>
               <img src={LOGO_PNG} alt="" width={62} height={62} />
