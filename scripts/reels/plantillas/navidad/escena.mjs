@@ -29,6 +29,7 @@ import { fraseDePrecio } from '../impacto/escena.mjs';
 import { capasDeAdornos, pintarCable, ampolletas, pintarAmpolletas, copos, pintarNieve, GORRO_EN_LOGO, nieveDelBorde, pintarNieveDelBorde } from './adornos.mjs';
 import { gorroParaLogo, ponerGirada, APOYO_EN_LOGO } from './gorro.mjs';
 import { pintarCinta, chispasDeCinta } from './cinta.mjs';
+import { pintarPapel, bordesRotos, chispasDelPapel, monoDorado } from './papel.mjs';
 
 export const FPS = 30;
 export const CTA_POR_DEFECTO = 'Guárdalo para tus compras de Navidad';
@@ -42,10 +43,13 @@ export const CTA_POR_DEFECTO = 'Guárdalo para tus compras de Navidad';
 //                de arriba, y nieve acumulada en el borde de la hoja azul noche desde el primer cuadro.
 //   'producida'  (B) lo de A y, al pasar del precio al cierre, una cinta roja con filete dorado que barre la
 //                pantalla en 0,45 s (cinta.mjs).
+//   'regalo'     (C, 12-11-2026: "prueba otro efecto de barrido de pantalla navideño") lo de A y, en vez de la
+//                cinta, la pantalla se envuelve en papel de regalo, salta un moño y el papel se rasga por el medio
+//                para mostrar el cierre, en 0,62 s (papel.mjs).
 // El guion (tiempos) es el mismo en las tres: el cierre se lee unos 2 s con todo puesto (en "producida", 0,1 s más).
 // Para encender una variante se cambia esta línea y se publica. `hacer.mjs --variante` arma las otras para comparar.
 export const VARIANTE = 'hoy';
-export const VARIANTES = ['hoy', 'gorro', 'producida'];
+export const VARIANTES = ['hoy', 'gorro', 'producida', 'regalo'];
 
 // --- Zonas seguras (Reels, TikTok, Shorts) ----------------------------------------------------------------
 // Las apps tapan los 220 px de arriba, los 420 de abajo y, de la mitad hacia abajo, lo que queda a la derecha
@@ -93,7 +97,8 @@ export function tiemposDeVariante(T) {
   return {
     gorro: [T.cierre + 0.5, T.cierre + 0.82], // el gorro grande cae (desde arriba de la pantalla) y aquí se posa
     cinta: [T.cierre - 0.2, T.cierre + 0.25], // la cinta de "producida" barre la pantalla (0,45 s)...
-    adelanto: 0.1, // ...y detrás de ella el cierre entra 0,1 s antes que en las otras (gorro incluido)
+    papel: [T.cierre - 0.38, T.cierre + 0.24], // el papel de "regalo" entra, lleva su moño y se rasga (0,62 s; empieza después de la portada)...
+    adelanto: 0.1, // ...y detrás el cierre entra 0,1 s antes que en las otras (gorro incluido)
   };
 }
 
@@ -532,6 +537,10 @@ export function pintor(escena, T) {
   if (!conGorro) poner(fondo, N.gorroChico, MARGEN + LOGO_PASTILLA.x + GORRO_EN_LOGO.x * LOGO_PASTILLA.lado, logoY + GORRO_EN_LOGO.y * LOGO_PASTILLA.lado);
   const gorroPastilla = conGorro ? { capa: N.gorroPastilla, ...lugarGorroPastilla(N.gorroPastilla) } : null;
   const chispasCinta = conCinta ? chispasDeCinta() : null;
+  const conPapel = variante === 'regalo';
+  const papel = conPapel ? { bordes: bordesRotos(), chispas: chispasDelPapel(), mono: monoDorado(N.mono) } : null;
+  // El cruce del precio al cierre: la cinta, el papel de regalo o ninguno (la hoja sube, como hoy).
+  const cruce = conCinta ? V.cinta : conPapel ? V.papel : null;
   let otro = null; // el cuadro del cierre mientras pasa la cinta (uno por hilo: cada hilo tiene su pintor)
   const hoja = hojaOscura({ radio: RADIO });
   const luces = ampolletas();
@@ -821,14 +830,16 @@ export function pintor(escena, T) {
   }
 
   return function pintar(dst, t) {
-    // "producida": mientras pasa la cinta, delante queda el precio y detrás el cierre; después, el cierre ya puesto
-    // (sin la hoja subiendo: la cinta la reemplaza).
-    if (conCinta && t >= V.cinta[0]) {
-      if (t < V.cinta[1]) {
+    // "producida" y "regalo": mientras pasa la cinta (o el papel), delante queda el precio y detrás el cierre;
+    // después, el cierre ya puesto (sin la hoja subiendo: el cruce la reemplaza).
+    if (cruce && t >= cruce[0]) {
+      if (t < cruce[1]) {
         cuadro(dst, t, 'precio');
         otro ??= new Uint8Array(W * H * 3);
         cuadro(otro, t, 'cierre');
-        pintarCinta(dst, otro, fase(t, V.cinta[0], V.cinta[1]), chispasCinta, N);
+        const p = fase(t, cruce[0], cruce[1]);
+        if (conCinta) pintarCinta(dst, otro, p, chispasCinta, N);
+        else pintarPapel(dst, otro, p, papel.bordes, papel.chispas, N, papel.mono);
       } else cuadro(dst, t, 'cierre');
     } else cuadro(dst, t, 'todo');
 

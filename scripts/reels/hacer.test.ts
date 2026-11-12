@@ -295,8 +295,8 @@ describe('plantillas: "navidad", variantes "gorro" y "producida" (muestras del 1
 
   it('la de hoy es la de siempre, y una variante que no existe es un error antes de armar nada', async () => {
     const { VARIANTES, preparar, CTA_POR_DEFECTO } = await import('./plantillas/navidad/escena.mjs');
-    expect(VARIANTES).toEqual(['hoy', 'gorro', 'producida']);
-    await expect(preparar(leerProducto(DATA, 1), CTA_POR_DEFECTO, { variante: 'neon' })).rejects.toThrow('No existe la variante "neon" de la plantilla navidad. Las que hay: hoy, gorro, producida.');
+    expect(VARIANTES).toEqual(['hoy', 'gorro', 'producida', 'regalo']);
+    await expect(preparar(leerProducto(DATA, 1), CTA_POR_DEFECTO, { variante: 'neon' })).rejects.toThrow('No existe la variante "neon" de la plantilla navidad. Las que hay: hoy, gorro, producida, regalo.');
     // El gorro grande y la nieve del borde son solo de las variantes.
     const hoy = await preparar(leerProducto(DATA, 1), CTA_POR_DEFECTO, { variante: 'hoy' });
     expect(adornos(hoy).gorroReal).toBeUndefined();
@@ -321,12 +321,17 @@ describe('plantillas: "navidad", variantes "gorro" y "producida" (muestras del 1
       expect(V.cinta[1]).toBeLessThanOrEqual(T.cierre + 0.36 - V.adelanto);
       expect(V.adelanto).toBeGreaterThanOrEqual(0); // el cierre entra antes, nunca después: no pierde tiempo de lectura
       expect(V.gorro[1]).toBeLessThan(T.cierre + 1.1); // el gorro se posa antes de que termine de entrar lo escrito
+      // "regalo": el papel dura de 0,5 a 0,8 s, deja limpia la portada y se va antes de que entre lo escrito.
+      expect(V.papel[1] - V.papel[0]).toBeGreaterThanOrEqual(0.5);
+      expect(V.papel[1] - V.papel[0]).toBeLessThanOrEqual(0.8);
+      expect(V.papel[0]).toBeGreaterThan(T.portada);
+      expect(V.papel[1]).toBeLessThanOrEqual(T.cierre + 0.36 - V.adelanto);
     }
   });
 
   it('en las tres, lo escrito del cierre queda entero, quieto y sin nada encima los últimos 2 segundos', async () => {
     const P = await cargarPlantilla('navidad');
-    for (const variante of ['hoy', 'gorro', 'producida']) {
+    for (const variante of ['hoy', 'gorro', 'producida', 'regalo']) {
       for (const n of [1, 6]) {
         const escena = await P.preparar(leerProducto(DATA, n), P.CTA_POR_DEFECTO, { variante });
         const T = P.tiempos(escena);
@@ -440,6 +445,34 @@ describe('plantillas: "navidad", variantes "gorro" y "producida" (muestras del 1
     const gorro = await P.preparar(leerProducto(DATA, 1), P.CTA_POR_DEFECTO, { variante: 'gorro' });
     P.pintor(gorro, T)(lienzo, (V.cinta[0] + V.cinta[1]) / 2);
     expect(rojos()).toBeLessThan(5_000);
+  }, SLOW);
+
+  it('"regalo": el papel tapa la pantalla entera con su moño, se rasga por el medio y, al terminar, ya está el cierre', async () => {
+    const P = await cargarPlantilla('navidad');
+    const { tiemposDeVariante } = await import('./plantillas/navidad/escena.mjs');
+    const { TRAMOS } = await import('./plantillas/navidad/papel.mjs');
+    const escena = await P.preparar(leerProducto(DATA, 1), P.CTA_POR_DEFECTO, { variante: 'regalo' });
+    const T = P.tiempos(escena);
+    const V = tiemposDeVariante(T);
+    const pintar = P.pintor(escena, T);
+    const lienzo = new Uint8Array(W * H * 3);
+    const px = (x: number, y: number) => Array.from(lienzo.slice((y * W + x) * 3, (y * W + x) * 3 + 3));
+    const rojo = ([r, g, b]: number[]) => r > 140 && g < 80 && b < 90;
+    const en = (p: number) => V.papel[0] + p * (V.papel[1] - V.papel[0]);
+    // Envuelta: rojo en las cuatro esquinas y al medio (fuera de la cinta y el moño), y el moño dorado al centro.
+    pintar(lienzo, en((TRAMOS.mono[1] + TRAMOS.rasga[0]) / 2));
+    for (const [x, y] of [[40, 40], [1040, 40], [40, 1880], [1040, 1880], [540, 1300]]) expect(rojo(px(x, y)), `${x},${y}`).toBe(true);
+    const [r, g, b] = px(540, 860);
+    expect(r > 200 && g > 150 && r - b > 60, `moño ${[r, g, b]}`).toBe(true); // dorado
+    // Rasgándose: al medio ya se ve el cierre (oscuro) y a los lados sigue el papel.
+    pintar(lienzo, en(TRAMOS.rasga[0] + 0.6 * (TRAMOS.rasga[1] - TRAMOS.rasga[0])));
+    expect(Math.max(...px(540, 1300))).toBeLessThan(90);
+    expect(rojo(px(20, 1300)) || rojo(px(1060, 1300))).toBe(true);
+    // Al terminar no queda papel.
+    pintar(lienzo, V.papel[1]);
+    let rojos = 0;
+    for (let i = 0; i < lienzo.length; i += 3) if (lienzo[i] > 150 && lienzo[i + 1] < 70 && lienzo[i + 2] < 90) rojos++;
+    expect(rojos).toBeLessThan(5_000);
   }, SLOW);
 });
 

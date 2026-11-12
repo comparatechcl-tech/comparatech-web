@@ -8,7 +8,7 @@
 //   --portada foto.jpg    guarda además la escena del precio completa como imagen, para usarla de portada
 //   --hoja hoja.jpg       guarda además una hoja con 8 cuadros del video ya armado, para revisarlo de un vistazo
 //   --zonas               pinta en rojo lo que tapan las apps (solo para revisar: ese video no se publica)
-//   --variante gorro      con "navidad": arma otra versión para comparar (hoy, gorro o producida; ver su escena.mjs)
+//   --variante gorro      con "navidad": arma otra versión para comparar (hoy, gorro, producida o regalo; ver su escena.mjs)
 //   --musica archivo      usa ese audio en vez del silencio (recortado al largo del video, entra y sale suave)
 //   --volumen 0.6         volumen de la música, de 0 a 1 (por defecto, 1)
 //   --hilos N             cuántos hilos pintan (por defecto, según el equipo)
