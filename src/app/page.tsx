@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Search, Check, Tags, ChartNoAxesColumn, Link2, Flame, Sparkles } from 'lucide-react';
+import { CalendarDays, Search, Check, Tags, ChartNoAxesColumn, Link2, Flame, Sparkles } from 'lucide-react';
 import { getCatalogProducts } from '@/lib/queries/products';
 import { getDealsWithStats } from '@/lib/queries/deals';
 import { dropsById } from '@/lib/deal-rank';
+import { blackFridayPhase } from '@/lib/black-friday';
 import { selectHomeDeals } from '@/lib/home-deals';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { DealStrip } from '@/components/product/DealStrip';
@@ -251,6 +252,24 @@ export default async function HomePage() {
           )}
         </div>
       </section>
+
+      {/* Texto aprobado por el dueño el 22-11-2026. Se va sola al terminar el
+          evento: la portada se regenera cada hora. */}
+      {blackFridayPhase(now) !== 'despues' && (
+        <Link
+          href="/black-friday"
+          prefetch={false}
+          className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm font-medium text-fg transition hover:bg-accent/15 sm:mb-12"
+        >
+          <span className="flex items-center gap-2.5">
+            <CalendarDays size={18} className="shrink-0 text-accent" aria-hidden />
+            Black Friday del 27 al 30-11: revisa el historial antes de comprar
+          </span>
+          <span className="shrink-0 text-accent" aria-hidden>
+            →
+          </span>
+        </Link>
+      )}
 
       {/* Ofertas — lo primero después del hero: es el gancho real del sitio
           y el destino de lo que se publica en redes. Solo aparece si hay
