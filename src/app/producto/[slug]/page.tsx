@@ -66,7 +66,7 @@ export async function generateStaticParams() {
 }
 
 // Se vuelve a armar a lo más cada 2 horas, y apenas cambia un precio: el
-// refresco (cada 2 horas) invalida todo el sitio cuando algo visible cambió.
+// refresco (cada hora) invalida todo el sitio cuando algo visible cambió.
 // Antes era cada 5 minutos y después cada hora; con los robots recorriendo
 // las fichas era CPU de Vercel gastada en armar lo mismo (155% de la CPU
 // gratis el 05-11-2026). Los productos nuevos, agregados después del build,

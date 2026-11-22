@@ -36,13 +36,14 @@ import {
  * crons diarios, y el programador de GitHub resultó impuntual (corría cada 3
  * a 6 horas).
  *
- * Pero revisa de verdad cada REFRESH_EVERY_MS (2 horas): el 26-10-2026 el
- * plan gratuito de Vercel llegó al 100% de su CPU del mes (4 horas), y el
- * refresco, con unas 60 corridas al día y la caché de todo el sitio borrada
- * en cada una, era lo que más gastaba. Los llamados de entremedio se retiran
- * en el acto. Si una corrida falla, la siguiente llamada (30 minutos
- * después) revisa igual: solo cuentan las completas. Las publicaciones
- * piden precios de menos de 6 horas, así que les sobra.
+ * Pero revisa de verdad cada REFRESH_EVERY_MS (1 hora). Fue cada 2 horas
+ * desde el 27-10-2026: el plan gratuito de Vercel había llegado al 100% de su
+ * CPU del mes (4 horas), y el refresco, con unas 60 corridas al día y la
+ * caché de todo el sitio borrada en cada una, era lo que más gastaba. En
+ * Railway esa CPU cuesta centavos, y desde el 22-11-2026 (para el Black
+ * Friday, cuando los precios se mueven más) es cada hora. Los llamados de
+ * entremedio se retiran en el acto. Si una corrida falla, la siguiente
+ * llamada (30 minutos después) revisa igual: solo cuentan las completas.
  *
  * El precio publicado es el del ganador de la caja de compra — lo que ve el
  * comprador en la ficha (ver lib/pricing). Cuando algo cambia, se invalida
@@ -68,8 +69,8 @@ import {
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-/** Cada cuánto se revisa de verdad (un poco menos de 2 horas: pg_cron llama a la hora y a la media). */
-const REFRESH_EVERY_MS = 115 * 60_000;
+/** Cada cuánto se revisa de verdad (un poco menos de 1 hora: pg_cron llama a los :03 y a los :33). */
+const REFRESH_EVERY_MS = 55 * 60_000;
 
 /** Desde aquí no se piden más datos a ML: lo que falta queda para la próxima. */
 const TIME_BUDGET_MS = 40_000;
@@ -282,12 +283,12 @@ export async function GET(req: NextRequest) {
     return finish(true, { omitida: 'otra revisión de precios estaba en curso' }, 200);
   }
 
-  // Cada 2 horas, no cada media hora (ver arriba). ?forzar=1 revisa igual, para lanzarlo a mano.
+  // Cada hora, no cada media hora (ver arriba). ?forzar=1 revisa igual, para lanzarlo a mano.
   if (req.nextUrl.searchParams.get('forzar') !== '1') {
     const last = await lastFullRunWithin(admin, 'refresh-prices', run.id, REFRESH_EVERY_MS);
     if (last) {
       const minutes = Math.round((Date.now() - new Date(last).getTime()) / 60_000);
-      return finish(true, { omitida: `la última revisión completa fue hace ${minutes} min; se revisa cada 2 horas` }, 200);
+      return finish(true, { omitida: `la última revisión completa fue hace ${minutes} min; se revisa cada hora` }, 200);
     }
   }
 

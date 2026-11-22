@@ -21,10 +21,10 @@ export const revalidate = 0;
 
 /**
  * Antigüedad máxima aceptable de la última revisión de precios. Se revisa
- * cada 2 horas (api/cron/refresh-prices, REFRESH_EVERY_MS), y si una
- * corrida falla se reintenta a la media hora: 180 deja pasar una corrida
- * fallida sin alarma, pero no varias seguidas. Se puede cambiar con
- * HEALTH_MAX_PRICE_AGE_MIN.
+ * cada hora (api/cron/refresh-prices, REFRESH_EVERY_MS; cada 2 horas hasta
+ * el 22-11-2026), y si una corrida falla se reintenta a la media hora: 180
+ * deja pasar un par de corridas fallidas sin alarma, pero no una tarde
+ * entera. Se puede cambiar con HEALTH_MAX_PRICE_AGE_MIN.
  */
 const DEFAULT_MAX_PRICE_AGE_MIN = 180;
 
@@ -33,7 +33,7 @@ const DEFAULT_MAX_PRICE_AGE_MIN = 180;
  * estar al día y aun así haber productos a la venta con el precio de hace
  * horas: cuando el catálogo no cabe en una corrida, o si un producto falla
  * siempre en ML. Con la revisión rotando, lo normal es menos de 2 horas
- * (ver lib/refresh-queue); con la revisión cada 2 horas, hasta unas 3. Se
+ * (ver lib/refresh-queue); con la revisión cada hora, hasta unas 2. Se
  * puede cambiar con HEALTH_MAX_OLDEST_PRICE_AGE_MIN.
  */
 const DEFAULT_MAX_OLDEST_PRICE_AGE_MIN = 300;
