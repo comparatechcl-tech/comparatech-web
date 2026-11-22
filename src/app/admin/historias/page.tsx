@@ -13,7 +13,9 @@ import {
   type StoryItem,
 } from '@/lib/social/stories';
 import { HISTORY_UNREAD_WARNING } from '@/lib/social/interest';
+import { readStoryAutoStatus, type StoryAutoStatus } from '@/lib/social/meta-story';
 import { NextRefresh } from './NextRefresh';
+import { StoryAutoControl } from './StoryAutoControl';
 import { StoryList } from './StoryList';
 import { waitingText } from './rules';
 
@@ -50,6 +52,16 @@ export default async function HistoriasPage() {
       posted = done;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  // Sin poder leerlo, la página sigue sin el control: no es lo principal de esta pantalla.
+  let autoStatus: StoryAutoStatus | null = null;
+  if (admin) {
+    try {
+      autoStatus = await readStoryAutoStatus(admin, now);
+    } catch {
+      autoStatus = null;
     }
   }
 
@@ -105,6 +117,7 @@ export default async function HistoriasPage() {
         </span>
         <ChevronRight size={18} className="shrink-0 text-accent" aria-hidden />
       </Link>
+      {autoStatus && <StoryAutoControl status={autoStatus} />}
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         {/* La página no puede elegir la cuenta: Compartir abre la app con la última que se usó. */}

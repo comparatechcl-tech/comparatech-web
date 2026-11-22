@@ -74,7 +74,8 @@ const FRAMES: Record<OfferFormat, Frame> = {
   // Instagram tapa los primeros 250 px y los últimos 300 de una historia: se ve de y=250 a y=1620. La
   // tarjeta termina en 1420 y deja 200 px vacíos para el sticker de enlace que se pone a mano en la app
   // (ver /admin/historias). Ese lugar no lleva texto ni flechas: la misma imagen se publica a veces sin
-  // sticker y tiene que verse terminada; para eso está la luz.
+  // sticker y tiene que verse terminada; para eso está la luz. Solo la historia que sale sola
+  // (linkInProfile) lleva ahí "Link en el perfil": a esa nadie le pone el sticker.
   story: { height: 1920, top: 270, cardBottom: 1420, glow: true },
   // La publicación del feed se ve entera: el contenido llega de margen a margen. Arriba son 66 y no 72
   // porque la tinta de la cabecera empieza unos px más abajo que su caja.
@@ -114,6 +115,8 @@ const HAT = { w: 50, h: 42, left: -7, top: -21 };
 const SANTA = { w: 180, h: 198, left: 884 };
 const CORNER = { w: 190, h: 162, left: 26 };
 const ART_BOTTOM = 1620;
+// "Link en el perfil": en el mismo lugar del sticker, centrado entre la tarjeta (1420) y lo que tapa Instagram (1620).
+const PROFILE_CTA = { w: 560, h: 104, top: 1468 };
 const XMAS = {
   ribbon: 'linear-gradient(180deg, #8A0E22 0%, #B8182F 24%, #D3293F 50%, #B8182F 76%, #8A0E22 100%)',
   gold: 'linear-gradient(90deg, #B8862B 0%, #F3D27A 50%, #B8862B 100%)',
@@ -202,6 +205,7 @@ export function OfferTemplate({
   format,
   theme = null,
   at = new Date(),
+  linkInProfile = false,
 }: {
   product: OgProduct;
   photo: string | null;
@@ -210,6 +214,8 @@ export function OfferTemplate({
   theme?: OfferTheme | null;
   /** El momento en que se dibuja la pieza: de ahí sale la cuenta de días del listón. */
   at?: Date;
+  /** Solo en la historia: "Link en el perfil" donde va el sticker de enlace. */
+  linkInProfile?: boolean;
 }) {
   const frame = FRAMES[format];
   // Navidad: la cuenta regresiva sale del día en que se dibuja la pieza (en Chile).
@@ -299,6 +305,28 @@ export function OfferTemplate({
       ) : null}
       {ribbon && frame.glow ? (
         <img src={CHRISTMAS_SANTA_PNG} alt="" width={SANTA.w} height={SANTA.h} style={{ position: 'absolute', left: SANTA.left, top: ART_BOTTOM - SANTA.h }} />
+      ) : null}
+      {linkInProfile && frame.glow ? (
+        <div
+          style={{
+            display: 'flex',
+            position: 'absolute',
+            left: (1080 - PROFILE_CTA.w) / 2,
+            top: PROFILE_CTA.top,
+            width: PROFILE_CTA.w,
+            height: PROFILE_CTA.h,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: PROFILE_CTA.h / 2,
+            backgroundColor: COLORS.cyan,
+            color: COLORS.ink,
+            fontSize: 48,
+            fontWeight: 800,
+            letterSpacing: -0.5,
+          }}
+        >
+          Link en el perfil
+        </div>
       ) : null}
 
       {/* Marca a la izquierda, datos del precio a la derecha */}

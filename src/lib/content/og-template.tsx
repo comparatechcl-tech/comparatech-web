@@ -177,6 +177,7 @@ export function ProductOgTemplate({
   photo,
   theme = null,
   at,
+  linkInProfile = false,
 }: {
   product: OgProduct;
   format: OgFormat;
@@ -185,8 +186,12 @@ export function ProductOgTemplate({
   theme?: OfferTheme | null;
   /** Cuándo se dibuja (la cuenta de días del listón de Navidad); por defecto, ahora. */
   at?: Date;
+  /** Solo la historia que sale sola: "Link en el perfil" en el lugar del sticker. */
+  linkInProfile?: boolean;
 }) {
-  if (format === 'story' || format === 'feed') return <OfferTemplate product={product} photo={photo} format={format} theme={theme} at={at} />;
+  if (format === 'story' || format === 'feed') {
+    return <OfferTemplate product={product} photo={photo} format={format} theme={theme} at={at} linkInProfile={linkInProfile} />;
+  }
 
   const L = LAYOUTS[format];
   const { width, height } = OG_SIZES[format];

@@ -93,10 +93,15 @@ async function draw(s: PieceSnapshot): Promise<Drawn> {
   try {
     // La temática (Navidad) se decide al dibujar, no al firmar: una historia programada antes que se publica
     // después de la ventana sale sin ella. Lo dibujado se guarda 10 minutos como mucho (RECENT_TTL_MS).
-    const png = new ImageResponse(<ProductOgTemplate product={product} format={s.format} photo={photo} theme={offerThemeAt(new Date())} />, {
-      ...OG_SIZES[s.format],
-      fonts: await ogFonts(s.format),
-    });
+    // 'perfil' es la historia que sale sola: el mismo dibujo, con "Link en el perfil" donde va el sticker.
+    const format = s.format === 'perfil' ? 'story' : s.format;
+    const png = new ImageResponse(
+      <ProductOgTemplate product={product} format={format} photo={photo} theme={offerThemeAt(new Date())} linkInProfile={s.format === 'perfil'} />,
+      {
+        ...OG_SIZES[format],
+        fonts: await ogFonts(format),
+      }
+    );
     return { jpeg: await pngToJpeg(await png.arrayBuffer(), BACKGROUND) };
   } catch (err) {
     console.error('[social/pieza] no se pudo dibujar la pieza:', err instanceof Error ? err.message : err);

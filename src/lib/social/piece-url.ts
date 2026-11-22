@@ -21,9 +21,14 @@ import { safeEqual } from '@/lib/safe-equal';
  * crons (ni al revés).
  */
 
-export type PieceFormat = 'feed' | 'story';
+/**
+ * 'perfil' es la historia que sale sola (lib/social/meta-story): la misma
+ * pieza de 'story', con "Link en el perfil" en el lugar del sticker, porque
+ * la API de Instagram no pone stickers de enlace.
+ */
+export type PieceFormat = 'feed' | 'story' | 'perfil';
 
-export const PIECE_FORMATS: PieceFormat[] = ['feed', 'story'];
+export const PIECE_FORMATS: PieceFormat[] = ['feed', 'story', 'perfil'];
 
 /** Lo que la pieza muestra y no sale de la base. */
 export interface PieceSnapshot {
@@ -58,7 +63,7 @@ export const MIN_SIGNING_SECRET_LENGTH = 32;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Entero sin ceros a la izquierda: cada valor tiene una sola forma de escribirse. */
 const INT = '(0|[1-9]\\d{0,9})';
-const FILE_RE = new RegExp(`^(feed|story)-${INT}-${INT}-${INT}-([0-3])-${INT}-([0-9a-f]{32})\\.jpg$`);
+const FILE_RE = new RegExp(`^(feed|story|perfil)-${INT}-${INT}-${INT}-([0-3])-${INT}-([0-9a-f]{32})\\.jpg$`);
 
 const FLAG_FREE_SHIPPING = 1;
 const FLAG_FULL = 2;
