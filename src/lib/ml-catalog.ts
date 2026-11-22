@@ -454,9 +454,38 @@ export async function getWinners(productId: string, token: string): Promise<Winn
   }
 }
 
+/** Un vendedor como lo entrega ML, en un lote o de a uno. */
+interface RawUser {
+  id?: number;
+  nickname?: string;
+  seller_reputation?: { level_id?: string; transactions?: { total?: number } };
+}
+
+function toSeller(body: RawUser | null | undefined): MlSeller | null {
+  if (!body?.id) return null;
+  return {
+    id: body.id,
+    nickname: body.nickname ?? null,
+    levelId: String(body.seller_reputation?.level_id ?? ''),
+    salesCount: body.seller_reputation?.transactions?.total ?? 0,
+  };
+}
+
+/** Vendedores por lote, y consultas de a uno en paralelo cuando un lote falla. */
+const SELLERS_PER_BATCH = 20;
+const SINGLE_SELLER_CONCURRENCY = 10;
+
 /**
- * Reputación de varios vendedores de una sola vez. `/users?ids=` acepta
- * lotes, así que un producto con 17 ofertas no cuesta 17 llamadas.
+ * Reputación de varios vendedores. `/users?ids=` acepta lotes, así que un
+ * producto con 17 ofertas no cuesta 17 llamadas.
+ *
+ * Si un lote no responde, sus vendedores se consultan de a uno en
+ * `/users/{id}`. Medido el 22-11-2026: ML responde 403 "ResourceDeprecated"
+ * al azar en 1 de cada 10 lotes (también con un solo id y de a un pedido), y
+ * `/users/{id}` respondió 60 de 60. Sin esto, cada lote caído dejaba sin
+ * revisar a todos los productos de sus 20 vendedores: entre 62 y 388
+ * productos por corrida. Si ML termina de cerrar los lotes, todo sale por la
+ * consulta de a uno (unos 540 vendedores, cerca de 10 s).
  */
 export async function getSellers(
   sellerIds: number[],
@@ -464,32 +493,28 @@ export async function getSellers(
 ): Promise<Map<number, MlSeller>> {
   const unique = [...new Set(sellerIds)].filter(Boolean);
   const batches: number[][] = [];
-  for (let i = 0; i < unique.length; i += 20) batches.push(unique.slice(i, i + 20));
+  for (let i = 0; i < unique.length; i += SELLERS_PER_BATCH) batches.push(unique.slice(i, i + SELLERS_PER_BATCH));
 
   const byId = new Map<number, MlSeller>();
+  const failed: number[] = [];
 
   await mapWithConcurrency(batches, 4, async (batch) => {
     const data = (await getJson(`${API}/users?ids=${batch.join(',')}`, token)) as
-      | {
-          code: number;
-          body?: {
-            id: number;
-            nickname?: string;
-            seller_reputation?: { level_id?: string; transactions?: { total?: number } };
-          };
-        }[]
+      | { code: number; body?: RawUser }[]
       | null;
-
-    for (const entry of data ?? []) {
-      const body = entry?.body;
-      if (entry?.code !== 200 || !body?.id) continue;
-      byId.set(body.id, {
-        id: body.id,
-        nickname: body.nickname ?? null,
-        levelId: String(body.seller_reputation?.level_id ?? ''),
-        salesCount: body.seller_reputation?.transactions?.total ?? 0,
-      });
+    if (!Array.isArray(data)) {
+      failed.push(...batch);
+      return;
     }
+    for (const entry of data) {
+      const seller = entry?.code === 200 ? toSeller(entry.body) : null;
+      if (seller) byId.set(seller.id, seller);
+    }
+  });
+
+  await mapWithConcurrency(failed, SINGLE_SELLER_CONCURRENCY, async (id) => {
+    const seller = toSeller((await getJson(`${API}/users/${id}`, token)) as RawUser | null);
+    if (seller) byId.set(seller.id, seller);
   });
 
   return byId;

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   discoverDomains,
   getHighlightedProducts,
+  getSellers,
   getSubcategories,
   getTrendKeywords,
   mlErrorsSince,
@@ -232,6 +233,81 @@ describe('searchCatalogProducts', () => {
       domain_id: 'MLC-CELLPHONES',
       limit: '5',
     });
+  });
+});
+
+describe('getSellers', () => {
+  /** Lo que responde ML al azar en /users?ids= (medido el 22-11-2026). */
+  const DEPRECATED = {
+    message: 'Resource deprecated - client no longer allowed to consume this resource',
+    error: 'ResourceDeprecated',
+    status: 403,
+  };
+  const user = (id: number, level = '5_green') => ({
+    id,
+    nickname: `VENDEDOR${id}`,
+    seller_reputation: { level_id: level, transactions: { total: id * 10 } },
+  });
+  const idsOf = (url: string) => (new URL(url).searchParams.get('ids') ?? '').split(',').map(Number);
+
+  it('pide los vendedores en lotes de 20, sin repetir', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
+      json(200, idsOf(url).map((id) => ({ code: 200, body: user(id) })))
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const ids = Array.from({ length: 45 }, (_, i) => i + 1);
+    const sellers = await getSellers([...ids, 1, 2, 3], 'tok');
+
+    expect(sellers.size).toBe(45);
+    expect(sellers.get(7)).toEqual({ id: 7, nickname: 'VENDEDOR7', levelId: '5_green', salesCount: 70 });
+    expect(fetchMock.mock.calls.map(([url]) => idsOf(url).length).sort((a, b) => a - b)).toEqual([5, 20, 20]);
+  });
+
+  it('si un lote responde 403, consulta sus vendedores de a uno', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      const { pathname } = new URL(url);
+      const single = /^\/users\/(\d+)$/.exec(pathname);
+      if (single) return json(200, user(Number(single[1]), Number(single[1]) === 3 ? '2_orange' : '5_green'));
+      // El lote que trae al vendedor 1 es el que falla.
+      if (idsOf(url).includes(1)) return json(403, DEPRECATED);
+      return json(200, idsOf(url).map((id) => ({ code: 200, body: user(id) })));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const thisRun = mlErrorsSince();
+    const sellers = await getSellers(Array.from({ length: 25 }, (_, i) => i + 1), 'tok');
+
+    // Los 20 del lote caído salieron de a uno; los otros 5, de su lote.
+    expect(sellers.size).toBe(25);
+    expect(sellers.get(1)?.levelId).toBe('5_green');
+    expect(sellers.get(3)?.levelId).toBe('2_orange');
+    expect(sellers.get(25)?.salesCount).toBe(250);
+    const paths = fetchMock.mock.calls.map(([url]) => new URL(url).pathname);
+    expect(paths.filter((p) => p === '/users')).toHaveLength(2);
+    expect(paths.filter((p) => /^\/users\/\d+$/.test(p))).toHaveLength(20);
+    // El 403 no se reintenta (no es pasajero) y queda contado.
+    expect(thisRun()).toEqual({ '/users': 1 });
+  });
+
+  it('un vendedor que tampoco responde de a uno queda fuera, sin botar a los demás', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, _init?: RequestInit) => {
+        const single = /^\/users\/(\d+)$/.exec(new URL(url).pathname);
+        if (!single) return json(403, DEPRECATED);
+        return single[1] === '2' ? json(404, { message: 'not found' }) : json(200, user(Number(single[1])));
+      })
+    );
+    const sellers = await getSellers([1, 2, 3], 'tok');
+    expect([...sellers.keys()].sort()).toEqual([1, 3]);
+  });
+
+  it('en un lote que responde, una entrada sin datos se salta', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => json(200, [{ code: 200, body: user(1) }, { code: 404, body: { message: 'no existe' } }]))
+    );
+    const sellers = await getSellers([1, 2], 'tok');
+    expect([...sellers.keys()]).toEqual([1]);
   });
 });
 
