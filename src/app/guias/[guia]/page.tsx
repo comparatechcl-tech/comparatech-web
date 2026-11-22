@@ -24,8 +24,8 @@ export function generateStaticParams() {
   return GUIDES.map((g) => ({ guia: g.slug }));
 }
 
-/** Una guía que no está en la lista no tiene página. */
-export const dynamicParams = false;
+// Una guía que no está en la lista no tiene página: lo corta notFound() más
+// abajo. Sin `dynamicParams = false` a propósito (ver app/modelo/[modelo]).
 
 // Como las fichas: los precios se revisan cada 30 minutos y la revisión
 // purga el sitio cuando algo cambia.

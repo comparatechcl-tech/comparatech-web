@@ -46,8 +46,8 @@ export function generateStaticParams() {
   return LISTING_FILTERS.map((f) => ({ categoria: f.category, tipo: f.type, filtro: f.slug }));
 }
 
-/** Un filtro que no está en la lista no tiene página. */
-export const dynamicParams = false;
+// Un filtro que no está en la lista no tiene página: lo corta notFound() más
+// abajo. Sin `dynamicParams = false` a propósito (ver app/modelo/[modelo]).
 
 // Lo mismo que la página del tipo: el catálogo se actualiza solo.
 // Cada hora (antes cada 5 minutos), como los datos que lee: el catálogo se

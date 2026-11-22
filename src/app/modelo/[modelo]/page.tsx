@@ -43,8 +43,10 @@ export function generateStaticParams() {
   return MODELS.map((m) => ({ modelo: m.slug }));
 }
 
-/** Un modelo que no está en la lista no tiene página. */
-export const dynamicParams = false;
+// Un modelo que no está en la lista no tiene página: lo corta notFound() más
+// abajo. Sin `dynamicParams = false` a propósito: fuera de Vercel (next start
+// en Railway), después de cada purga de caché Next respondía 404 en estas
+// páginas hasta el siguiente despliegue (22-11-2026; ver app-pages.test.ts).
 
 // Como las fichas: los precios se revisan cada 30 minutos y la revisión
 // purga el sitio cuando algo cambia.

@@ -38,8 +38,8 @@ export function generateStaticParams() {
   return COMPARISONS.map((c) => ({ par: comparisonSlug(c) }));
 }
 
-/** Una comparación que no está en la lista no tiene página. */
-export const dynamicParams = false;
+// Una comparación que no está en la lista no tiene página: lo corta notFound()
+// más abajo. Sin `dynamicParams = false` a propósito (ver app/modelo/[modelo]).
 
 // Como las páginas de modelo: los precios se revisan cada 30 minutos.
 // Cada hora (antes cada 5 minutos), como los datos que lee: el catálogo se
