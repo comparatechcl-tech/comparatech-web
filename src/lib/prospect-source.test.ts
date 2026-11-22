@@ -71,6 +71,7 @@ vi.mock('@/lib/digest-data', () => ({
 
 import { NextRequest } from 'next/server';
 import { ROOT_CATEGORIES, type MlFailure } from '@/lib/ml-catalog';
+import { EXTRA_SEARCHES } from '@/lib/prospect-finders';
 import {
   MAX_FAILED_RATIO,
   assessSource,
@@ -482,18 +483,18 @@ describe('GET /api/cron/prospect', () => {
       const res = await prospectRoute(request());
       expect(res.status).toBe(200);
       const body = await res.json();
-      // 7 subcategorías × 4 búsquedas × 3 fichas, todas revisadas (el tope de esta fuente es 600).
+      // (7 subcategorías × 4 búsquedas + 12 fijas) × 3 fichas, todas revisadas (el tope de esta fuente es 600).
       expect(body).toMatchObject({
         ok: true,
         fuente: 'busquedas',
-        found: 84,
-        inspected: 84,
+        found: 120,
+        inspected: 120,
         inserted: 40,
         would_insert: 40,
-        over_daily_cap: 44,
+        over_daily_cap: 80,
         max_new_candidates: 40,
-        busquedas_elegidas: 28,
-        busquedas_en_catalogo: 28,
+        busquedas_elegidas: 40,
+        busquedas_en_catalogo: 40,
       });
       expect(body.fuente_ml.problema).toBeNull();
       expect(body.highlighted).toBeUndefined();
@@ -535,7 +536,11 @@ describe('GET /api/cron/prospect', () => {
       const line = 'Mercado Libre bloqueó la lista de lo más buscado: hoy no se pudo buscar productos nuevos.';
       expect(finish.mock.calls[0][2]).toBe(`${line} (HTTP 403 ${BLOCK_CODE} en 7 de 7 consultas)`);
       expect(sendEmail.mock.calls[0][0].html).toContain(line);
-      expect(mocks.upserts).toEqual([]);
+      // Las búsquedas fijas no dependen de esa lista: lo que encontraron se guarda igual.
+      const saved = mocks.upserts.filter((u) => u.table === 'product_candidates').flatMap((u) => u.rows);
+      const fromExtra = EXTRA_SEARCHES.map((s) => `P-${s.replace(/\s+/g, '-')}-`);
+      expect(saved.length).toBeGreaterThan(0);
+      expect(saved.every((row) => fromExtra.some((prefix) => String(row.ml_product_id).startsWith(prefix)))).toBe(true);
     });
   });
 });

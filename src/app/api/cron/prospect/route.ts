@@ -35,7 +35,7 @@ import {
   type ProspectSourceName,
   type SourceProblem,
 } from '@/lib/prospect-source';
-import { findByHighlights, findBySearches } from '@/lib/prospect-finders';
+import { EXTRA_SEARCHES, findByHighlights, findBySearches } from '@/lib/prospect-finders';
 
 /**
  * Prospección diaria del catálogo.
@@ -550,7 +550,7 @@ export async function GET(req: NextRequest) {
     //      (lib/prospect-finders).
     const findings =
       source === 'busquedas'
-        ? await findBySearches(token, () => Date.now() - startedAt > SEARCH_DEADLINE_MS)
+        ? await findBySearches(token, () => Date.now() - startedAt > SEARCH_DEADLINE_MS, EXTRA_SEARCHES)
         : await findByHighlights(token);
     const found = findings.ids;
 

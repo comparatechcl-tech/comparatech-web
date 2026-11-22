@@ -56,6 +56,30 @@ const SEARCH_CONCURRENCY = 16;
 /** Búsquedas que se muestran en el resumen, para ver de dónde salió lo que entró. */
 const REPORT_SAMPLE = 20;
 
+/**
+ * Búsquedas fijas de los productos con enchufe que se sumaron el 22-11-2026.
+ * El cuidado personal cuelga de Belleza, una rama que no se recorre a
+ * propósito (casi todo es maquillaje y perfumes), y lo más buscado de cocina
+ * no siempre nombra estos tipos.
+ */
+export const EXTRA_SEARCHES = [
+  'cafetera espresso',
+  'cafetera electrica',
+  'cafetera capsulas',
+  'tostador',
+  'licuadora',
+  'batidora de mano',
+  'procesador de alimentos',
+  'arrocera electrica',
+  'plancha a vapor',
+  'secador de pelo',
+  'plancha de pelo',
+  'cepillo de dientes electrico',
+];
+
+/** Después de las categorías de lo más buscado: desempata a favor de ellas. */
+const EXTRA_ORDER = 10_000;
+
 export interface SourceFindings {
   /** Productos encontrados, sin repetir, el más interesante primero. */
   ids: string[];
@@ -156,6 +180,19 @@ export function pickKeywords(
   return picked.slice(0, max);
 }
 
+/**
+ * Suma las búsquedas fijas que no estén ya elegidas. Van primero para que el
+ * tope de tiempo no las corte, y con el puesto de una búsqueda frecuente, pero
+ * al ordenar las fichas quedan después de las de lo más buscado.
+ */
+export function withExtraSearches(keywords: Keyword[], extra: string[]): Keyword[] {
+  const seen = new Set(keywords.map((k) => k.keyword.toLowerCase()));
+  const added = extra
+    .filter((keyword) => !seen.has(keyword.toLowerCase()))
+    .map((keyword, i) => ({ keyword, categoryId: 'fija', rank: 0, categoryOrder: EXTRA_ORDER + i }));
+  return [...added, ...keywords];
+}
+
 /** El primer tipo de producto de la lista que el sitio publica (lib/categories), o null. */
 export function pickSiteDomain(domains: string[]): string | null {
   return domains.find((domain) => categoryFromDomain(domain) !== null) ?? null;
@@ -199,7 +236,11 @@ export function rankSearchResults(found: { keyword: Keyword; ids: string[] }[]):
  * analiza igual): la búsqueda en el catálogo puede tardar 2 s y la corrida
  * entera tiene que caber en el minuto de la función.
  */
-export async function findBySearches(token: string, outOfTime: () => boolean): Promise<SourceFindings> {
+export async function findBySearches(
+  token: string,
+  outOfTime: () => boolean,
+  extraSearches: string[] = []
+): Promise<SourceFindings> {
   const level1Results = await mapWithConcurrency(ROOT_CATEGORIES, CONCURRENCY, (root) =>
     getSubcategories(root, token)
   );
@@ -209,11 +250,14 @@ export async function findBySearches(token: string, outOfTime: () => boolean): P
     categoryId,
     result: await getTrendKeywords(categoryId, token),
   }));
-  const keywords = pickKeywords(
-    trendResults.map(({ categoryId, result }) => ({
-      categoryId,
-      keywords: result.status === 'ok' ? result.items : [],
-    }))
+  const keywords = withExtraSearches(
+    pickKeywords(
+      trendResults.map(({ categoryId, result }) => ({
+        categoryId,
+        keywords: result.status === 'ok' ? result.items : [],
+      }))
+    ),
+    extraSearches
   );
 
   const typeFailures: (MlFailure | null)[] = [];

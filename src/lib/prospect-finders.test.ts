@@ -6,6 +6,7 @@ import {
   pickKeywords,
   pickSiteDomain,
   rankSearchResults,
+  withExtraSearches,
   type Keyword,
 } from '@/lib/prospect-finders';
 
@@ -23,6 +24,21 @@ afterEach(() => {
 });
 
 const keyword = (over: Partial<Keyword>): Keyword => ({ keyword: 'x', categoryId: 'MLC1', rank: 0, categoryOrder: 0, ...over });
+
+describe('withExtraSearches', () => {
+  it('suma las búsquedas fijas al comienzo, sin repetir las ya elegidas', () => {
+    const out = withExtraSearches([keyword({ keyword: 'Licuadora' }), keyword({ keyword: 'iphone 17', categoryOrder: 1 })], [
+      'licuadora',
+      'secador de pelo',
+    ]);
+    expect(out.map((k) => k.keyword)).toEqual(['secador de pelo', 'Licuadora', 'iphone 17']);
+  });
+
+  it('al ordenar, sus fichas quedan después de las de lo más buscado del mismo puesto', () => {
+    const [extra, trend] = withExtraSearches([keyword({ keyword: 'iphone 17', categoryOrder: 6 })], ['secador de pelo']);
+    expect(rankSearchResults([{ keyword: extra, ids: ['SECADOR'] }, { keyword: trend, ids: ['IPHONE'] }])).toEqual(['IPHONE', 'SECADOR']);
+  });
+});
 
 describe('pickKeywords', () => {
   it('toma primero la más buscada de cada categoría, después las segundas, sin repetir', () => {

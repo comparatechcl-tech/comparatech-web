@@ -164,6 +164,20 @@ const DOMAIN_TO_CATEGORY: Record<string, string> = {
   'MLC-FANS': 'electrodomesticos',
   'MLC-ELECTRIC_HOME_HEATERS': 'electrodomesticos',
   'MLC-HAIR_CLIPPERS_ELECTRIC_SHAVERS_AND_HAIR_TRIMMERS': 'electrodomesticos',
+  // Productos con enchufe (decisión del dueño, 22-11-2026): electro chico de
+  // cocina y cuidado personal eléctrico. Tienen marca, modelo y garantía, y
+  // Mercado Libre entrega su ganador. Maquillaje, suplementos, ropa y
+  // zapatillas quedan fuera: sin ganador, o con reglas sanitarias o tallas.
+  'MLC-ELECTRIC_COFFEE_MAKERS': 'electrodomesticos',
+  'MLC-TOASTERS': 'electrodomesticos',
+  'MLC-BLENDERS': 'electrodomesticos',
+  'MLC-HAND_BLENDERS': 'electrodomesticos',
+  'MLC-FOOD_PROCESSORS': 'electrodomesticos',
+  'MLC-ELECTRIC_POTS_SKILLETS_AND_RICE_COOKERS': 'electrodomesticos',
+  'MLC-IRONS': 'electrodomesticos',
+  'MLC-HAIR_DRYERS': 'electrodomesticos',
+  'MLC-HAIR_STRAIGHTENERS': 'electrodomesticos',
+  'MLC-ELECTRIC_TOOTHBRUSHES': 'electrodomesticos',
 };
 
 /** Categoría del sitio para un dominio de ML, o null si no está mapeado. */

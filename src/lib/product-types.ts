@@ -116,6 +116,16 @@ const DOMAIN_LABELS: Record<string, string> = {
   'MLC-WATER_DISPENSERS': 'Dispensadores de agua',
   'MLC-WATER_HEATERS': 'Calefonts y termos',
   'MLC-HAIR_CLIPPERS_ELECTRIC_SHAVERS_AND_HAIR_TRIMMERS': 'Afeitadoras y cortapelos',
+  'MLC-ELECTRIC_COFFEE_MAKERS': 'Cafeteras',
+  'MLC-TOASTERS': 'Tostadores',
+  'MLC-BLENDERS': 'Licuadoras',
+  'MLC-HAND_BLENDERS': 'Batidoras de mano',
+  'MLC-FOOD_PROCESSORS': 'Procesadores de alimentos',
+  'MLC-ELECTRIC_POTS_SKILLETS_AND_RICE_COOKERS': 'Arroceras y ollas eléctricas',
+  'MLC-IRONS': 'Planchas de ropa',
+  'MLC-HAIR_DRYERS': 'Secadores de pelo',
+  'MLC-HAIR_STRAIGHTENERS': 'Planchas de pelo',
+  'MLC-ELECTRIC_TOOTHBRUSHES': 'Cepillos de dientes eléctricos',
 };
 
 export const OTHER_TYPE_LABEL = 'Otros';
