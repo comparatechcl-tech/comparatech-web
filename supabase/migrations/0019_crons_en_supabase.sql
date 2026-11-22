@@ -24,6 +24,8 @@
 --      backup            15:00 los lunes
 --      meta-diario       13:30, 15:30 y 18:30 (pasadas 1, 2 y 3)
 --      carrusel          14:45 todos los días (solo publica los jueves)
+--    El refresco corre a los :03 y :33 (no a la hora en punto), por lo mismo
+--    que prospect.
 --    prospect va a las 12:07 y no en punto: Mercado Libre responde 429 a los
 --    pedidos de token unos segundos después de cada hora en punto, y pg_cron
 --    es puntual (Vercel Hobby lo corría en algún minuto de esa hora).
@@ -55,7 +57,7 @@ where jobname in (
 
 select cron.schedule(
   'refrescar-precios',
-  '*/30 * * * *',
+  '3,33 * * * *',
   $$
   select net.http_get(
     url := 'https://www.comparatech.cl/api/cron/refresh-prices',
