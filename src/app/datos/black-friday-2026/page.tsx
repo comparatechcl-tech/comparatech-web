@@ -10,6 +10,7 @@ import {
   EVENT_WINDOWS,
   MIN_CATEGORY_MEASURED,
   MIN_REF_DAYS,
+  NO_DATA_NOTICE,
   THERMOMETER_PATH,
   asOfLabel,
   averageChange,
@@ -45,7 +46,10 @@ export const revalidate = 3600;
 
 const EVENT_LABEL = rangeLabel(EVENT_WINDOWS.eventStart, EVENT_WINDOWS.eventEnd, true);
 const REF_LABEL = rangeLabel(EVENT_WINDOWS.refStart, EVENT_WINDOWS.refEnd);
-const PRE_LABEL = rangeLabel(EVENT_WINDOWS.refEnd, EVENT_WINDOWS.eventStart);
+/** Los días fuera del precio habitual. */
+const OUT_OF_REF_LABEL = rangeLabel(EVENT_WINDOWS.refEnd, EVENT_WINDOWS.eventStart);
+/** Los días en que se mide "subió antes": desde que volvió la revisión de precios. */
+const PRE_LABEL = rangeLabel(EVENT_WINDOWS.preStart, EVENT_WINDOWS.eventStart);
 
 /**
  * El termómetro del Black Friday 2026 (SEO etapa 3): qué bajó de verdad
@@ -101,6 +105,10 @@ export default async function TermometroBlackFridayPage() {
         </p>
       )}
 
+      <p className="mt-3 max-w-3xl rounded-lg border border-border bg-surface px-3 py-2 text-sm leading-relaxed text-fg">
+        {NO_DATA_NOTICE}
+      </p>
+
       {event && <EventResults event={event} baseline={baseline} phase={phase} />}
 
       {phase === 'antes' && summary?.preLive && <PreLive preLive={summary.preLive} baseline={baseline} />}
@@ -118,7 +126,7 @@ export default async function TermometroBlackFridayPage() {
           </li>
           <li>
             <strong className="font-medium text-fg">Precio habitual:</strong> el que más tiempo rigió {REF_LABEL}. La semana{' '}
-            {PRE_LABEL} queda fuera, porque ahí un precio puede subir para que el del evento parezca una baja.
+            {OUT_OF_REF_LABEL} queda fuera, porque ahí un precio puede subir para que el del evento parezca una baja.
           </li>
           <li>
             <strong className="font-medium text-fg">Precio del Black Friday:</strong> el más bajo que se mantuvo al menos 6
@@ -145,7 +153,7 @@ export default async function TermometroBlackFridayPage() {
           <li>
             Para comparar, medimos lo mismo en un fin de semana sin evento:{' '}
             {rangeLabel(BASELINE_WINDOWS.eventStart, BASELINE_WINDOWS.eventEnd, true)}, con su propio precio habitual (
-            {rangeLabel(BASELINE_WINDOWS.refStart, BASELINE_WINDOWS.refEnd)}).
+            {rangeLabel(BASELINE_WINDOWS.refStart, BASELINE_WINDOWS.refEnd)}) y la misma cantidad de días previos.
           </li>
         </ol>
       </section>
@@ -440,7 +448,7 @@ function PreLive({ preLive, baseline }: { preLive: PreLiveSummary; baseline: Win
         La semana antes
       </h2>
       <p className="mb-3 mt-1 max-w-3xl text-sm leading-relaxed text-muted">
-        Desde el sábado 21 de noviembre, {shareLabel(preLive.roseBefore, preLive.measured)} de los productos (
+        Desde el domingo 22 de noviembre, {shareLabel(preLive.roseBefore, preLive.measured)} de los productos (
         {preLive.roseBefore.toLocaleString('es-CL')} de {preLive.measured.toLocaleString('es-CL')}) ya estuvo al menos un día{' '}
         {CHANGE_PCT}% o más sobre su precio habitual.
         {baseline && (

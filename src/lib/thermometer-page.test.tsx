@@ -166,7 +166,8 @@ describe('antes del evento', () => {
     });
     const t = text(html);
     expect(t).toContain('La semana antes');
-    expect(t).toContain('Desde el sábado 21 de noviembre, 10% de los productos (90 de 900) ya estuvo al menos un día 5% o más sobre su precio habitual');
+    expect(t).toContain('Entre el 19 y el 22 de noviembre no pudimos revisar precios. Esos días no cuentan en esta medición.');
+    expect(t).toContain('Desde el domingo 22 de noviembre, 10% de los productos (90 de 900) ya estuvo al menos un día 5% o más sobre su precio habitual');
     expect(t).toContain('En la semana antes del fin de semana sin evento fue 5%');
     expect(t).toContain('precio habitual $400.000 → estuvo en $460.000 (15% más)');
     expect(html).toContain('href="/producto/tv-lg-55"');
@@ -199,7 +200,7 @@ describe('durante y después', () => {
     expect(t).toContain('el balance sale el martes 1 de diciembre');
     expect(t).toContain('23 de 100 productos · fin de semana sin evento: 12%');
     expect(t).toContain('Subió la semana antes');
-    expect(t).toContain('Del 21 al 26 de noviembre; 7 de ellos "bajaron" en el evento sin quedar bajo su precio habitual');
+    expect(t).toContain('Del 22 al 26 de noviembre; 7 de ellos "bajaron" en el evento sin quedar bajo su precio habitual');
     expect(t).toContain('Las ofertas bajaron en promedio');
     expect(t).toContain('De cada 100 productos, 23 bajaron de verdad, 61 quedaron igual y 16 estuvieron más caros');
     // Por categoría: celulares (30) y audio (54); electrónica no llega a 10.
@@ -212,7 +213,7 @@ describe('durante y después', () => {
     expect(t).not.toContain('$5.000 →');
     expect(html).toContain('href="/producto/audifonos-sony-wh-1000xm6"');
     expect(t).toContain('Subieron antes y en el Black Friday "bajaron"');
-    expect(t).toContain('precio habitual $100.000 · del 21 al 26 de noviembre subió a $125.000 · en el Black Friday $100.000');
+    expect(t).toContain('precio habitual $100.000 · del 22 al 26 de noviembre subió a $125.000 · en el Black Friday $100.000');
     expect(t).not.toMatch(AVOIDED);
   });
 

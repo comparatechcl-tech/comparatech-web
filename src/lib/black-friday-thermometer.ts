@@ -22,8 +22,9 @@
  *    lastPriceSeenRecently en lib/deals).
  *  - Más caro: hasta su precio más bajo del evento quedó 5% o más sobre el
  *    habitual.
- *  - Subió antes: entre el 21 y el 26 estuvo al menos un día (24 horas en
- *    total) 5% o más sobre el habitual. "Subió y después bajó": además, en el
+ *  - Subió antes: entre el 22 (desde que volvió la revisión de precios, ver
+ *    NO_DATA_GAP) y el 26 estuvo al menos un día (24 horas en total) 5% o más
+ *    sobre el habitual. "Subió y después bajó": además, en el
  *    evento quedó 5% o más bajo ese precio alto, pero no bajó de verdad: para
  *    quien lo miró esa semana parecía una baja.
  *  - Descuento anunciado: el que informa el vendedor contra su precio de
@@ -85,26 +86,50 @@ export const MIN_CATEGORY_MEASURED = 10;
  */
 export const HISTORY_CLEAN_FROM = Date.parse('2026-10-08T03:00:00Z');
 
+/**
+ * Las horas en que no se revisó ningún precio: el sitio estuvo caído del 19
+ * de noviembre a las 19:00 al 22 a las 13:37, hora de Chile (medido en
+ * cron_runs y price_history). El último precio anotado no se puede dar por
+ * vigente en ese rato: contaría como "subió antes" lo que ya venía de antes.
+ */
+export const NO_DATA_GAP = {
+  from: Date.parse('2026-11-19T22:00:00Z'),
+  to: Date.parse('2026-11-22T16:37:00Z'),
+};
+
+/** El aviso que acompaña a la medición (mismo texto en el termómetro y en /black-friday). */
+export const NO_DATA_NOTICE = 'Entre el 19 y el 22 de noviembre no pudimos revisar precios. Esos días no cuentan en esta medición.';
+
+/**
+ * Cuánto antes del evento empieza a contar "subió antes". Es lo que quedó con
+ * datos antes del Black Friday, y el fin de semana de comparación usa lo
+ * mismo: con menos días hay menos ocasiones de subir, y no serían comparables.
+ */
+const PRE_WINDOW_MS = BLACK_FRIDAY.start - NO_DATA_GAP.to;
+
 /** Las ventanas de una medición, en milisegundos. El fin de cada una no se incluye. */
 export interface ThermometerWindows {
   /** Referencia: de acá sale el precio habitual. */
   refStart: number;
   refEnd: number;
-  /** La semana previa: de refEnd al inicio del evento. */
+  /** Desde cuándo cuenta "subió antes", hasta el inicio del evento. */
+  preStart: number;
   eventStart: number;
   eventEnd: number;
 }
 
 /**
  * Las ventanas de un evento: la referencia son los 20 días que terminan 6
- * días antes de que empiece (nunca antes de HISTORY_CLEAN_FROM), y la semana
- * previa, esos 6 días. Para el Black Friday 2026: referencia del 1 al 20 de
- * noviembre y semana previa del 21 al 26.
+ * días antes de que empiece (nunca antes de HISTORY_CLEAN_FROM). De esos 6
+ * días, "subió antes" mira los últimos PRE_WINDOW_MS. Para el Black Friday
+ * 2026: referencia del 1 al 20 de noviembre (sin las horas de NO_DATA_GAP) y
+ * "subió antes" desde el 22 a las 13:37 hasta el 26.
  */
 export function windowsFor(eventStart: number, eventEnd: number): ThermometerWindows {
   return {
     refStart: Math.max(eventStart - 26 * DAY_MS, HISTORY_CLEAN_FROM),
     refEnd: eventStart - 6 * DAY_MS,
+    preStart: eventStart - PRE_WINDOW_MS,
     eventStart,
     eventEnd,
   };
@@ -151,7 +176,7 @@ export function thermometerPhase(now: number): ThermometerPhase {
 }
 
 /** Desde cuándo se cuenta en vivo lo que subió en la semana previa: con un día ya puede haber algo. */
-export const PRE_LIVE_FROM = EVENT_WINDOWS.refEnd + PRE_HOLD_MS;
+export const PRE_LIVE_FROM = EVENT_WINDOWS.preStart + PRE_HOLD_MS;
 
 // ---------------------------------------------------------------------------
 // La línea de tiempo de cada producto.
@@ -230,7 +255,18 @@ export function timelineOf(product: ThermometerProduct, rows: ThermometerRow[], 
       to: Math.min(i + 1 < points.length ? points[i + 1].t : end, end),
     }))
     .filter((s) => s.to > s.from);
-  return stretches.length > 0 ? stretches : null;
+  const known = withoutGap(stretches);
+  return known.length > 0 ? known : null;
+}
+
+/** Saca de los tramos las horas sin revisión de precios (NO_DATA_GAP). */
+function withoutGap(stretches: Stretch[]): Stretch[] {
+  return stretches.flatMap((s) => {
+    const parts: Stretch[] = [];
+    if (s.from < NO_DATA_GAP.from) parts.push({ ...s, to: Math.min(s.to, NO_DATA_GAP.from) });
+    if (s.to > NO_DATA_GAP.to) parts.push({ ...s, from: Math.max(s.from, NO_DATA_GAP.to) });
+    return parts;
+  });
 }
 
 function clip(stretches: Stretch[], from: number, to: number): Stretch[] {
@@ -328,7 +364,7 @@ export function measureProduct(
   const isDrop = realPct >= CHANGE_PCT && shareAtOrBelow(ref, eventPrice) < SEESAW_SHARE;
   const verdict: Verdict = isDrop ? 'bajo' : realPct <= -CHANGE_PCT ? 'caro' : 'igual';
 
-  const prePrice = highestHeld(clip(stretches, windows.refEnd, windows.eventStart), PRE_HOLD_MS);
+  const prePrice = highestHeld(clip(stretches, windows.preStart, windows.eventStart), PRE_HOLD_MS);
   const roseBefore = prePrice !== null && -pctBelow(habitual, prePrice) >= CHANGE_PCT;
   const roseThenDropped = roseBefore && !isDrop && prePrice !== null && pctBelow(prePrice, eventPrice) >= CHANGE_PCT;
 
@@ -367,7 +403,7 @@ export function measurePre(
 ): PreOutcome | null {
   const ref = clip(stretches, windows.refStart, windows.refEnd);
   if (duration(ref) < MIN_REF_DAYS * DAY_MS) return null;
-  const prePrice = highestHeld(clip(stretches, windows.refEnd, Math.min(asOf, windows.eventStart)), PRE_HOLD_MS);
+  const prePrice = highestHeld(clip(stretches, windows.preStart, Math.min(asOf, windows.eventStart)), PRE_HOLD_MS);
   if (prePrice === null) return null;
   const habitual = habitualPrice(ref);
   return {
@@ -744,7 +780,7 @@ export function watchNote(product: ThermometerProduct, rows: ThermometerRow[], n
   const today = product.price;
   const below = pctBelow(habitual, today);
   const isDrop = below >= CHANGE_PCT && shareAtOrBelow(ref, today) < SEESAW_SHARE;
-  const prePrice = highestHeld(clip(stretches, EVENT_WINDOWS.refEnd, Math.min(asOf, EVENT_WINDOWS.eventStart)), PRE_HOLD_MS);
+  const prePrice = highestHeld(clip(stretches, EVENT_WINDOWS.preStart, Math.min(asOf, EVENT_WINDOWS.eventStart)), PRE_HOLD_MS);
   const rose = prePrice !== null && -pctBelow(habitual, prePrice) >= CHANGE_PCT;
   const inEvent = now >= EVENT_WINDOWS.eventStart;
 

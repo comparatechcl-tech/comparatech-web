@@ -278,7 +278,10 @@ describe('measureProduct', () => {
   it('con menos de 7 días de referencia no se mide', () => {
     const late = product({ createdAt: cl('2026-11-15 10:00') });
     expect(measure(late, [])).toBeNull();
-    const enough = product({ createdAt: cl('2026-11-13 23:00') });
+    // Las horas sin revisión de precios no suman a los 7 días.
+    const beforeGap = product({ createdAt: cl('2026-11-13 23:00') });
+    expect(measure(beforeGap, [])).toBeNull();
+    const enough = product({ createdAt: cl('2026-11-12 18:00') });
     expect(measure(enough, [])).not.toBeNull();
   });
 
@@ -303,12 +306,41 @@ describe('measurePre', () => {
   it('cuenta en vivo lo que lleva un día o más sobre el habitual', () => {
     const p = product();
     const r = rows(p, [['2026-10-12 10:00', 100_000], ['2026-11-21 08:00', 120_000]]);
-    const at = cl('2026-11-23 10:00');
+    const at = cl('2026-11-24 10:00');
     const st = timelineOf(p, r, at)!;
     expect(measurePre(p, st, EVENT_WINDOWS, at)).toMatchObject({ habitual: 100_000, prePrice: 120_000, roseBefore: true });
-    // El sábado 21 a las 20:00 todavía no lleva un día en la semana previa.
-    const early = cl('2026-11-21 20:00');
+    // El lunes 23 a las 10:00 todavía no lleva un día desde que volvió la revisión de precios.
+    const early = cl('2026-11-23 10:00');
     expect(measurePre(p, timelineOf(p, r, early)!, EVENT_WINDOWS, early)).toBeNull();
+  });
+});
+
+describe('las horas sin revisión de precios (19 al 22 de noviembre)', () => {
+  it('"subió antes" parte cuando volvió la revisión, y la comparación mide los mismos días', () => {
+    expect(iso(EVENT_WINDOWS.preStart)).toBe('2026-11-22T16:37:00.000Z');
+    expect(iso(BASELINE_WINDOWS.preStart)).toBe('2026-11-08T16:37:00.000Z');
+    expect(EVENT_WINDOWS.eventStart - EVENT_WINDOWS.preStart).toBe(BASELINE_WINDOWS.eventStart - BASELINE_WINDOWS.preStart);
+    expect(rangeLabel(EVENT_WINDOWS.preStart, EVENT_WINDOWS.eventStart)).toBe('del 22 al 26 de noviembre');
+  });
+
+  it('esas horas salen de la línea de tiempo', () => {
+    const p = product();
+    const st = timelineOf(p, rows(p, [['2026-11-10 10:00', 100_000]]), cl('2026-11-24 10:00'));
+    expect(st).toEqual([
+      { price: 100_000, list: null, from: cl('2026-11-10 10:00'), to: Date.parse('2026-11-19T22:00:00Z') },
+      { price: 100_000, list: null, from: Date.parse('2026-11-22T16:37:00Z'), to: cl('2026-11-24 10:00') },
+    ]);
+  });
+
+  it('el último precio anotado antes de la caída no cuenta como "subió antes"', () => {
+    const p = product({ price: 100_000 });
+    const r = rows(p, [
+      ['2026-10-12 10:00', 100_000],
+      ['2026-11-19 12:00', 130_000],
+      ['2026-11-22 13:36', 100_000],
+    ]);
+    const at = cl('2026-11-24 10:00');
+    expect(measurePre(p, timelineOf(p, r, at)!, EVENT_WINDOWS, at)).toMatchObject({ prePrice: 100_000, roseBefore: false });
   });
 });
 

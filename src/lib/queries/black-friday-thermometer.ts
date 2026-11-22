@@ -176,7 +176,7 @@ async function computeSummary(): Promise<ThermometerSummary> {
 // La llave lleva el número de versión: el caché de datos de Vercel sobrevive
 // a los despliegues. Un día de vigencia basta: lo que hace cambiar el dato es
 // el slot (cada día, cada hora o nunca), que es parte de la llave.
-const readSummary = unstable_cache(async (_slot: string) => computeSummary(), ['bf-termometro-v1'], { revalidate: 86_400 });
+const readSummary = unstable_cache(async (_slot: string) => computeSummary(), ['bf-termometro-v2'], { revalidate: 86_400 });
 
 /**
  * "Lo que vamos a vigilar" en /black-friday (lib/black-friday-thermometer,
