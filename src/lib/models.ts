@@ -179,6 +179,21 @@ export const MODELS: ModelDef[] = [
     exclude: [/^(ssd|soporte|estuche|funda|skin|base)\b/, /\bexpansion\b/],
     label: 'nombre',
   },
+  // Aprobada por el dueño el 22-11-2026: es el producto con más clics.
+  {
+    slug: 'nintendo-switch-2',
+    name: 'Nintendo Switch 2',
+    otherNames: ['Switch 2'],
+    brand: 'Nintendo',
+    domains: ['MLC-GAME_CONSOLES'],
+    include: [/\bswitch 2\b/],
+    // En el mismo tipo de producto hay estuches, soportes y otros accesorios.
+    exclude: [
+      /^(ssd|soporte|estuche|funda|skin|base|dock|cargador|protector|mica|lamina|grip)\b/,
+      /\b(case|estuche|funda|joy con|joycon|volante|wheel)\b/,
+    ],
+    label: 'nombre',
+  },
   {
     slug: 'gta-6',
     name: 'GTA 6',

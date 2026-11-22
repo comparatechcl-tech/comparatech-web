@@ -64,7 +64,14 @@ const CATALOG: [name: string, domain: string, model: string | null][] = [
   ['Reproductor remoto PlayStation Portal para consola PS5 Negro', 'MLC-GAME_CONSOLES', null],
   ['Marvels Wolverine Ps5', 'MLC-VIDEO_GAMES', null],
   ['Control Dualsense PS5 Playstation 5 Blanco', 'MLC-GAMEPADS_AND_JOYSTICKS', null],
-  ['Consola Nintendo Switch 2', 'MLC-GAME_CONSOLES', null],
+  ['Consola Nintendo Switch 2', 'MLC-GAME_CONSOLES', 'nintendo-switch-2'],
+  ['Consola Nintendo Switch 2 + Nintendo Switch Sports Resort Bundle', 'MLC-GAME_CONSOLES', 'nintendo-switch-2'],
+  // La generación anterior, los accesorios y los juegos no son una Switch 2.
+  ['Consola Nintendo Switch Oled Color Blanco', 'MLC-GAME_CONSOLES', null],
+  ['Powera Slim Case For Nintendo Switch 2', 'MLC-GAME_CONSOLES', null],
+  ['Estuche Rigido Consola Nintendo Switch 2', 'MLC-GAME_CONSOLES', null],
+  ['Mando Inalámbrico Nintendo Switch 2 Pro Controller Negro', 'MLC-GAMEPADS_AND_JOYSTICKS', null],
+  ['Videojuego Mario Kart World Nintendo Switch 2 Físico', 'MLC-VIDEO_GAMES', null],
   // Xbox Series X|S: las fichas con vendedor verde en Mercado Libre el 07-11-2026.
   ['Consola Xbox Microsoft, Series S, de 512gb, digital, color blanco.', 'MLC-GAME_CONSOLES', 'xbox-series'],
   ['Consola Microsoft Xbox Series S De 1tb, Color Blanco', 'MLC-GAME_CONSOLES', 'xbox-series'],
