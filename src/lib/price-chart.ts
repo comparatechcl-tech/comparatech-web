@@ -13,6 +13,7 @@
  * Sin I/O: se prueba con datos fijos.
  */
 import type { PricePoint } from '@/lib/deals';
+import { formatCLP, formatFullDate, formatFullDateTime } from '@/lib/format';
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -115,6 +116,47 @@ export function summarizeHistory(history: PricePoint[], now: number = Date.now()
     changes48h,
     recent,
   };
+}
+
+/** Con una revisión más vieja que esto no se dice "Hoy": el sitio pudo estar sin revisar precios. */
+export const STATEMENT_MAX_AGE_MS = 24 * HOUR_MS;
+
+/**
+ * El precio de hoy dicho en una frase que se entiende sola, con fechas
+ * completas: es lo que un buscador o una IA puede citar sin adivinar el año
+ * ni la hora. Texto aprobado por el dueño el 22-11-2026:
+ *
+ *   "Hoy $544.221 en Mercado Libre. Precio revisado el 22-11-2026 a las 18:42
+ *   (hora de Chile). El más bajo que registramos desde el 05-10-2026 fue
+ *   $496.150, el 04-11-2026."
+ *
+ * Solo hechos del historial. Variantes: si el más bajo es el de hoy, dice
+ * desde cuándo sigue; si el precio nunca cambió o el historial no calza con
+ * el precio de la ficha, quedan solo las dos primeras frases. null si no se
+ * sabe cuándo se revisó, o si fue hace más de un día.
+ */
+export function priceStatement(
+  price: number,
+  checkedAt: string | null | undefined,
+  summary: PriceHistorySummary,
+  now: number = Date.now()
+): string | null {
+  const checked = checkedAt ? Date.parse(checkedAt) : NaN;
+  if (!Number.isFinite(checked) || !(price > 0)) return null;
+  if (checked > now + 5 * 60_000 || now - checked > STATEMENT_MAX_AGE_MS) return null;
+  const when = formatFullDateTime(checked);
+  if (!when) return null;
+
+  const head = `Hoy ${formatCLP(price)} en Mercado Libre. Precio revisado el ${when.date} a las ${when.time} (hora de Chile).`;
+  const last = summary.stretches[summary.stretches.length - 1];
+  // Nunca cambió (lo dice la frase que sigue en la ficha), o el historial todavía no trae el precio de hoy.
+  if (summary.recent.length === 1 || !last || last.price !== price) return head;
+
+  const since = formatFullDate(summary.start);
+  if (last.price === summary.min) {
+    return `${head} Es el más bajo que registramos desde el ${since} y sigue así desde el ${formatFullDate(summary.minAt)}.`;
+  }
+  return `${head} El más bajo que registramos desde el ${since} fue ${formatCLP(summary.min)}, el ${formatFullDate(summary.minAt)}.`;
 }
 
 /**

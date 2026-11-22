@@ -90,6 +90,37 @@ export function formatDayMonth(iso: string): string {
 }
 
 /**
+ * La fecha con año y la hora, en hora de Chile: { date: "22-11-2026", time:
+ * "18:42" }. Para los textos que tienen que entenderse solos, sin saber qué
+ * día se leen (lo que lee un buscador o una IA): "04/11" no dice de qué año.
+ * null si la fecha no es válida.
+ *
+ * Los números salen de formatToParts y se arman a mano, para que el servidor
+ * y el navegador escriban exactamente lo mismo.
+ */
+export function formatFullDateTime(value: string | number | null | undefined): { date: string; time: string } | null {
+  if (value === null || value === undefined || value === '') return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Santiago',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(d);
+  const get = (type: string) => (parts.find((p) => p.type === type)?.value ?? '').padStart(2, '0');
+  return { date: `${get('day')}-${get('month')}-${get('year')}`, time: `${get('hour')}:${get('minute')}` };
+}
+
+/** "22-11-2026", en hora de Chile. Vacío si la fecha no es válida. */
+export function formatFullDate(value: string | number | null | undefined): string {
+  return formatFullDateTime(value)?.date ?? '';
+}
+
+/**
  * "hace 12 minutos", "hace 3 horas", "hace 2 días".
  *
  * Se usa para mostrar cuándo se verificó un precio contra Mercado Libre:

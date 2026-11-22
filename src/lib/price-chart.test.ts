@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chartPaths, heldLabel, summarizeHistory, vsAverage } from './price-chart';
+import { chartPaths, heldLabel, priceStatement, summarizeHistory, vsAverage } from './price-chart';
 
 const NOW = Date.parse('2026-10-17T12:00:00Z');
 const H = 3_600_000;
@@ -92,6 +92,69 @@ describe('summarizeHistory', () => {
     expect(s.start).toBe(NOW - 90 * D);
     expect(s.stretches.map((x) => x.price)).toEqual([20_000, 25_000]);
     expect(s.max).toBe(25_000);
+  });
+});
+
+describe('priceStatement: el precio de hoy en una frase con fechas completas', () => {
+  // 22-11-2026 a las 19:00 en Chile; el precio se revisó a las 18:42.
+  const now = Date.parse('2026-11-22T22:00:00Z');
+  const checked = '2026-11-22T21:42:00Z';
+  const HEAD = 'Hoy $544.221 en Mercado Libre. Precio revisado el 22-11-2026 a las 18:42 (hora de Chile).';
+  const history = [
+    { price: 560_000, observed_at: '2026-10-05T15:00:00Z' },
+    { price: 496_150, observed_at: '2026-11-04T15:00:00Z' },
+    { price: 544_221, observed_at: '2026-11-04T19:00:00Z' },
+  ];
+
+  it('el texto que aprobó el dueño: precio, fecha de la revisión y el más bajo registrado', () => {
+    const s = summarizeHistory(history, now)!;
+    expect(priceStatement(544_221, checked, s, now)).toBe(
+      `${HEAD} El más bajo que registramos desde el 05-10-2026 fue $496.150, el 04-11-2026.`
+    );
+  });
+
+  it('si el más bajo es el de hoy, dice desde cuándo sigue', () => {
+    const s = summarizeHistory(
+      [
+        { price: 560_000, observed_at: '2026-10-05T15:00:00Z' },
+        { price: 544_221, observed_at: '2026-11-20T15:00:00Z' },
+      ],
+      now
+    )!;
+    expect(priceStatement(544_221, checked, s, now)).toBe(
+      `${HEAD} Es el más bajo que registramos desde el 05-10-2026 y sigue así desde el 20-11-2026.`
+    );
+  });
+
+  it('un precio que nunca cambió lleva solo el precio y la fecha (lo demás lo dice la ficha)', () => {
+    const s = summarizeHistory([{ price: 544_221, observed_at: '2026-10-05T15:00:00Z' }], now)!;
+    expect(priceStatement(544_221, checked, s, now)).toBe(HEAD);
+  });
+
+  it('si el historial todavía no trae el precio de la ficha, no se comparan', () => {
+    const s = summarizeHistory(history, now)!;
+    expect(priceStatement(480_000, checked, s, now)).toBe(
+      'Hoy $480.000 en Mercado Libre. Precio revisado el 22-11-2026 a las 18:42 (hora de Chile).'
+    );
+  });
+
+  it('con más de 90 días de historia, el más bajo es el del gráfico y lo dice desde ahí', () => {
+    const later = Date.parse('2027-02-01T15:00:00Z');
+    const s = summarizeHistory(history, later)!;
+    // El gráfico parte el 03-11-2026: el más bajo sigue siendo el del 04-11.
+    expect(priceStatement(544_221, '2027-02-01T14:30:00Z', s, later)).toBe(
+      'Hoy $544.221 en Mercado Libre. Precio revisado el 01-02-2027 a las 11:30 (hora de Chile). El más bajo que registramos desde el 03-11-2026 fue $496.150, el 04-11-2026.'
+    );
+  });
+
+  it('sin fecha de revisión, con una de hace más de un día o del futuro, no dice "hoy"', () => {
+    const s = summarizeHistory(history, now)!;
+    expect(priceStatement(544_221, null, s, now)).toBeNull();
+    expect(priceStatement(544_221, 'no es fecha', s, now)).toBeNull();
+    // Como en la caída del 19 al 22-11-2026: la última revisión era de hace 3 días.
+    expect(priceStatement(544_221, '2026-11-19T22:00:00Z', s, now)).toBeNull();
+    expect(priceStatement(544_221, '2026-11-22T23:00:00Z', s, now)).toBeNull();
+    expect(priceStatement(0, checked, s, now)).toBeNull();
   });
 });
 

@@ -336,7 +336,7 @@ export default async function ProductoPage({
 
       {/* Lo que el sitio aporta sobre lo que muestra Mercado Libre: cómo se
           movió el precio. Va antes de las specs, que son las de ML. */}
-      <PriceHistory productId={product.id} name={short} price={product.price} />
+      <PriceHistory productId={product.id} name={short} price={product.price} checkedAt={product.price_checked_at} />
 
       <div className="mt-10">
         <h2 className="mb-3 font-heading text-lg font-semibold">Especificaciones</h2>

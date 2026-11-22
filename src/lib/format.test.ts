@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatDayMonth,
+  formatFullDate,
+  formatFullDateTime,
   formatTimeAgo,
   salesLabel,
   singularizeUnits,
@@ -143,6 +145,24 @@ describe('formatDayMonth', () => {
   it('siempre con dos dígitos, también el día y el mes de una cifra', () => {
     expect(formatDayMonth('2026-10-04T15:00:00.000Z')).toBe('04/10');
     expect(formatDayMonth('2027-01-05T15:00:00.000Z')).toBe('05/01');
+  });
+});
+
+describe('formatFullDateTime y formatFullDate', () => {
+  it('la fecha con año y la hora, en hora de Chile, con dos dígitos', () => {
+    expect(formatFullDateTime('2026-11-22T21:42:00.000Z')).toEqual({ date: '22-11-2026', time: '18:42' });
+    // Las 02:05 UTC del 5 de enero todavía son la noche del 4 en Santiago.
+    expect(formatFullDateTime('2027-01-05T02:05:00.000Z')).toEqual({ date: '04-01-2027', time: '23:05' });
+    // La medianoche se escribe 00, no 24.
+    expect(formatFullDateTime('2026-11-23T03:00:00.000Z')).toEqual({ date: '23-11-2026', time: '00:00' });
+    expect(formatFullDate(Date.parse('2026-10-05T15:00:00Z'))).toBe('05-10-2026');
+  });
+
+  it('sin fecha o con una que no se entiende, nada', () => {
+    expect(formatFullDateTime(null)).toBeNull();
+    expect(formatFullDateTime('')).toBeNull();
+    expect(formatFullDateTime('no es fecha')).toBeNull();
+    expect(formatFullDate(undefined)).toBe('');
   });
 });
 

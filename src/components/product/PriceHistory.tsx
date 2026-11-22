@@ -4,17 +4,26 @@ import {
   BUSY_CHANGES_48H,
   chartPaths,
   heldLabel,
+  priceStatement,
   summarizeHistory,
   vsAverage,
   type PriceHistorySummary,
 } from '@/lib/price-chart';
-import { formatCLP, formatDayMonth, formatDayMonthTime } from '@/lib/format';
+import { formatCLP, formatDayMonth, formatFullDate, formatFullDateTime } from '@/lib/format';
 
 /** El lienzo del gráfico; en pantalla se estira al ancho disponible. */
 const WIDTH = 600;
 const HEIGHT = 160;
 
+/** "04/11": para los ejes del gráfico, donde no cabe más. */
 const day = (t: number) => formatDayMonth(new Date(t).toISOString());
+/** "04-11-2026": para los textos, que tienen que entenderse sin saber qué día se leen. */
+const fullDay = (t: number) => formatFullDate(t);
+/** "17-10-2026 21:30", en hora de Chile: la del registro del historial. */
+const fullDayTime = (t: number) => {
+  const when = formatFullDateTime(t);
+  return when ? `${when.date} ${when.time}` : '';
+};
 
 /**
  * "Historial de precios" de la ficha: cómo se movió el precio desde que el
@@ -32,22 +41,28 @@ export async function PriceHistory({
   productId,
   name,
   price,
+  checkedAt,
   soldOutSince,
 }: {
   productId: string;
   name: string;
   price: number;
+  /** Cuándo se revisó el precio (price_checked_at): con eso se arma la frase del precio de hoy. */
+  checkedAt?: string | null;
   /** Desde cuándo está fuera de venta (inactive_since): el historial termina ahí. */
   soldOutSince?: string | null;
 }) {
+  const now = Date.now();
   const soldOutAt = soldOutSince ? Date.parse(soldOutSince) : NaN;
-  const soldOut = Number.isFinite(soldOutAt) && soldOutAt <= Date.now();
+  const soldOut = Number.isFinite(soldOutAt) && soldOutAt <= now;
   const history = await getPriceHistoryCached(productId);
-  const summary = history ? summarizeHistory(history, soldOut ? soldOutAt : Date.now()) : null;
+  const summary = history ? summarizeHistory(history, soldOut ? soldOutAt : now) : null;
   if (!summary) return null;
 
-  const since = day(summary.trackedSince);
-  const until = soldOut ? ` hasta el ${day(summary.end)}, cuando dejó de estar a la venta` : '';
+  // El precio de hoy en una frase con fechas completas (lib/price-chart). Fuera de venta no hay "hoy".
+  const statement = soldOut ? null : priceStatement(price, checkedAt, summary, now);
+  const since = fullDay(summary.trackedSince);
+  const until = soldOut ? ` hasta el ${fullDay(summary.end)}, cuando dejó de estar a la venta` : '';
   const neverChanged = summary.recent.length === 1;
   const lead = neverChanged
     ? soldOut
@@ -60,6 +75,7 @@ export async function PriceHistory({
       <h2 id="historial-de-precios" className="mb-2 font-heading text-lg font-semibold">
         Historial de precios
       </h2>
+      {statement && <p className="mb-2 text-sm leading-relaxed text-fg">{statement}</p>}
       <p className="text-sm leading-relaxed text-muted">{lead}</p>
 
       <PriceChart summary={summary} price={price} soldOut={soldOut} />
@@ -168,7 +184,7 @@ function Numbers({ summary, price, soldOut }: { summary: PriceHistorySummary; pr
     {
       term: 'Más bajo registrado',
       value: formatCLP(summary.min),
-      note: `El ${day(summary.minAt)}${held ? `, ${held}` : ''}`,
+      note: `El ${fullDay(summary.minAt)}${held ? `, ${held}` : ''}`,
     },
     { term: 'Más alto registrado', value: formatCLP(summary.max) },
   ];
@@ -210,7 +226,7 @@ function Changes({ summary, soldOut }: { summary: PriceHistorySummary; soldOut: 
         <tbody>
           {summary.recent.map((row) => (
             <tr key={row.at} className="border-t border-border">
-              <td className="py-1.5 pr-3 text-muted">{formatDayMonthTime(new Date(row.at).toISOString())}</td>
+              <td className="py-1.5 pr-3 text-muted">{fullDayTime(row.at)}</td>
               <td className="py-1.5 pr-3 font-medium text-fg">{formatCLP(row.price)}</td>
               <td className={`py-1.5 ${row.diff !== null && row.diff < 0 ? 'text-accent' : 'text-muted'}`}>
                 {row.diff === null ? 'Primer registro' : `${row.diff < 0 ? '−' : '+'}${formatCLP(Math.abs(row.diff))}`}
