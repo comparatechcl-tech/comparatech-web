@@ -111,3 +111,15 @@ jobs:
           # Termina con código 1 si no pudo pedir el plan o si algún video
           # falló; lo que sí se armó ya quedó subido.
           node scripts/reels/generar.mjs "${args[@]}"
+
+      # El video con música de la historia automática (12:40 de Chile). Si falla
+      # no pasa nada grave: a esa hora sale la imagen, y los reels no se tocan.
+      - name: Armar la historia del día con música
+        if: ${{ !cancelled() && inputs.seco != true }}
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then exit 0; fi
+          node scripts/reels/historia.mjs

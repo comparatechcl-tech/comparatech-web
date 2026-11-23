@@ -200,6 +200,32 @@ export async function publishInstagramImage(
   return publishInstagramContainer(conn, creds, container, deps);
 }
 
+/** Cuánto se espera a que Instagram procese una historia en video antes de salir con la imagen. */
+export const VIDEO_STORY_WAIT_MS = 75_000;
+
+/**
+ * Deja lista una historia en video, con la música dentro del archivo (la API
+ * no da acceso a la biblioteca de música de Instagram). Devuelve el contenedor
+ * ya procesado, SIN publicarlo: hasta aquí no salió nada, y si algo falla se
+ * puede publicar la imagen en su lugar (lib/social/meta-story).
+ */
+export async function prepareInstagramVideoStory(
+  conn: Pick<MetaConnection, 'igUserId' | 'pageToken'>,
+  creds: MetaCredentials,
+  input: { videoUrl: string },
+  deps: PublishDeps = {}
+): Promise<string> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const auth = pageAuth(conn, creds);
+  const what = 'la historia en video';
+  const container = idOf(
+    await graphPost(`${conn.igUserId}/media`, { media_type: 'STORIES', video_url: input.videoUrl, ...auth }, fetchImpl),
+    what
+  );
+  await waitUntilFinished(container, auth, what, fetchImpl, deps.sleep ?? defaultSleep, deps.waitMs ?? VIDEO_STORY_WAIT_MS);
+  return container;
+}
+
 // ---------------------------------------------------------------------------
 // Reels (la publicación diaria automática, lib/social/meta-daily).
 

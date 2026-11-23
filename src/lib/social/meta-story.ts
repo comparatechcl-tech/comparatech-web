@@ -5,7 +5,13 @@ import { SITE_URL } from '@/lib/site';
 import { chileDay } from './carousel-url';
 import type { LiveCheck, ShownOffer } from './live-price';
 import { metaCredentials, metaErrorMessage, readMetaConnection, redactTokens } from './meta';
-import { PublishError, publishInstagramImage, type PublishDeps } from './meta-publish';
+import {
+  PublishError,
+  prepareInstagramVideoStory,
+  publishInstagramContainer,
+  publishInstagramImage,
+  type PublishDeps,
+} from './meta-publish';
 import { STORY_MARK } from './networks';
 import { piecePath, snapshotOf } from './piece-url';
 import type { StoryItem } from './stories';
@@ -25,7 +31,10 @@ import { STORY_NETWORKS } from './story-networks';
  *   precio, el descuento y el envío confirmados en Mercado Libre en el momento;
  * - el día se anota ANTES de publicar: si algo se corta o Meta no responde,
  *   no se vuelve a publicar. Solo se reintenta un error en que no salió nada;
- * - se puede pausar por hoy o hasta encenderla (meta_story_pause).
+ * - se puede pausar por hoy o hasta encenderla (meta_story_pause);
+ * - sale en video con música si el de esa oferta, con esos mismos datos, ya
+ *   está armado (lib/social/story-video, dueño 23-11-2026). Si no está o
+ *   Instagram no lo acepta, sale la imagen: la historia del día no se pierde.
  *
  * La llama app/api/cron/historia-diaria dos veces al día (migración 0020): la
  * segunda pasada solo hace algo si la primera no pudo.
@@ -52,6 +61,10 @@ export interface StoryState {
   /** El id de lo publicado en Instagram. */
   id?: string;
   permalink?: string | null;
+  /** Salió como video con música. */
+  withMusic?: boolean;
+  /** Por qué salió sin música, si debía llevarla. */
+  musicProblem?: string;
   error?: string;
   at: string;
 }
@@ -77,6 +90,8 @@ export interface StoryDeps extends PublishDeps {
   key: Buffer | null;
   readPicks(admin: SupabaseClient, now: Date, key: Buffer): Promise<StoryItem[]>;
   liveCheck(items: { productId: string; shown: ShownOffer }[]): Promise<Record<string, LiveCheck>>;
+  /** La dirección pública del video con música de esta oferta, o null si no está armado. */
+  findVideo?(item: StoryItem, at: Date): Promise<string | null>;
   siteUrl?: string;
   now?: () => number;
 }
@@ -202,8 +217,30 @@ export async function runMetaStory(admin: SupabaseClient, at: Date, deps: StoryD
 
   try {
     const base = (deps.siteUrl ?? SITE_URL).replace(/\/+$/, '');
-    const done = await publishInstagramImage(connection, creds, { imageUrl: `${base}${path}`, story: true }, deps);
-    state = { ...state, status: 'publicado', id: done.mediaId, permalink: done.permalink, at: new Date(now()).toISOString() };
+    // Preparar el video no publica nada: si falla aquí, se sigue con la imagen.
+    let container: string | null = null;
+    let musicProblem: string | undefined;
+    if (deps.findVideo) {
+      try {
+        const videoUrl = await deps.findVideo(item, at);
+        if (videoUrl) container = await prepareInstagramVideoStory(connection, creds, { videoUrl }, deps);
+        else musicProblem = 'El video de hoy no estaba armado.';
+      } catch (err) {
+        musicProblem = redactTokens(err instanceof Error ? err.message : String(err)).slice(0, 200);
+      }
+    }
+    const done = container
+      ? await publishInstagramContainer(connection, creds, container, deps)
+      : await publishInstagramImage(connection, creds, { imageUrl: `${base}${path}`, story: true }, deps);
+    state = {
+      ...state,
+      status: 'publicado',
+      id: done.mediaId,
+      permalink: done.permalink,
+      withMusic: container !== null,
+      ...(musicProblem ? { musicProblem } : {}),
+      at: new Date(now()).toISOString(),
+    };
   } catch (err) {
     state = { ...state, ...failure(err), at: new Date(now()).toISOString() };
   }
@@ -232,6 +269,8 @@ export async function runMetaStory(admin: SupabaseClient, at: Date, deps: StoryD
       precio: state.price,
       id: state.id ?? null,
       permalink: state.permalink ?? null,
+      con_musica: state.withMusic === true,
+      aviso_musica: state.musicProblem ?? null,
       error: state.error ?? null,
     },
   });

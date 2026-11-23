@@ -7,6 +7,7 @@ import { liveCheckOffers } from '@/lib/social/live-check-server';
 import { STORY_ACTOR, runMetaStory } from '@/lib/social/meta-story';
 import { pieceKey } from '@/lib/social/piece-url';
 import { readStoryPicks } from '@/lib/social/stories';
+import { findStoryVideo } from '@/lib/social/story-video';
 
 /**
  * La historia automática de Instagram (lib/social/meta-story). La llama
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
       key: pieceKey(),
       readPicks: readStoryPicks,
       liveCheck: (items) => liveCheckOffers(admin, items, STORY_ACTOR),
+      findVideo: (item, at) => findStoryVideo(admin, item, at),
     });
     await run.finish(summary.ok, summary, summary.ok ? undefined : summary.skipped ?? summary.state?.error ?? 'no se pudo publicar');
     return NextResponse.json(summary, { status: summary.ok ? 200 : 502 });

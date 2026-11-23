@@ -104,7 +104,11 @@ function item(id: string, over: Partial<StoryItem> = {}): StoryItem {
 }
 
 type Call = { path: string; params: Record<string, string> };
-function graph({ publishThrows = false, containerFails = false }: { publishThrows?: boolean; containerFails?: boolean } = {}) {
+function graph({
+  publishThrows = false,
+  containerFails = false,
+  videoFails = false,
+}: { publishThrows?: boolean; containerFails?: boolean; videoFails?: boolean } = {}) {
   const calls: Call[] = [];
   const fetchImpl = async (input: string, init?: RequestInit) => {
     const url = new URL(input);
@@ -115,6 +119,7 @@ function graph({ publishThrows = false, containerFails = false }: { publishThrow
     calls.push({ path, params });
     const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
     if (path === '1784/media') {
+      if (videoFails && params.video_url) return json({ error: { message: 'video no válido', code: 36001 } }, 400);
       return containerFails ? json({ error: { message: 'imagen no válida', code: 36001 } }, 400) : json({ id: 'cont1' });
     }
     if (path === 'cont1') return json({ status_code: 'FINISHED' });
@@ -299,6 +304,57 @@ describe('runMetaStory', () => {
     const second = await runMetaStory(fakeAdmin(), new Date(AT.getTime() + 3 * 3600_000), deps(good, [item(ID_A)], { [ID_A]: same }));
     expect(second).toMatchObject({ ok: true, state: { status: 'publicado' } });
     expect(published(good.calls)).toBe(1);
+  });
+
+  it('con el video de la oferta armado, publica el video con música y no la imagen', async () => {
+    const { runMetaStory } = await import('./meta-story');
+    const g = graph();
+    const videoUrl = 'https://almacen.example/reels/2026-11-23/historia.mp4';
+    const findVideo = vi.fn(async (_item: StoryItem) => videoUrl);
+    const summary = await runMetaStory(fakeAdmin(), AT, { ...deps(g, [item(ID_A)], { [ID_A]: same }), findVideo });
+
+    expect(summary).toMatchObject({ ok: true, state: { status: 'publicado', withMusic: true } });
+    expect(findVideo.mock.calls[0][0]).toMatchObject({ id: ID_A });
+    const containers = g.calls.filter((c) => c.path === '1784/media');
+    expect(containers).toHaveLength(1);
+    expect(containers[0].params).toMatchObject({ media_type: 'STORIES', video_url: videoUrl });
+    expect(containers[0].params.image_url).toBeUndefined();
+    expect(published(g.calls)).toBe(1);
+    expect(store.events).toEqual([expect.objectContaining({ after: expect.objectContaining({ con_musica: true }) })]);
+  });
+
+  it('sin el video armado sale la imagen, y queda anotado por qué', async () => {
+    const { runMetaStory } = await import('./meta-story');
+    const g = graph();
+    const summary = await runMetaStory(fakeAdmin(), AT, { ...deps(g, [item(ID_A)], { [ID_A]: same }), findVideo: async () => null });
+    expect(summary).toMatchObject({ ok: true, state: { status: 'publicado', withMusic: false, musicProblem: 'El video de hoy no estaba armado.' } });
+    expect(g.calls.find((c) => c.path === '1784/media')?.params.image_url).toContain('/social/pieza/');
+    expect(published(g.calls)).toBe(1);
+  });
+
+  it('si Instagram rechaza el video, publica la imagen una sola vez', async () => {
+    const { runMetaStory } = await import('./meta-story');
+    const g = graph({ videoFails: true });
+    const summary = await runMetaStory(fakeAdmin(), AT, {
+      ...deps(g, [item(ID_A)], { [ID_A]: same }),
+      findVideo: async () => 'https://almacen.example/reels/x.mp4',
+    });
+    expect(summary).toMatchObject({ ok: true, state: { status: 'publicado', withMusic: false } });
+    expect(summary.state?.musicProblem).toContain('video no válido');
+    expect(g.calls.filter((c) => c.path === '1784/media').map((c) => Boolean(c.params.video_url))).toEqual([true, false]);
+    expect(published(g.calls)).toBe(1);
+  });
+
+  it('si el video se manda a publicar y Meta no responde, no se publica también la imagen', async () => {
+    const { runMetaStory } = await import('./meta-story');
+    const g = graph({ publishThrows: true });
+    const summary = await runMetaStory(fakeAdmin(), AT, {
+      ...deps(g, [item(ID_A)], { [ID_A]: same }),
+      findVideo: async () => 'https://almacen.example/reels/x.mp4',
+    });
+    expect(summary).toMatchObject({ ok: false, state: { status: 'incierto' } });
+    expect(g.calls.filter((c) => c.path === '1784/media')).toHaveLength(1);
+    expect(published(g.calls)).toBe(1);
   });
 
   it('sin poder leer la pausa, el estado o las marcas de hoy, no publica', async () => {
