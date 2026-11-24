@@ -4,7 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { pingHealthcheck, startCronRun, type CronRun } from '@/lib/cron-runs';
-import { fetchAllRows } from '@/lib/admin-stats';
+import { fetchAllRows, readRefreshRuns, refreshStatusFromRuns } from '@/lib/admin-stats';
 import { enrichFromMlProduct, getMlToken, mlTokenError } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
 import { gatherDigestInput } from '@/lib/digest-data';
@@ -27,6 +27,7 @@ import {
   isGreenSeller,
   mapWithConcurrency,
   mlErrorsSince,
+  winnersClosure,
   type MlOffer,
 } from '@/lib/ml-catalog';
 import {
@@ -68,11 +69,21 @@ import { EXTRA_SEARCHES, findByHighlights, findBySearches } from '@/lib/prospect
  * 14-10-2026 ML responde 403 a los destacados y la prospección pasó días
  * anotándose como ok con 0 productos.
  *
+ * Mientras Mercado Libre tenga cerrada la consulta de precios (desde el
+ * 23-11-2026, ver winnersGate en lib/ml-catalog) la corrida queda en pausa:
+ * sin el ganador de cada ficha no se sabe quién la vende ni a cuánto, así que
+ * ningún producto puede entrar a la cola. El 24-11 la corrida miró 600 fichas
+ * y pidió 602 precios para no dejar nada: eso es gastar llamadas, y ML
+ * bloquea aplicaciones por exceso de llamadas. En pausa no le pide nada a ML;
+ * igual archiva los pendientes viejos y manda el correo del día. Se reanuda
+ * sola cuando el refresco de precios anota que ML volvió a responder.
+ *
  * Parámetros útiles para correrlo a mano:
  *   ?dry=1             analiza y reporta sin escribir nada ni mandar correo
  *   ?limit=N           cambia el tope de productos nuevos analizados por corrida
  *   ?fuente=busquedas  lo más buscado (la de todos los días)
  *   ?fuente=destacados la lista de más vendidos (bloqueada desde el 14-10-2026)
+ *   ?forzar=1          busca aunque la consulta de precios figure cerrada
  */
 
 export const maxDuration = 60;
@@ -504,6 +515,22 @@ async function sendDailyDigest(admin: SupabaseAdmin, sourceProblem: SourceProble
 
 const NOOP_RUN: CronRun = { finish: async () => {} };
 
+/** Lo que queda anotado en la corrida (summary.en_pausa) cuando no se busca. */
+const PAUSED_BY_PRICES =
+  'Mercado Libre tiene cerrada la consulta de precios: sin ella no se sabe quién vende cada producto ni a cuánto, y no se buscan productos nuevos.';
+
+/**
+ * ¿Mercado Libre tiene cerrada la consulta de precios? Lo sabe este proceso
+ * (el refresco prueba una vez por hora) y, si recién partió con un despliegue,
+ * la bitácora del refresco. Si no se puede leer, se busca como siempre: con la
+ * ruta cerrada, getWinners igual deja de llamar al quinto rechazo.
+ */
+async function pricesClosedByMl(admin: SupabaseAdmin): Promise<boolean> {
+  if (winnersClosure().closed) return true;
+  const runs = await readRefreshRuns(admin);
+  return !!runs.data && runs.data.length > 0 && refreshStatusFromRuns(runs.data, new Date()).state === 'ml_cerro';
+}
+
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -512,6 +539,7 @@ export async function GET(req: NextRequest) {
   const startedAt = Date.now();
   const outOfTime = () => Date.now() - startedAt > TIME_BUDGET_MS;
   const dryRun = req.nextUrl.searchParams.get('dry') === '1';
+  const force = req.nextUrl.searchParams.get('forzar') === '1';
   const source = sourceFrom(req.nextUrl.searchParams.get('fuente'));
   const requestedLimit = Number(req.nextUrl.searchParams.get('limit'));
   const maxNewProducts =
@@ -542,6 +570,29 @@ export async function GET(req: NextRequest) {
   };
 
   try {
+    // Con la consulta de precios cerrada no puede entrar ningún candidato: no
+    // se le pide nada a ML (ni el token). Lo que no depende de ML se hace igual.
+    if (!force && (await pricesClosedByMl(admin))) {
+      const expiry: { expired: number } | { skipped: string } = dryRun
+        ? { skipped: 'dry_run' }
+        : await expireStalePending(admin);
+      const digest: DigestResult = dryRun ? { ok: true, skipped: 'dry_run' } : await sendDailyDigest(admin, null);
+      const body = {
+        ok: true,
+        dry_run: dryRun,
+        fuente: source,
+        en_pausa: PAUSED_BY_PRICES,
+        inserted: 0,
+        expired: expiry,
+        digest,
+        errores_ml: mlErrorsThisRun(),
+        elapsed_ms: Date.now() - startedAt,
+      };
+      const error = digest.ok ? undefined : `correo: ${digest.error}`;
+      await Promise.all([run.finish(true, body, error), pingHealthcheck(healthcheckUrl, digest.ok)]);
+      return NextResponse.json(body);
+    }
+
     const token = await getMlToken();
     if (!token) return fail(502, `No se pudo obtener token de ML (${mlTokenError() ?? 'sin detalle'})`);
 

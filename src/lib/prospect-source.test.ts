@@ -475,6 +475,90 @@ describe('GET /api/cron/prospect', () => {
     expect(ping).toHaveBeenCalledWith(undefined, false);
   });
 
+  describe('con la consulta de precios cerrada por Mercado Libre', () => {
+    /** Lo que anota el refresco de precios en su última pasada (ver refreshStatusFromRuns). */
+    const closedRefresh = () => [
+      {
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+        ok: true,
+        summary: { revisados: 16, errores_transitorios: 16, consulta_de_precios_cerrada: true },
+        error: null,
+      },
+    ];
+
+    it('queda en pausa: no le pide nada a ML, y el correo y el aviso al healthcheck salen igual', async () => {
+      mocks.rows.cron_runs = closedRefresh();
+      const fetchMock = vi.fn(async () => {
+        throw new Error('en pausa no se consulta a Mercado Libre');
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await prospectRoute(request());
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({
+        ok: true,
+        dry_run: false,
+        fuente: 'busquedas',
+        inserted: 0,
+        expired: { expired: 0 },
+        digest: { ok: true, sent_to: 1 },
+        errores_ml: {},
+      });
+      expect(body.en_pausa).toContain('Mercado Libre tiene cerrada la consulta de precios');
+      // Ni búsquedas, ni fichas, ni precios: nada de lo que hace la corrida normal.
+      expect(body.found).toBeUndefined();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mocks.upserts).toEqual([]);
+
+      // Queda anotada como bien hecha (no es una falla) y el correo del día sale.
+      expect(finish).toHaveBeenCalledWith(true, body, undefined);
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      expect(ping).toHaveBeenCalledWith('https://hc.example.com/abc', true);
+    });
+
+    it('si el correo falla, la pausa lo anota y avisa al healthcheck', async () => {
+      mocks.rows.cron_runs = closedRefresh();
+      vi.stubGlobal('fetch', vi.fn());
+      sendEmail.mockResolvedValueOnce({ ok: false, error: 'sin cupo' } as never);
+
+      const res = await prospectRoute(request());
+      const body = await res.json();
+      expect(body).toMatchObject({ ok: true, digest: { ok: false, error: 'sin cupo' } });
+      expect(finish).toHaveBeenCalledWith(true, body, 'correo: sin cupo');
+      expect(ping).toHaveBeenCalledWith('https://hc.example.com/abc', false);
+    });
+
+    it('una corrida de prueba en pausa no escribe ni manda correo', async () => {
+      mocks.rows.cron_runs = closedRefresh();
+      vi.stubGlobal('fetch', vi.fn());
+
+      const body = await (await prospectRoute(request('?dry=1'))).json();
+      expect(body).toMatchObject({ ok: true, dry_run: true, expired: { skipped: 'dry_run' }, digest: { ok: true, skipped: 'dry_run' } });
+      expect(finish).not.toHaveBeenCalled();
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it('?forzar=1 busca igual (para probar a mano si Mercado Libre la reabrió)', async () => {
+      mocks.rows.cron_runs = closedRefresh();
+      stubSearchMl();
+
+      const body = await (await prospectRoute(request('?forzar=1&dry=1'))).json();
+      expect(body.en_pausa).toBeUndefined();
+      expect(body).toMatchObject({ ok: true, fuente: 'busquedas', found: 120, would_insert: 40 });
+    });
+
+    it('si el refresco dejó de anotar que está cerrada, vuelve a buscar sola', async () => {
+      mocks.rows.cron_runs = [{ ...closedRefresh()[0], summary: { revisados: 1297, actualizados: 3 } }];
+      stubSearchMl();
+
+      const body = await (await prospectRoute(request('?dry=1'))).json();
+      expect(body.en_pausa).toBeUndefined();
+      expect(body.found).toBe(120);
+    });
+  });
+
   describe('lo más buscado (la fuente de cada día)', () => {
     it('guarda hasta 40 candidatos, marcados como de búsquedas y sin puesto de más vendidos', async () => {
       stubSearchMl();

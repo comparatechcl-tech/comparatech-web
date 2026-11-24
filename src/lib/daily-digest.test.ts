@@ -7,6 +7,7 @@ import {
   errorsLine,
   healthLine,
   linkModeLine,
+  pausedLine,
   pickTopToApprove,
   rankForApproval,
   type DigestCandidate,
@@ -258,6 +259,41 @@ describe('líneas fijas', () => {
     expect(errorsLine(['candidatos por revisar', 'clics de ayer'])).toBe(
       '⚠ Datos incompletos: falló candidatos por revisar, clics de ayer'
     );
+  });
+});
+
+describe('con los precios cerrados por Mercado Libre', () => {
+  it('no culpa a los filtros de que no entrara nada: la búsqueda diaria está en pausa', () => {
+    const line =
+      'Hoy no entraron productos nuevos: la búsqueda diaria está en pausa mientras Mercado Libre no entregue precios.';
+    const html = buildDigestHtml(input({ pricesClosed: true }));
+    expect(html).toContain(line);
+    expect(html).not.toContain('no pasó los filtros');
+    expect(buildDigestText(input({ pricesClosed: true }))).toContain(line);
+    // Con precios, la explicación de siempre.
+    expect(buildDigestText(input())).toContain('Hoy no entraron productos nuevos.');
+    expect(buildDigestText(input())).not.toContain('en pausa mientras');
+  });
+
+  it('lo que está en pausa no "vuelve solo": el sitio no puede saber si la ficha recuperó vendedor', () => {
+    expect(pausedLine(3)).toBe(
+      '3 productos están en pausa automática: Mercado Libre se quedó sin vendedor verde para esa ficha. ' +
+        'Vuelven a publicarse solos, sin que hagas nada.'
+    );
+    expect(pausedLine(1)).toContain('1 producto está en pausa automática');
+    expect(pausedLine(1)).toContain('Vuelve a publicarse solo, sin que hagas nada.');
+    const closed = pausedLine(3, true);
+    expect(closed).toBe(
+      '3 productos están en pausa: en la última revisión sus fichas no tenían vendedor con reputación verde. ' +
+        'Mientras Mercado Libre no entregue precios, el sitio no puede saber si eso cambió.'
+    );
+    expect(pausedLine(1, true)).toContain('1 producto está en pausa: en la última revisión su ficha no tenía vendedor');
+
+    const html = buildDigestHtml(input({ pausedCount: 3, pricesClosed: true }));
+    expect(html).toContain('el sitio no puede saber si eso cambió');
+    expect(html).not.toContain('Vuelven a publicarse solos');
+    expect(buildDigestText(input({ pausedCount: 3, pricesClosed: true }))).not.toContain('vuelven solos');
+    expect(buildDigestHtml(input({ pausedCount: 3 }))).toContain('Vuelven a publicarse solos');
   });
 });
 

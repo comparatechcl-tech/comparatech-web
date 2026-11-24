@@ -45,6 +45,9 @@ const OLDEST_PRICE_WARN_MIN = 120;
 const OLDEST_PRICE_BAD_MIN = 240;
 /** La prospección corre una vez al día. */
 const PROSPECT_WARN_HOURS = 26;
+/** Lo que explica una prospección en pausa (summary.en_pausa, ver api/cron/prospect). */
+const PROSPECT_PAUSED_HINT =
+  'Mientras Mercado Libre no entregue precios no se buscan productos nuevos: no se sabría quién los vende ni a cuánto. Se reanuda sola si reabre la consulta. No es una falla.';
 
 const TZ = 'America/Santiago';
 const whenFmt = new Intl.DateTimeFormat('es-CL', {
@@ -160,19 +163,26 @@ export default async function ResumenPage() {
         <ul className="mt-3 divide-y divide-border rounded-xl border border-border bg-surface">
           <PriceHealth stat={summary.ultimoPrecioMin} oldest={summary.precioMasViejoMin} refresh={summary.refresco} />
           <HealthRow
-            tone={prospectTone(summary.ultimaProspeccion.data?.at ?? null, now, summary.ultimaProspeccion.error)}
+            tone={
+              summary.ultimaProspeccion.data?.enPausa
+                ? 'warn'
+                : prospectTone(summary.ultimaProspeccion.data?.at ?? null, now, summary.ultimaProspeccion.error)
+            }
             label="Última prospección"
             value={
               summary.ultimaProspeccion.error
                 ? '—'
                 : summary.ultimaProspeccion.data
                   ? `${formatWhen(summary.ultimaProspeccion.data.at)} · ${
-                      summary.ultimaProspeccion.data.nuevos === null
-                        ? '— nuevos'
-                        : plural(summary.ultimaProspeccion.data.nuevos, 'nuevo', 'nuevos')
+                      summary.ultimaProspeccion.data.enPausa
+                        ? 'en pausa'
+                        : summary.ultimaProspeccion.data.nuevos === null
+                          ? '— nuevos'
+                          : plural(summary.ultimaProspeccion.data.nuevos, 'nuevo', 'nuevos')
                     }`
                   : 'sin datos'
             }
+            hint={summary.ultimaProspeccion.data?.enPausa ? PROSPECT_PAUSED_HINT : undefined}
           />
           <DigestHealth stat={summary.correoAyer} />
           <HealthRow

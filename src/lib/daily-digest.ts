@@ -210,6 +210,30 @@ export function errorsLine(errors: string[]): string {
   return errors.length > 0 ? `⚠ Datos incompletos: falló ${errors.join(', ')}` : '';
 }
 
+/** Por qué no entraron productos nuevos mientras Mercado Libre no entrega precios. */
+const NO_NEW_WHILE_CLOSED =
+  'Hoy no entraron productos nuevos: la búsqueda diaria está en pausa mientras Mercado Libre no entregue precios.';
+
+/**
+ * Lo que está fuera del sitio sin que nadie lo haya ocultado. Con los precios
+ * cerrados no vuelve solo: el sitio no puede saber si la ficha recuperó un
+ * vendedor.
+ */
+export function pausedLine(count: number, pricesClosed = false): string {
+  if (pricesClosed) {
+    return (
+      `${count} ${plural(count, 'producto está', 'productos están')} en pausa: en la última revisión ` +
+      `${plural(count, 'su ficha no tenía', 'sus fichas no tenían')} vendedor con reputación verde. ` +
+      'Mientras Mercado Libre no entregue precios, el sitio no puede saber si eso cambió.'
+    );
+  }
+  return (
+    `${count} ${plural(count, 'producto está', 'productos están')} en pausa automática: ` +
+    'Mercado Libre se quedó sin vendedor verde para esa ficha. ' +
+    `${plural(count, 'Vuelve a publicarse solo', 'Vuelven a publicarse solos')}, sin que hagas nada.`
+  );
+}
+
 function isStale(days: number | null): days is number {
   return days !== null && days > STALE_APPROVAL_DAYS;
 }
@@ -354,7 +378,11 @@ export function buildDigestHtml(input: DigestInput): string {
         ? // La explicación de "días sin novedades" sería falsa: el motivo va arriba.
           `
       <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">Hoy no entraron productos nuevos.</p>`
-        : `
+        : input.pricesClosed
+          ? // Tampoco es que no pasaran los filtros: la búsqueda está en pausa.
+            `
+      <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">${escapeHtml(NO_NEW_WHILE_CLOSED)}</p>`
+          : `
       <p style="font-size:14px;color:${MUTED};margin:28px 0 0;">
         Hoy no entraron productos nuevos: lo que apareció en Mercado Libre ya
         estaba en el sitio o no pasó los filtros (vendedor verde y comisión).
@@ -394,9 +422,7 @@ export function buildDigestHtml(input: DigestInput): string {
     pausedCount > 0
       ? `
       <p style="font-size:13px;color:${MUTED};margin:20px 0 0;line-height:1.5;">
-        ${pausedCount} ${plural(pausedCount, 'producto está', 'productos están')} en pausa automática:
-        Mercado Libre se quedó sin vendedor verde para esa ficha.
-        ${plural(pausedCount, 'Vuelve', 'Vuelven')} a publicarse solos, sin que hagas nada.
+        ${escapeHtml(pausedLine(pausedCount, input.pricesClosed))}
       </p>`
       : '';
 
@@ -487,16 +513,14 @@ export function buildDigestText(input: DigestInput): string {
   if (newCandidates.length > 0) {
     lines.push(`Nuevos desde ayer (${newCandidates.length}): ${countByCategory(newCandidates)}`);
   } else {
-    lines.push('Hoy no entraron productos nuevos.');
+    lines.push(input.pricesClosed && !sourceProblem ? NO_NEW_WHILE_CLOSED : 'Hoy no entraron productos nuevos.');
   }
 
   if (needsLink.length > 0) {
     lines.push('', `${needsLink.length} ${plural(needsLink.length, 'producto necesita', 'productos necesitan')} un link nuevo: ${adminUrl}/admin/problemas`);
     needsLink.forEach((p) => lines.push(`  - ${p.name}`));
   }
-  if (pausedCount > 0) {
-    lines.push('', `${pausedCount} ${plural(pausedCount, 'producto en pausa automática', 'productos en pausa automática')} (vuelven solos).`);
-  }
+  if (pausedCount > 0) lines.push('', pausedLine(pausedCount, input.pricesClosed));
 
   lines.push('', `${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.`);
   if (clicsAyer !== null) lines.push(`${clicsAyer} ${plural(clicsAyer, 'clic', 'clics')} hacia Mercado Libre ayer.`);

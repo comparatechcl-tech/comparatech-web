@@ -570,6 +570,11 @@ export interface ProspectInfo {
   /** null si no se sabe cuántos entraron. */
   nuevos: number | null;
   source: 'cron_runs' | 'candidatos';
+  /**
+   * La corrida no buscó: Mercado Libre tiene cerrada la consulta de precios
+   * (summary.en_pausa, ver api/cron/prospect). No es una falla.
+   */
+  enPausa?: true;
 }
 
 /** La corrida exitosa más reciente con su cantidad de candidatos nuevos. */
@@ -582,6 +587,7 @@ export function prospectFromRuns(runs: CronRunRow[]): ProspectInfo | null {
       at: run.finished_at ?? run.started_at,
       nuevos: typeof inserted === 'number' ? inserted : null,
       source: 'cron_runs',
+      ...(typeof summary?.en_pausa === 'string' ? { enPausa: true as const } : {}),
     };
   }
   return null;

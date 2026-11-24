@@ -271,6 +271,13 @@ describe('bitácora de crons', () => {
     expect(prospectFromRuns([run({ ok: null })])).toBeNull();
   });
 
+  it('prospección en pausa por los precios cerrados: se distingue de un día sin novedades', () => {
+    expect(
+      prospectFromRuns([run({ summary: { inserted: 0, en_pausa: 'Mercado Libre tiene cerrada la consulta de precios' } })])
+    ).toEqual({ at: '2026-10-04T12:01:00Z', nuevos: 0, source: 'cron_runs', enPausa: true });
+    expect(prospectFromRuns([run({ summary: { inserted: 0 } })])).not.toHaveProperty('enPausa');
+  });
+
   describe('refresco de precios', () => {
     // NOW es 17:00 UTC.
     const omitida = (at: string) =>
