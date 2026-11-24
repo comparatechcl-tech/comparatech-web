@@ -257,7 +257,7 @@ function ModelChart({
         </Link>
       </h3>
       {summary && today !== null ? (
-        <PriceChart summary={summary} price={today} soldOut={false} />
+        <PriceChart summary={summary} price={today} end="hoy" />
       ) : (
         <p className="mt-2 text-sm text-muted">Todavía no hay historial que mostrar.</p>
       )}

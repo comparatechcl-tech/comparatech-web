@@ -2,6 +2,7 @@ import { Product } from '@/lib/types';
 import { resolveDescription } from '@/lib/product-description';
 import { buyUrl } from '@/lib/outbound';
 import { SITE_URL } from '@/lib/site';
+import { priceState } from '@/lib/price-freshness';
 
 /**
  * JSON dentro de un <script>. Un nombre o una spec con "</script>" cerraría
@@ -18,9 +19,12 @@ export function jsonLdString(data: unknown): string {
  *
  * Solo lo que es cierto hoy: si el producto está fuera de venta se declara
  * OutOfStock y sin link de compra (un link a una oferta que no existe es
- * justo lo que Google penaliza).
+ * justo lo que Google penaliza). Y si está a la venta pero su precio no se
+ * revisó hoy (lib/price-freshness), no se declara ninguna oferta: null.
+ * Google mostraría ese precio como vigente al lado del resultado.
  */
 export function productOffer(product: Product) {
+  if (product.is_active && priceState(product.price_checked_at) !== 'hoy') return null;
   const freeShipping = product.offer_info?.free_shipping === true;
 
   return {
@@ -67,7 +71,7 @@ export function ProductJsonLd({ product }: { product: Product }) {
     // Google marca el dato estructurado como inválido si `brand.name` viene
     // vacío — mejor omitir la propiedad completa cuando no sabemos la marca.
     ...(product.brand?.trim() ? { brand: { '@type': 'Brand', name: product.brand } } : {}),
-    offers: offer,
+    ...(offer ? { offers: offer } : {}),
   };
 
   return (

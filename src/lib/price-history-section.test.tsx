@@ -75,9 +75,27 @@ describe('historial de la ficha', () => {
     expect(t).toContain('05/10');
   });
 
-  it('sin la fecha de la revisión, o con una de hace días, no dice "hoy"', async () => {
-    expect(await render({ checkedAt: null })).not.toContain('Precio revisado el');
-    expect(await render({ checkedAt: '2026-11-19T22:00:00Z' })).not.toContain('Precio revisado el');
+  it('sin la fecha de la revisión no dibuja nada: no se sabe hasta cuándo vale el historial', async () => {
+    expect(await render({ checkedAt: null })).toBeNull();
+  });
+
+  it('con el precio revisado hace días, el historial termina en esa revisión y nada dice "hoy"', async () => {
+    // Revisado el 19-11 a las 19:00 de Chile; se lee el 22-11.
+    const t = (await render({ checkedAt: '2026-11-19T22:00:00Z' }))!;
+    expect(t).toContain(
+      'El 19-11-2026 a las 19:00 (hora de Chile), la última vez que revisamos el precio, costaba $544.221 en Mercado Libre. El más bajo que registramos desde el 05-10-2026 fue $496.150, el 04-11-2026. El precio de hoy está en Mercado Libre.'
+    );
+    expect(t).toContain('desde el 05-10-2026 hasta el 19-11-2026, la última vez que lo revisamos. Lo anotamos cada vez que lo vimos cambiar.');
+    expect(t).toContain('El 19/11');
+    expect(t).not.toMatch(/Hoy|últimos 30 días|últimas 48 horas/);
+    expect(t).not.toMatch(AVOIDED);
+  });
+
+  it('con el precio revisado hace días y sin cambios, dice entre qué fechas no cambió', async () => {
+    const t = (await render({ checkedAt: '2026-11-19T22:00:00Z' }, [{ price: 544_221, observed_at: '2026-10-05T15:00:00Z' }]))!;
+    expect(t).toContain('la última vez que revisamos el precio, costaba $544.221 en Mercado Libre. El precio de hoy está en Mercado Libre.');
+    expect(t).toContain('no cambió desde el 05-10-2026 hasta el 19-11-2026, la última vez que lo revisamos.');
+    expect(t).not.toContain('Hoy');
   });
 
   it('fuera de venta no hay precio de hoy: dice hasta cuándo se vendió, con año', async () => {

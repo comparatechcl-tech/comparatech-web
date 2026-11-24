@@ -89,7 +89,7 @@ export function ModelPriceHistory({
                   summary.trackedSince,
                 )}. Lo anotamos cada vez que lo vemos cambiar.`}
           </p>
-          <PriceChart summary={summary} price={today} soldOut={false} />
+          <PriceChart summary={summary} price={today} end="hoy" />
           {summary.recent.length > 1 && (
             <Numbers summary={summary} today={today} minLabel={labelOf(sourceAt(series, summary.minAt))} />
           )}

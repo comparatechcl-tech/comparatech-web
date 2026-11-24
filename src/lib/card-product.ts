@@ -15,6 +15,7 @@ import type { Product } from '@/lib/types';
 import type { ConfirmedDrop } from '@/lib/deal-rank';
 import { buyUrl } from '@/lib/outbound';
 import { specBadges } from '@/lib/spec-badges';
+import { priceDateLabel, priceState } from '@/lib/price-freshness';
 
 export interface CardProduct {
   id: string;
@@ -33,6 +34,13 @@ export interface CardProduct {
   is_featured?: true;
   /** Baja comprobada con el historial propio (lib/deal-rank), en pesos. */
   drop_amount?: number;
+  /**
+   * "23/11": el precio no se revisó hoy y va con el día de su última
+   * revisión (lib/price-freshness). Sin este dato ni `no_price`, es el de hoy.
+   */
+  price_date?: string;
+  /** No hay un precio que mostrar: nunca se revisó, o hace más de un mes. */
+  no_price?: true;
 }
 
 /**
@@ -71,9 +79,13 @@ export function cardImageLoading(index: number, eager: number): CardImageLoading
   return index < PRIORITY_IMAGES ? 'priority' : 'eager';
 }
 
-export function toCardProduct(product: Product, drop?: ConfirmedDrop | null): CardProduct {
+export function toCardProduct(product: Product, drop?: ConfirmedDrop | null, now: number = Date.now()): CardProduct {
   const badges = specBadges(product.specs);
-  const chip = offerChip(product.offer_info);
+  // Con el precio sin revisar hoy no se afirma nada de la oferta: ni
+  // descuento, ni envío, ni una baja (lib/price-freshness).
+  const state = priceState(product.price_checked_at, now);
+  const today = state === 'hoy';
+  const chip = today ? offerChip(product.offer_info) : null;
 
   return {
     id: product.id,
@@ -81,12 +93,14 @@ export function toCardProduct(product: Product, drop?: ConfirmedDrop | null): Ca
     name: product.name,
     category: product.category,
     price: product.price,
-    original_price: product.original_price,
+    original_price: today ? product.original_price : null,
     image_url: product.image_url,
     href: buyUrl(product),
     ...(badges.length > 0 && { badges }),
     ...(chip && { chip }),
     ...(product.is_featured && { is_featured: true as const }),
-    ...(drop && { drop_amount: drop.amount }),
+    ...(today && drop && { drop_amount: drop.amount }),
+    ...(state === 'referencia' && product.price_checked_at && { price_date: priceDateLabel(product.price_checked_at) }),
+    ...(state === 'sin_precio' && { no_price: true as const }),
   };
 }

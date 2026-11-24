@@ -37,9 +37,12 @@ function product(over: Partial<Product> = {}): Product {
   };
 }
 
+/** Seis horas después de la revisión del producto de prueba: su precio es el de hoy. */
+const NOW = Date.parse('2026-10-01T06:00:00Z');
+
 describe('toCardProduct', () => {
   it('lleva solo lo que la tarjeta muestra', () => {
-    expect(toCardProduct(product())).toEqual({
+    expect(toCardProduct(product(), null, NOW)).toEqual({
       id: 'p1',
       slug: 'audifono-x',
       name: 'Audífono X',
@@ -79,7 +82,8 @@ describe('toCardProduct', () => {
           is_lowest: null,
         },
       }),
-      { amount: 5000, pct: 20, since: '2026-10-05T12:00:00Z' }
+      { amount: 5000, pct: 20, since: '2026-10-05T12:00:00Z' },
+      NOW
     );
     expect(card.chip).toBe('Full');
     expect(card.is_featured).toBe(true);
@@ -104,9 +108,57 @@ describe('toCardProduct', () => {
           offers_count: null,
           is_lowest: null,
         },
-      })
+      }),
+      null,
+      NOW
     );
     expect(card.chip).toBe('Envío gratis');
+  });
+
+  /*
+   * Desde el 23-11-2026 Mercado Libre no entrega precios y cada producto
+   * queda con el de su última revisión. Ese precio no se muestra como el de
+   * hoy: va con su fecha y sin nada de la oferta, que también pudo cambiar.
+   */
+  describe('con el precio sin revisar hoy', () => {
+    const offer = {
+      free_shipping: true,
+      is_full: true,
+      sold_by_ml: false,
+      official_store: false,
+      warranty: null,
+      offers_count: 3,
+      is_lowest: null,
+    };
+    const drop = { amount: 5000, pct: 20, since: '2026-09-28T12:00:00Z' };
+
+    it('revisado hace tres días: el precio con su día, sin descuento, envío ni baja', () => {
+      // La revisión fue el 30-09 a las 21:00 de Chile.
+      const card = toCardProduct(product({ offer_info: offer }), drop, Date.parse('2026-10-04T00:00:00Z'));
+      expect(card.price).toBe(20000);
+      expect(card.price_date).toBe('30/09');
+      expect(card.original_price).toBeNull();
+      expect(Object.keys(card)).not.toContain('chip');
+      expect(Object.keys(card)).not.toContain('drop_amount');
+      expect(Object.keys(card)).not.toContain('no_price');
+    });
+
+    it('nunca revisado, o hace más de un mes: no hay precio que mostrar', () => {
+      for (const card of [
+        toCardProduct(product({ price_checked_at: null, offer_info: offer }), drop, NOW),
+        toCardProduct(product({ offer_info: offer }), drop, Date.parse('2026-11-05T00:00:00Z')),
+      ]) {
+        expect(card.no_price).toBe(true);
+        expect(card.original_price).toBeNull();
+        expect(Object.keys(card)).not.toContain('price_date');
+        expect(Object.keys(card)).not.toContain('chip');
+        expect(Object.keys(card)).not.toContain('drop_amount');
+      }
+    });
+
+    it('revisado hoy no lleva fecha', () => {
+      expect(Object.keys(toCardProduct(product(), null, NOW))).not.toContain('price_date');
+    });
   });
 });
 

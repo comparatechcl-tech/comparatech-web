@@ -26,12 +26,13 @@ import { shortProductName, truncateAtWord } from '@/lib/text';
 import { seoProductName, seoProductTitle } from '@/lib/seo-title';
 import { formatCLP, formatDayMonth, formatDiscountPct } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
-import { isPastInactiveGrace, reasonInfo, type InactiveReason } from '@/lib/inactive-reasons';
+import { isPastInactiveGrace, type InactiveReason } from '@/lib/inactive-reasons';
 import { MIN_DEAL_DISCOUNT, discountOf } from '@/lib/deal-rank';
 import { domainLabel, indexableTypes, typePath, typeSlug } from '@/lib/category-listing';
 import { modelOf, modelPath, versionColor, versionLabel } from '@/lib/models';
 import { getModelVersions } from '@/lib/queries/models';
 import { viewerItems } from '@/lib/photo-viewer';
+import { buyLabel, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { PhotoViewer } from '@/components/product/PhotoViewer';
 import type { Product } from '@/lib/types';
 
@@ -73,13 +74,18 @@ export async function generateStaticParams() {
 // se arman al vuelo la primera vez que alguien entra (dynamicParams).
 export const revalidate = 7200;
 
-/** Lo que ve el comprador según por qué el producto salió de venta. */
+/**
+ * Lo que ve el comprador según por qué el producto salió de venta. En pasado:
+ * es lo que se vio en la última revisión, y desde el 23-11-2026 Mercado Libre
+ * no deja volver a revisar (ver winnersGate en lib/ml-catalog).
+ */
 const INACTIVE_MESSAGES: Record<InactiveReason, string> = {
-  sin_ganador: 'Hoy no hay vendedores ofreciendo este producto en Mercado Libre.',
-  ganador_no_verde: 'Hoy no hay un vendedor con reputación verde en Mercado Libre para este producto.',
+  sin_ganador: 'En nuestra última revisión no había vendedores ofreciendo este producto en Mercado Libre.',
+  ganador_no_verde:
+    'En nuestra última revisión no había un vendedor con reputación verde en Mercado Libre para este producto.',
   link_otro_producto: 'Estamos actualizando el link de este producto.',
 };
-const INACTIVE_FALLBACK = 'Hoy este producto no está disponible en Mercado Libre.';
+const INACTIVE_FALLBACK = 'En nuestra última revisión este producto no estaba disponible en Mercado Libre.';
 
 /** Lo que Google muestra de una meta description (ver truncateAtWord). */
 const META_DESCRIPTION_MAX = 155;
@@ -135,13 +141,25 @@ export async function generateMetadata({
   const checkedAt = product.price_checked_at ? new Date(product.price_checked_at) : null;
   const checked =
     checkedAt && !Number.isNaN(checkedAt.getTime()) ? ` (precio del ${formatDayMonth(checkedAt.toISOString())})` : '';
-  const lead = `${short} a ${formatCLP(product.price)}${discount ? ` con ${discount}% de descuento` : ''} en Mercado Libre${checked}.`;
+  // Con el precio sin revisar hoy no se habla del vendedor (pudo cambiar), y
+  // sin un precio que mostrar no se dice ninguno (lib/price-freshness).
+  const state = priceState(product.price_checked_at);
+  const lead =
+    state === 'sin_precio'
+      ? `${short}: mira sus specs y el precio de hoy en Mercado Libre.`
+      : `${short} a ${formatCLP(product.price)}${discount ? ` con ${discount}% de descuento` : ''} en Mercado Libre${checked}.`;
   // La ficha muestra un solo vendedor (el de la oferta ganadora), no una
   // comparación entre vendedores. Con un nombre largo la frase completa no
   // cabe en lo que muestra Google: ahí va la versión corta, en vez de dejar
   // que se corte a la mitad ("… la reputación…").
-  const full = `${lead} Mira sus specs y la reputación del vendedor.`;
-  const active = full.length <= META_DESCRIPTION_MAX ? full : `${lead} Specs y reputación del vendedor.`;
+  const [long, brief] =
+    state === 'hoy'
+      ? ['Mira sus specs y la reputación del vendedor.', 'Specs y reputación del vendedor.']
+      : state === 'referencia'
+        ? ['Mira sus specs y su historial de precios.', 'Specs e historial de precios.']
+        : ['', ''];
+  const full = long ? `${lead} ${long}` : lead;
+  const active = full.length <= META_DESCRIPTION_MAX || !brief ? full : `${lead} ${brief}`;
   const description = truncateAtWord(
     product.is_active
       ? active
@@ -268,13 +286,9 @@ export default async function ProductoPage({
                 .
               </p>
             </div>
-            <p className="mt-3 text-xs text-muted">
-              Último precio que vimos: {formatCLP(product.price)}.
-              {/* Solo si de verdad vuelve sola: un link a otro producto
-                  necesita que alguien genere uno nuevo. */}
-              {reasonInfo(product.inactive_reason).auto &&
-                ' Apenas vuelva a haber un vendedor con reputación verde, la ficha se actualiza sola.'}
-            </p>
+            {/* Sin "la ficha se actualiza sola": desde el 23-11-2026 no se
+                puede volver a revisar si apareció un vendedor. */}
+            <p className="mt-3 text-xs text-muted">Último precio que vimos: {formatCLP(product.price)}.</p>
             <p className="mt-4 text-sm leading-relaxed text-muted">{resolveDescription(product)}</p>
           </div>
         </div>
@@ -300,6 +314,13 @@ export default async function ProductoPage({
   // listan las tarjetas del catálogo, una por producto real.
   const comparable = catalog.some((p) => p.slug === product.slug);
 
+  // Qué se puede decir del precio (lib/price-freshness). Revisado hoy: todo
+  // como siempre. Si no, el precio va con su fecha (o no va), sin datos de la
+  // oferta ni frases sobre "hoy", y el botón manda a ver el precio de hoy.
+  const priceIs = priceState(product.price_checked_at);
+  const today = priceIs === 'hoy';
+  const cta = buyLabel(priceIs);
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">
       <ProductJsonLd product={product} />
@@ -315,21 +336,34 @@ export default async function ProductoPage({
           )}
           <h1 className="mt-1 font-heading text-2xl font-bold sm:text-3xl">{product.name}</h1>
           <div className="mt-3">
-            <PriceTag price={product.price} originalPrice={product.original_price} />
-            <PriceFreshness checkedAt={product.price_checked_at} />
+            {priceIs === 'sin_precio' ? (
+              <p className="text-sm text-muted">El precio de hoy está en Mercado Libre.</p>
+            ) : (
+              <>
+                <PriceTag price={product.price} originalPrice={product.original_price} />
+                <PriceFreshness checkedAt={product.price_checked_at} />
+              </>
+            )}
           </div>
-          <TrustChips product={product} />
-          <PriceHistoryNote productId={product.id} price={product.price} listPrice={product.original_price} createdAt={product.created_at} />
+          {today && <TrustChips product={product} />}
+          {today && (
+            <PriceHistoryNote productId={product.id} price={product.price} listPrice={product.original_price} createdAt={product.created_at} />
+          )}
           <div id={PRIMARY_CTA_ID} className="mt-6">
             <AffiliateButton
               href={href}
               productId={product.id}
               productName={product.name}
               placement="ficha"
+              label={cta}
               className="w-full sm:w-auto"
             />
           </div>
-          <p className="mt-3 text-xs text-muted">Al hacer clic irás a Mercado Libre para completar tu compra.</p>
+          <p className="mt-3 text-xs text-muted">
+            {today
+              ? 'Al hacer clic irás a Mercado Libre para completar tu compra.'
+              : 'Al hacer clic irás a Mercado Libre, donde están el precio y el stock de hoy.'}
+          </p>
           <p className="mt-4 text-sm leading-relaxed text-muted">{resolveDescription(product)}</p>
         </div>
       </div>
@@ -340,7 +374,8 @@ export default async function ProductoPage({
 
       <div className="mt-10">
         <h2 className="mb-3 font-heading text-lg font-semibold">Especificaciones</h2>
-        <ProductSpecsTable product={product} />
+        {/* El vendedor es el de la última revisión: si no fue hoy, no se muestra. */}
+        <ProductSpecsTable product={product} hideSeller={!today} />
         {/* Quien lee la tabla hasta el final está decidiendo: el botón
             tiene que estar ahí, no arriba. */}
         <div id={SPECS_CTA_ID} className="mt-5 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
@@ -349,10 +384,10 @@ export default async function ProductoPage({
             productId={product.id}
             productName={product.name}
             placement="ficha"
-            label={`Ver oferta a ${formatCLP(product.price)}`}
+            label={today ? `Ver oferta a ${formatCLP(product.price)}` : cta}
             className="w-full sm:w-auto"
           />
-          <span className="text-xs text-muted">Precio y stock final en Mercado Libre.</span>
+          {today && <span className="text-xs text-muted">Precio y stock final en Mercado Libre.</span>}
         </div>
       </div>
 
@@ -369,8 +404,10 @@ export default async function ProductoPage({
         href={href}
         productId={product.id}
         productName={product.name}
-        price={product.price}
+        price={priceIs === 'sin_precio' ? null : product.price}
         originalPrice={product.original_price}
+        priceDate={priceIs === 'referencia' && product.price_checked_at ? priceDateLabel(product.price_checked_at) : null}
+        label={today ? undefined : 'Ver precio de hoy'}
         imageUrl={product.image_url}
         primaryCtaId={PRIMARY_CTA_ID}
         otherCtaIds={[SPECS_CTA_ID]}

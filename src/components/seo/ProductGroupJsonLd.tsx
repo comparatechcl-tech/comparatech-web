@@ -36,6 +36,8 @@ export function productGroupJsonLd(model: ModelDef, versions: Product[], siteUrl
     hasVariant: versions.map((v) => {
       const color = versionColor(v.specs);
       const size = versionCapacity(v.specs);
+      // Sin oferta si el precio no se revisó hoy (ver productOffer).
+      const offer = productOffer(v);
       return {
         '@type': 'Product',
         name: v.name,
@@ -46,7 +48,7 @@ export function productGroupJsonLd(model: ModelDef, versions: Product[], siteUrl
         ...(color && colors.size > 1 ? { color } : {}),
         ...(size && sizes.size > 1 ? { size } : {}),
         inProductGroupWithID: model.slug,
-        offers: productOffer(v),
+        ...(offer ? { offers: offer } : {}),
       };
     }),
   };

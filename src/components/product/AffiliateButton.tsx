@@ -128,7 +128,8 @@ export function AffiliateButton({
       }
       onClick={handleClick}
       onAuxClick={handleAuxClick}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-xl bg-mlYellow px-5 py-3 font-heading font-semibold text-[#1a1400] transition hover:brightness-95 ${className}`}
+      // text-center: en las tarjetas del celular el texto ocupa dos líneas.
+      className={`inline-flex items-center justify-center gap-1.5 rounded-xl bg-mlYellow px-5 py-3 text-center font-heading font-semibold text-[#1a1400] transition hover:brightness-95 ${className}`}
     >
       {label}
     </a>

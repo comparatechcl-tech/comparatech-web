@@ -5,11 +5,14 @@ import {
   chartPaths,
   heldLabel,
   priceStatement,
+  referenceStatement,
   summarizeHistory,
   vsAverage,
+  type HistoryEnd,
   type PriceHistorySummary,
 } from '@/lib/price-chart';
 import { formatCLP, formatDayMonth, formatFullDate, formatFullDateTime } from '@/lib/format';
+import { priceState } from '@/lib/price-freshness';
 
 /** El lienzo del gráfico; en pantalla se estira al ancho disponible. */
 const WIDTH = 600;
@@ -32,7 +35,9 @@ const fullDayTime = (t: number) => {
  * comprar, solo lo que pasó.
  *
  * Fuera de venta, el historial termina cuando dejó de venderse y el precio
- * de la tarjeta es el último que se vio, no el de hoy.
+ * de la tarjeta es el último que se vio, no el de hoy. Lo mismo si el precio
+ * no se revisó hoy (lib/price-freshness): termina en la última revisión, y
+ * nada dice "hoy" ni "los últimos 30 días".
  *
  * Componente de servidor, sin JavaScript en el navegador: el gráfico es un
  * SVG y los números son texto, que es lo que lee Google.
@@ -55,20 +60,37 @@ export async function PriceHistory({
   const now = Date.now();
   const soldOutAt = soldOutSince ? Date.parse(soldOutSince) : NaN;
   const soldOut = Number.isFinite(soldOutAt) && soldOutAt <= now;
+  // A la venta, pero con el precio sin revisar hoy: lo que se sabe llega hasta esa revisión.
+  const checkedMs = checkedAt ? Date.parse(checkedAt) : NaN;
+  const frozen = !soldOut && priceState(checkedAt, now) !== 'hoy';
+  if (frozen && !Number.isFinite(checkedMs)) return null;
+  const end: HistoryEnd = soldOut ? 'fuera_de_venta' : frozen ? 'ultima_revision' : 'hoy';
   const history = await getPriceHistoryCached(productId);
-  const summary = history ? summarizeHistory(history, soldOut ? soldOutAt : now) : null;
+  const summary = history ? summarizeHistory(history, soldOut ? soldOutAt : frozen ? checkedMs : now) : null;
   if (!summary) return null;
 
-  // El precio de hoy en una frase con fechas completas (lib/price-chart). Fuera de venta no hay "hoy".
-  const statement = soldOut ? null : priceStatement(price, checkedAt, summary, now);
+  // El precio en una frase con fechas completas (lib/price-chart). Fuera de venta no hay.
+  const statement =
+    end === 'hoy'
+      ? priceStatement(price, checkedAt, summary, now)
+      : end === 'ultima_revision'
+        ? referenceStatement(price, checkedAt, summary)
+        : null;
   const since = fullDay(summary.trackedSince);
-  const until = soldOut ? ` hasta el ${fullDay(summary.end)}, cuando dejó de estar a la venta` : '';
+  const until =
+    end === 'fuera_de_venta'
+      ? ` hasta el ${fullDay(summary.end)}, cuando dejó de estar a la venta`
+      : end === 'ultima_revision'
+        ? ` hasta el ${fullDay(summary.end)}, la última vez que lo revisamos`
+        : '';
   const neverChanged = summary.recent.length === 1;
   const lead = neverChanged
-    ? soldOut
-      ? `El precio de ${name} en Mercado Libre no cambió desde el ${since}${until}.`
-      : `El precio de ${name} en Mercado Libre no ha cambiado desde el ${since}, cuando empezamos a seguirlo.`
-    : `Así se movió el precio de ${name} en Mercado Libre desde el ${since}${until}. Lo anotamos cada vez que lo vemos cambiar.`;
+    ? end === 'hoy'
+      ? `El precio de ${name} en Mercado Libre no ha cambiado desde el ${since}, cuando empezamos a seguirlo.`
+      : `El precio de ${name} en Mercado Libre no cambió desde el ${since}${until}.`
+    : `Así se movió el precio de ${name} en Mercado Libre desde el ${since}${until}. Lo anotamos cada vez que lo ${
+        end === 'ultima_revision' ? 'vimos' : 'vemos'
+      } cambiar.`;
 
   return (
     <section aria-labelledby="historial-de-precios" className="mt-10">
@@ -78,15 +100,15 @@ export async function PriceHistory({
       {statement && <p className="mb-2 text-sm leading-relaxed text-fg">{statement}</p>}
       <p className="text-sm leading-relaxed text-muted">{lead}</p>
 
-      <PriceChart summary={summary} price={price} soldOut={soldOut} />
-      {!neverChanged && <Numbers summary={summary} price={price} soldOut={soldOut} />}
-      {!soldOut && summary.changes48h >= BUSY_CHANGES_48H && (
+      <PriceChart summary={summary} price={price} end={end} />
+      {!neverChanged && <Numbers summary={summary} price={price} end={end} />}
+      {end === 'hoy' && summary.changes48h >= BUSY_CHANGES_48H && (
         <p className="mt-3 text-xs text-muted">
           El precio cambia seguido: {summary.changes48h} veces en las últimas 48 horas. Revisa el de Mercado Libre
           antes de comprar.
         </p>
       )}
-      {!neverChanged && <Changes summary={summary} soldOut={soldOut} />}
+      {!neverChanged && <Changes summary={summary} end={end} />}
       <p className="mt-3 text-xs text-muted">
         <Link href="/como-funciona#historial" className="hover:text-accent hover:underline">
           Cómo armamos este historial
@@ -97,13 +119,15 @@ export async function PriceHistory({
 }
 
 /** El gráfico del historial. Lo usa también la página de cada modelo (ModelPriceHistory). */
-export function PriceChart({ summary, price, soldOut }: { summary: PriceHistorySummary; price: number; soldOut: boolean }) {
+export function PriceChart({ summary, price, end }: { summary: PriceHistorySummary; price: number; end: HistoryEnd }) {
   const { line, area, averageY } = chartPaths(summary, WIDTH, HEIGHT);
   const flat = summary.min === summary.max;
   const label = flat
-    ? `Precio sin cambios desde el ${day(summary.trackedSince)}: ${formatCLP(summary.max)}.`
+    ? `Precio sin cambios ${end === 'hoy' ? 'desde' : 'entre'} el ${day(summary.trackedSince)}${
+        end === 'hoy' ? '' : ` y el ${day(summary.end)}`
+      }: ${formatCLP(summary.max)}.`
     : `Precio entre ${formatCLP(summary.min)} y ${formatCLP(summary.max)} desde el ${day(summary.start)}; ${
-        soldOut ? 'último' : 'hoy'
+        end === 'hoy' ? 'hoy' : `el ${day(summary.end)},`
       } ${formatCLP(price)}.`;
 
   return (
@@ -152,11 +176,11 @@ export function PriceChart({ summary, price, soldOut }: { summary: PriceHistoryS
       </div>
       <div aria-hidden className="mt-1 flex justify-between pl-[5.25rem] text-[11px] text-muted">
         <span>{day(summary.start)}</span>
-        <span>{soldOut ? day(summary.end) : 'Hoy'}</span>
+        <span>{end === 'hoy' ? 'Hoy' : day(summary.end)}</span>
       </div>
       {!flat && (
         <figcaption className="mt-2 text-xs text-muted">
-          La línea punteada es el promedio {averageWhen(summary, soldOut)}.
+          La línea punteada es el promedio {averageWhen(summary, end)}.
         </figcaption>
       )}
     </figure>
@@ -164,23 +188,23 @@ export function PriceChart({ summary, price, soldOut }: { summary: PriceHistoryS
 }
 
 /** "de los últimos 30 días", o desde el primer registro si hay menos. */
-function averageWhen(summary: PriceHistorySummary, soldOut: boolean): string {
+function averageWhen(summary: PriceHistorySummary, end: HistoryEnd): string {
   if (summary.averageFrom <= summary.trackedSince) return `desde el ${day(summary.trackedSince)}`;
-  return soldOut ? 'de sus últimos 30 días a la venta' : 'de los últimos 30 días';
+  if (end === 'fuera_de_venta') return 'de sus últimos 30 días a la venta';
+  return end === 'ultima_revision' ? `de los 30 días hasta el ${day(summary.end)}` : 'de los últimos 30 días';
 }
 
-function Numbers({ summary, price, soldOut }: { summary: PriceHistorySummary; price: number; soldOut: boolean }) {
+function Numbers({ summary, price, end }: { summary: PriceHistorySummary; price: number; end: HistoryEnd }) {
   const diff = vsAverage(price, summary.average);
   const held = heldLabel(summary.minHeldMs);
+  const vsAverageNote = diff === 0 ? 'Igual al promedio' : `${Math.abs(diff)}% ${diff < 0 ? 'bajo' : 'sobre'} el promedio`;
   const items = [
-    soldOut
+    end === 'fuera_de_venta'
       ? { term: 'Último precio', value: formatCLP(price), note: 'Hoy no está a la venta' }
-      : {
-          term: 'Hoy',
-          value: formatCLP(price),
-          note: diff === 0 ? 'Igual al promedio' : `${Math.abs(diff)}% ${diff < 0 ? 'bajo' : 'sobre'} el promedio`,
-        },
-    { term: `Promedio ${averageWhen(summary, soldOut)}`, value: formatCLP(summary.average) },
+      : end === 'ultima_revision'
+        ? { term: `El ${day(summary.end)}`, value: formatCLP(price), note: vsAverageNote }
+        : { term: 'Hoy', value: formatCLP(price), note: vsAverageNote },
+    { term: `Promedio ${averageWhen(summary, end)}`, value: formatCLP(summary.average) },
     {
       term: 'Más bajo registrado',
       value: formatCLP(summary.min),
@@ -202,13 +226,15 @@ function Numbers({ summary, price, soldOut }: { summary: PriceHistorySummary; pr
   );
 }
 
-function Changes({ summary, soldOut }: { summary: PriceHistorySummary; soldOut: boolean }) {
+function Changes({ summary, end }: { summary: PriceHistorySummary; end: HistoryEnd }) {
   const when =
     summary.averageFrom <= summary.trackedSince
       ? `desde el ${day(summary.trackedSince)}`
-      : soldOut
+      : end === 'fuera_de_venta'
         ? 'en sus últimos 30 días a la venta'
-        : 'en los últimos 30 días';
+        : end === 'ultima_revision'
+          ? `en los 30 días hasta el ${day(summary.end)}`
+          : 'en los últimos 30 días';
 
   return (
     <details className="mt-4 text-sm">

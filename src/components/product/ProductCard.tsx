@@ -84,7 +84,13 @@ export function ProductCard({
             </div>
           )}
           <div className="mt-auto pt-2">
-            <PriceTag price={product.price} originalPrice={product.original_price} hideDiscount={isDeal} />
+            {/* Sin revisar hoy, el precio va con su fecha o no va (lib/price-freshness). */}
+            {product.no_price ? (
+              <p className="text-xs text-muted">El precio de hoy está en Mercado Libre</p>
+            ) : (
+              <PriceTag price={product.price} originalPrice={product.original_price} hideDiscount={isDeal} />
+            )}
+            {product.price_date && <p className="mt-0.5 text-[11px] text-muted">Precio del {product.price_date}</p>}
             {(dropAmount > 0 || chip) && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {dropAmount > 0 && <DropChip amount={dropAmount} />}
@@ -104,6 +110,7 @@ export function ProductCard({
           productId={product.id}
           productName={product.name}
           placement={placement}
+          label={product.price_date || product.no_price ? 'Ver precio de hoy' : undefined}
           className="w-full text-xs"
         />
       </div>

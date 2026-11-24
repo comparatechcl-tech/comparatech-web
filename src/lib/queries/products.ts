@@ -9,6 +9,7 @@ import { normalizeName } from '@/lib/text';
 import { pickAlternatives } from '@/lib/search';
 import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 import { INACTIVE_GRACE_DAYS, isPastInactiveGrace } from '@/lib/inactive-reasons';
+import { withoutStaleOffer } from '@/lib/price-freshness';
 
 /**
  * Capa de acceso a datos de productos, siempre desde la tabla `products`.
@@ -182,8 +183,15 @@ async function readCatalogCached(): Promise<Product[]> {
  */
 const fetchActiveProducts = cache(() => readCatalogCached());
 
+/**
+ * Lo que sale de acá es lo que el sitio público puede mostrar: con el link de
+ * compra resuelto y, si el precio no se revisó hoy, sin descuento ni datos de
+ * la oferta (ver lib/price-freshness). Así ninguna página los afirma por su
+ * cuenta: ni las ofertas, ni las tarjetas, ni el dato estructurado.
+ */
 function withOutbound(products: Product[], settings: Awaited<ReturnType<typeof getAffiliateSettings>>) {
-  return products.map((p) => ({ ...p, outbound_url: resolveOutboundUrl(p, settings) }));
+  const now = Date.now();
+  return products.map((p) => ({ ...withoutStaleOffer(p, now), outbound_url: resolveOutboundUrl(p, settings) }));
 }
 
 export async function getAllProducts(): Promise<Product[]> {

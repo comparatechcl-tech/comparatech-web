@@ -15,6 +15,7 @@ import { categoryFromDomain } from '@/lib/categories';
 import { mapWithConcurrency, mlErrorsSince, retryWinnersNow, winnersClosure } from '@/lib/ml-catalog';
 import { resolveLinkTarget } from '@/lib/link-check';
 import { readAffiliateSettings } from '@/lib/settings';
+import { priceStateChangedSince } from '@/lib/price-freshness';
 import {
   PRICED_COLUMNS,
   applyPricing,
@@ -116,6 +117,13 @@ const COLUMNS_0016 = 'offer_info, ml_category_id, ml_root_category';
 const REFRESH_COLUMNS = `${PRICED_COLUMNS}, slug, price_checked_at`;
 
 type RefreshRow = PricedProduct & { slug?: string | null; price_checked_at?: string | null };
+
+/**
+ * Cuánto se mira hacia atrás para saber si un precio cambió de estado desde
+ * la corrida anterior (ver priceStateChangedSince). Dos horas, el doble de lo
+ * que pasa entre corridas: si una se pierde, la siguiente igual lo nota.
+ */
+const PRICE_STATE_WINDOW_MS = 2 * 3_600_000;
 
 /** Sobre esta proporción de errores transitorios, la corrida cuenta como fallida. */
 const MAX_TRANSIENT_RATIO = 0.5;
@@ -393,8 +401,17 @@ export async function GET(req: NextRequest) {
 
     const repaired = !late && !outOfTime() ? await repairMissingData(admin, token, outOfTime) : 0;
 
+    // Un precio que dejó de ser "el de hoy" (o de servir de referencia) desde
+    // la corrida anterior cambia lo que muestran las páginas, aunque en la
+    // base no cambie nada (lib/price-freshness): hay que volver a armarlas.
+    const stateChanged = priceStateChangedSince(
+      rows.filter((r) => !freshIds.has(r.id)).map((r) => r.price_checked_at),
+      startedAt - PRICE_STATE_WINDOW_MS,
+      startedAt
+    );
+
     // toWrite ya es lo que se escribió: vacío si se pasó del corte duro.
-    const visible = hasVisibleChanges(toWrite) || repaired > 0;
+    const visible = hasVisibleChanges(toWrite) || repaired > 0 || stateChanged;
     if (visible) {
       revalidatePath('/', 'layout');
       revalidateTag('catalog');
@@ -431,6 +448,8 @@ export async function GET(req: NextRequest) {
       {
         ...summary,
         consulta_de_precios_cerrada: pricesClosed,
+        // Algún precio dejó de mostrarse como el de hoy (o como referencia): se volvió a armar el sitio.
+        precios_que_cambiaron_de_estado: stateChanged,
         // Productos que no se pidieron a ML por estar cerrada (ver winnersGate).
         sin_consultar_por_cierre: closure.skipped - skippedBefore,
         // Ofertas y productos con clics o en redes que pasaron adelante.

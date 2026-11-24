@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatFullDateTime, formatTimeAgo } from '@/lib/format';
+import { priceState } from '@/lib/price-freshness';
 
 /**
  * "Precio revisado hace 12 minutos". Dice "revisado" y no "verificado": habla
@@ -16,23 +17,29 @@ import { formatFullDateTime, formatTimeAgo } from '@/lib/format';
  * que es cierta se lea cuando se lea: los buscadores y las IAs leen ese HTML,
  * y un precio sin fecha no les dice si está vigente. Hasta el 22-11-2026 el
  * servidor no escribía nada.
+ *
+ * Si la revisión no es de hoy (lib/price-freshness), la fecha completa se
+ * queda también en el navegador: "hace 3 días" junto al precio se lee como un
+ * descuido, y la fecha dice de qué día es ese precio.
  */
 export function PriceFreshness({ checkedAt }: { checkedAt: string | null }) {
   const [mounted, setMounted] = useState(false);
   const [label, setLabel] = useState<string | null>(null);
 
+  const when = formatFullDateTime(checkedAt);
+  const full = when ? `el ${when.date} a las ${when.time} (hora de Chile)` : null;
+
   useEffect(() => {
-    const update = () => setLabel(formatTimeAgo(checkedAt));
+    const update = () => setLabel(priceState(checkedAt) === 'hoy' ? formatTimeAgo(checkedAt) : full);
     update();
     setMounted(true);
     const timer = setInterval(update, 60_000);
     return () => clearInterval(timer);
-  }, [checkedAt]);
+  }, [checkedAt, full]);
 
   // Antes de hidratar: lo mismo que escribió el servidor, la fecha completa.
-  // Ya en el navegador: "hace 12 minutos", o nada si la fecha no sirve.
-  const when = formatFullDateTime(checkedAt);
-  const text = mounted ? label : when ? `el ${when.date} a las ${when.time} (hora de Chile)` : null;
+  // Ya en el navegador: "hace 12 minutos" si es de hoy, o nada si la fecha no sirve.
+  const text = mounted ? label : full;
   if (!text) return null;
 
   return (

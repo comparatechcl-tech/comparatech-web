@@ -27,6 +27,8 @@ export function StickyBuyBar({
   productName,
   price,
   originalPrice,
+  priceDate = null,
+  label = 'Ver oferta en Mercado Libre',
   imageUrl,
   primaryCtaId,
   otherCtaIds = [],
@@ -34,8 +36,12 @@ export function StickyBuyBar({
   href: string;
   productId: string;
   productName: string;
-  price: number;
+  /** null: no hay un precio que mostrar (lib/price-freshness). */
+  price: number | null;
   originalPrice: number | null;
+  /** "23/11": el precio no es de hoy y va con el día de su última revisión. */
+  priceDate?: string | null;
+  label?: string;
   imageUrl: string;
   /** id del elemento que envuelve el botón principal. */
   primaryCtaId: string;
@@ -95,7 +101,7 @@ export function StickyBuyBar({
     };
   }, [primaryCtaId, otherIdsKey]);
 
-  const discount = formatDiscountPct(price, originalPrice);
+  const discount = price === null ? null : formatDiscountPct(price, originalPrice);
 
   return (
     <div
@@ -113,7 +119,12 @@ export function StickyBuyBar({
           <Image loader={mlImageLoader} src={imageUrl} alt="" fill sizes="44px" className="object-contain" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="font-heading text-base font-bold leading-tight text-fg">{formatCLP(price)}</p>
+          {price === null ? (
+            <p className="text-xs leading-tight text-muted">El precio de hoy está en Mercado Libre</p>
+          ) : (
+            <p className="font-heading text-base font-bold leading-tight text-fg">{formatCLP(price)}</p>
+          )}
+          {price !== null && priceDate ? <p className="text-xs text-muted">Precio del {priceDate}</p> : null}
           {discount ? <p className="text-xs font-medium text-accent">-{discount}%</p> : null}
         </div>
         <AffiliateButton
@@ -121,7 +132,7 @@ export function StickyBuyBar({
           productId={productId}
           productName={productName}
           placement="ficha-sticky"
-          label="Ver oferta en Mercado Libre"
+          label={label}
           className="shrink-0 px-3 py-2.5 text-xs"
         />
       </div>

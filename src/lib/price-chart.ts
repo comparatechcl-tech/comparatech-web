@@ -160,6 +160,46 @@ export function priceStatement(
 }
 
 /**
+ * Cómo termina el historial que se muestra: hoy, cuando el producto dejó de
+ * venderse, o en la última revisión del precio si esa revisión no es de hoy
+ * (lib/price-freshness): después de ella no se sabe qué pasó con el precio.
+ */
+export type HistoryEnd = 'hoy' | 'fuera_de_venta' | 'ultima_revision';
+
+/**
+ * Lo mismo que priceStatement cuando el precio no se revisó hoy: no dice
+ * "Hoy", dice de qué día y hora es ese precio y dónde está el de hoy.
+ * `summary` tiene que terminar en esa revisión. null si no se sabe cuándo fue.
+ *
+ *   "El 23-11-2026 a las 13:33 (hora de Chile), la última vez que revisamos el
+ *   precio, costaba $544.221 en Mercado Libre. El más bajo que registramos
+ *   desde el 05-10-2026 fue $496.150, el 04-11-2026. El precio de hoy está en
+ *   Mercado Libre."
+ */
+export function referenceStatement(
+  price: number,
+  checkedAt: string | null | undefined,
+  summary: PriceHistorySummary
+): string | null {
+  const checked = checkedAt ? Date.parse(checkedAt) : NaN;
+  if (!Number.isFinite(checked) || !(price > 0)) return null;
+  const when = formatFullDateTime(checked);
+  if (!when) return null;
+
+  const head = `El ${when.date} a las ${when.time} (hora de Chile), la última vez que revisamos el precio, costaba ${formatCLP(price)} en Mercado Libre.`;
+  const tail = 'El precio de hoy está en Mercado Libre.';
+  const last = summary.stretches[summary.stretches.length - 1];
+  if (summary.recent.length === 1 || !last || last.price !== price) return `${head} ${tail}`;
+
+  const since = formatFullDate(summary.start);
+  const lowest =
+    last.price === summary.min
+      ? `Era el más bajo que registramos desde el ${since}.`
+      : `El más bajo que registramos desde el ${since} fue ${formatCLP(summary.min)}, el ${formatFullDate(summary.minAt)}.`;
+  return `${head} ${lowest} ${tail}`;
+}
+
+/**
  * Cuánto está el precio de hoy sobre (+) o bajo (−) el promedio, en
  * porcentaje redondeado. 0 si la diferencia es menor a 1%: no se dice
  * "1% bajo el promedio" por $300.
