@@ -292,6 +292,21 @@ describe('bitácora de crons', () => {
       expect(status).toEqual({ state: 'ml_rechaza', lastAt: '2026-10-04T16:33:00Z', rejected: 1274, checked: 1274 });
     });
 
+    it('Mercado Libre tiene cerrada la consulta: la corrida solo probó y quedó anotada como bien hecha', () => {
+      const status = refreshStatusFromRuns(
+        [
+          omitida('2026-10-04T16:33:00Z'),
+          run({
+            started_at: '2026-10-04T16:03:00Z',
+            ok: true,
+            summary: { revisados: 1297, errores_transitorios: 1297, consulta_de_precios_cerrada: true, errores_ml: {} },
+          }),
+        ],
+        NOW
+      );
+      expect(status).toEqual({ state: 'ml_cerro', lastAt: '2026-10-04T16:33:00Z' });
+    });
+
     it('falla por otra razón: muestra el error anotado', () => {
       const status = refreshStatusFromRuns(
         [run({ started_at: '2026-10-04T16:33:00Z', ok: false, summary: { revisados: 100, errores_ml: { x: 3 } }, error: 'timeout' })],

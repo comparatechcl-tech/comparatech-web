@@ -326,6 +326,8 @@ function HealthRow({
 function refreshHint(refresh: RefreshStatus | null, tone: Tone): string {
   const at = refresh?.lastAt ? ` (último intento: ${formatWhen(refresh.lastAt)})` : '';
   switch (refresh?.state) {
+    case 'ml_cerro':
+      return `Mercado Libre cerró la consulta automática de precios el 23-11-2026 y su soporte confirmó que es a propósito. El sitio prueba una vez por hora por si la reabre${at}. No es una falla: no hay migraciones que correr.`;
     case 'ml_rechaza':
       return `El refresco sí corre${at}, pero Mercado Libre está rechazando la consulta de precios en ${num(
         refresh.rejected
@@ -359,6 +361,17 @@ function PriceHealth({
   const old = oldest.data;
   const oldTone: Tone =
     old === null ? 'ok' : old > OLDEST_PRICE_BAD_MIN ? 'bad' : old > OLDEST_PRICE_WARN_MIN ? 'warn' : 'ok';
+  // Cerrada por Mercado Libre: se sabe y no se arregla desde acá, así que va en ámbar y no en rojo.
+  if (refresh.data?.state === 'ml_cerro' && tone !== 'ok') {
+    return (
+      <HealthRow
+        tone="warn"
+        label="Precios verificados"
+        value={`hace ${formatMinutes(min)}`}
+        hint={refreshHint(refresh.data, 'warn')}
+      />
+    );
+  }
   return (
     <HealthRow
       tone={tone === 'bad' || oldTone === 'bad' ? 'bad' : tone === 'warn' || oldTone === 'warn' ? 'warn' : 'ok'}

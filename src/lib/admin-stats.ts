@@ -495,6 +495,8 @@ export type RefreshState =
   | 'detenido'
   /** Corre, pero Mercado Libre rechaza la consulta de precios en la mayoría. */
   | 'ml_rechaza'
+  /** Corre y solo prueba: Mercado Libre tiene cerrada la consulta de precios (ver winnersGate en lib/ml-catalog). */
+  | 'ml_cerro'
   /** Corre y falla por otra razón. */
   | 'falla'
   /** Corre y la última revisión terminó bien. */
@@ -526,9 +528,11 @@ export function refreshStatusFromRuns(runs: CronRunRow[], now: Date): RefreshSta
   // Las pasadas de cada media hora se saltan la revisión si la última
   // completa es reciente: cuenta la última que revisó de verdad.
   const real = runs.find((r) => !asRecord(r.summary)?.omitida);
+  const summary = asRecord(real?.summary);
+  // Esa corrida queda anotada como bien hecha: no hay nada que arreglar acá.
+  if (summary?.consulta_de_precios_cerrada === true) return { state: 'ml_cerro', lastAt };
   if (!real || real.ok !== false) return { state: 'corre', lastAt };
 
-  const summary = asRecord(real.summary);
   const checked = typeof summary?.revisados === 'number' ? summary.revisados : 0;
   const rejected = Object.values(asRecord(summary?.errores_ml) ?? {}).reduce<number>(
     (n, v) => n + (typeof v === 'number' ? v : 0),

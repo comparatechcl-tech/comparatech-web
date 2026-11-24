@@ -12,7 +12,7 @@ import { oldestVisibleMinutes, refreshQueue } from '@/lib/refresh-queue';
 import { syncTelegramPosts } from '@/lib/social/telegram';
 import { enrichFromMl, getMlToken, mlTokenAttempts, mlTokenError } from '@/lib/ml-enrichment';
 import { categoryFromDomain } from '@/lib/categories';
-import { mapWithConcurrency, mlErrorsSince } from '@/lib/ml-catalog';
+import { mapWithConcurrency, mlErrorsSince, retryWinnersNow, winnersClosure } from '@/lib/ml-catalog';
 import { resolveLinkTarget } from '@/lib/link-check';
 import { readAffiliateSettings } from '@/lib/settings';
 import {
@@ -64,6 +64,14 @@ import {
  * lib/refresh-queue). El atraso se mide con el precio visible más viejo, en
  * el resumen de cada corrida y en /api/health. El resumen trae también lo
  * que tardó cada etapa (tiempos_ms).
+ *
+ * Desde el 23-11-2026 ML tiene cerrada la consulta de precios para esta
+ * aplicación, a propósito (ver winnersGate en lib/ml-catalog). Mientras siga
+ * así, la corrida hace una sola consulta de prueba por hora, no cambia nada y
+ * queda anotada como bien hecha con `consulta_de_precios_cerrada: true`: no
+ * es una falla que alguien pueda arreglar, y como falla hacía reintentar los
+ * 1.300 productos cada media hora y dejaba el healthcheck en rojo para
+ * siempre. Si ML la reabre, la prueba lo nota y todo vuelve solo.
  */
 
 export const maxDuration = 60;
@@ -290,6 +298,9 @@ export async function GET(req: NextRequest) {
       const minutes = Math.round((Date.now() - new Date(last).getTime()) / 60_000);
       return finish(true, { omitida: `la última revisión completa fue hace ${minutes} min; se revisa cada hora` }, 200);
     }
+  } else {
+    // Lanzada a mano: si ML tenía cerrada la consulta de precios, se prueba ahora.
+    retryWinnersNow();
   }
 
   try {
@@ -341,6 +352,7 @@ export async function GET(req: NextRequest) {
 
     const { directLinks } = await readAffiliateSettings(admin);
     const readMs = Date.now() - startedAt;
+    const skippedBefore = winnersClosure().skipped;
     const outcomes = await priceProducts(queue, token, {
       concurrency: pricingConcurrency(queue.length),
       outOfTime,
@@ -351,6 +363,9 @@ export async function GET(req: NextRequest) {
     });
     const mlMs = Date.now() - startedAt - readMs;
     const summary = summarizePricing(outcomes);
+    // ML tiene cerrada la consulta de precios y no respondió ni un producto.
+    const closure = winnersClosure();
+    const pricesClosed = closure.closed && summary.revisados > 0 && summary.errores_transitorios === summary.revisados;
 
     // Escribir tarde es peor que no escribir: Vercel corta a los 60 s y la
     // corrida quedaría a medias sin respuesta. Pasado el plazo se escribe
@@ -408,12 +423,16 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Una escritura parcial sigue contando como corrida degradada.
-    const ok = !late && isHealthy(summary, writeErrors);
+    // Una escritura parcial sigue contando como corrida degradada. Con la
+    // consulta cerrada por ML no hay nada que la corrida pudiera hacer mejor.
+    const ok = !late && (pricesClosed ? writeErrors === 0 : isHealthy(summary, writeErrors));
     return finish(
       ok,
       {
         ...summary,
+        consulta_de_precios_cerrada: pricesClosed,
+        // Productos que no se pidieron a ML por estar cerrada (ver winnersGate).
+        sin_consultar_por_cierre: closure.skipped - skippedBefore,
         // Ofertas y productos con clics o en redes que pasaron adelante.
         prioritarios: priority,
         // El precio visible más viejo que quedó: si sube corrida tras

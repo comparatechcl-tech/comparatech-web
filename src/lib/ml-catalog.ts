@@ -434,11 +434,133 @@ export type WinnersResult =
  *    desactivaba el producto por un tropiezo de la API.
  */
 export async function getWinners(productId: string, token: string): Promise<WinnersResult> {
+  const closed = (): WinnersResult => {
+    winnersGate.skipped++;
+    return { status: 'error', detail: WINNERS_CLOSED_DETAIL };
+  };
+
+  if (Date.now() < winnersGate.until) return closed();
+  if (winnersGate.closed) {
+    // Pasó el rato: una sola consulta de prueba, y las demás esperan lo que diga.
+    if (winnersGate.probe) {
+      if (!(await winnersGate.probe)) return closed();
+    } else {
+      let settle!: (open: boolean) => void;
+      winnersGate.probe = new Promise<boolean>((resolve) => {
+        settle = resolve;
+      });
+      try {
+        return await requestWinners(productId, token);
+      } finally {
+        winnersGate.probe = null;
+        settle(!winnersGate.closed);
+      }
+    }
+  }
+  return requestWinners(productId, token);
+}
+
+/** El código con que ML niega una ruta por política: no es un tropiezo pasajero. */
+const POLICY_BLOCK_CODE = 'PA_UNAUTHORIZED_RESULT_FROM_POLICIES';
+
+/** Lo que responde getWinners mientras ML tiene cerrada la ruta. */
+export const WINNERS_CLOSED_DETAIL = 'ML tiene cerrada la consulta de precios';
+
+/** Rechazos seguidos, sin ninguna respuesta buena entre medio, para darla por cerrada. */
+const WINNERS_CLOSE_AFTER = 5;
+/** Cuánto se deja de preguntar antes de probar otra vez (el refresco revisa cada hora). */
+const WINNERS_CLOSED_MS = 55 * 60_000;
+/** Si la consulta de prueba no dice nada (red, 429, 5xx), se espera esto antes de otra. */
+const WINNERS_PROBE_RETRY_MS = 60_000;
+
+/**
+ * Corte de /products/{id}/items. Desde el 23-11-2026 ML responde 403
+ * PA_UNAUTHORIZED_RESULT_FROM_POLICIES a esta ruta, y su soporte confirmó el
+ * 24-11 que es a propósito para aplicaciones no certificadas. Seguir pidiendo
+ * los 1.300 productos cada media hora eran unas 62.000 llamadas rechazadas al
+ * día, y ML bloquea aplicaciones por "volumen excesivo de llamadas"
+ * (EXCESSIVE_API_CALL): se perdería también lo que sí responde (fichas,
+ * búsqueda, vendedores).
+ *
+ * Con WINNERS_CLOSE_AFTER rechazos seguidos de ese tipo la ruta se da por
+ * cerrada: durante WINNERS_CLOSED_MS getWinners responde "cerrada" sin llamar
+ * a ML. Pasado ese rato, UNA consulta de prueba decide: si ML la rechaza
+ * igual, se cierra otro rato; si responde, todo vuelve a funcionar solo.
+ *
+ * El estado vive en el proceso (en Railway es uno solo y dura días). Al
+ * reiniciar se vuelve a medir con las primeras consultas.
+ */
+const winnersGate = {
+  /** Rechazos por política seguidos. */
+  streak: 0,
+  /** ML la tenía cerrada la última vez que se supo. */
+  closed: false,
+  /** Desde cuándo se sabe, en este proceso. */
+  since: null as number | null,
+  /** Hasta cuándo no se llama a ML. */
+  until: 0,
+  /** Consultas que no se hicieron por estar cerrada. */
+  skipped: 0,
+  /** La consulta de prueba en curso: resuelve true si ML volvió a responder. */
+  probe: null as Promise<boolean> | null,
+};
+
+function noteWinnersAnswer(answer: 'responde' | 'cerrada' | 'sin_dato') {
+  const now = Date.now();
+  if (answer === 'responde') {
+    winnersGate.streak = 0;
+    winnersGate.closed = false;
+    winnersGate.since = null;
+    winnersGate.until = 0;
+  } else if (answer === 'cerrada') {
+    winnersGate.streak++;
+    if (winnersGate.closed || winnersGate.streak >= WINNERS_CLOSE_AFTER) {
+      winnersGate.closed = true;
+      winnersGate.since ??= now;
+      winnersGate.until = now + WINNERS_CLOSED_MS;
+    }
+  } else if (winnersGate.closed) {
+    // No dice si sigue cerrada: se prueba de nuevo en un rato corto, no con cada producto.
+    winnersGate.until = Math.max(winnersGate.until, now + WINNERS_PROBE_RETRY_MS);
+  }
+}
+
+/** Si ML tiene cerrada la consulta de precios, según lo visto en este proceso. */
+export function winnersClosure(): { closed: boolean; since: string | null; skipped: number } {
+  return {
+    closed: winnersGate.closed,
+    since: winnersGate.since === null ? null : new Date(winnersGate.since).toISOString(),
+    skipped: winnersGate.skipped,
+  };
+}
+
+/** La próxima consulta prueba de nuevo sin esperar el rato (revisión lanzada a mano). */
+export function retryWinnersNow(): void {
+  winnersGate.until = 0;
+}
+
+/** Solo para las pruebas: el estado vive en el módulo. */
+export function resetWinnersGate(): void {
+  Object.assign(winnersGate, { streak: 0, closed: false, since: null, until: 0, skipped: 0, probe: null });
+}
+
+async function requestWinners(productId: string, token: string): Promise<WinnersResult> {
   try {
     const res = await fetchMl(`${API}/products/${productId}/items`, token, 8000);
-    if (!res) return { status: 'error', detail: 'fallo de red' };
-    if (res.status === 404) return { status: 'no_winner' };
-    if (!res.ok) return { status: 'error', detail: `HTTP ${res.status}` };
+    if (!res) {
+      noteWinnersAnswer('sin_dato');
+      return { status: 'error', detail: 'fallo de red' };
+    }
+    if (res.status === 404) {
+      noteWinnersAnswer('responde');
+      return { status: 'no_winner' };
+    }
+    if (!res.ok) {
+      const denied = res.status === 403 && (await mlErrorCode(res)) === POLICY_BLOCK_CODE;
+      noteWinnersAnswer(denied ? 'cerrada' : 'sin_dato');
+      return { status: 'error', detail: denied ? WINNERS_CLOSED_DETAIL : `HTTP ${res.status}` };
+    }
+    noteWinnersAnswer('responde');
 
     const data = (await res.json()) as { results?: MlOffer[]; paging?: { total?: number } };
     const offers = (data.results ?? []).filter(

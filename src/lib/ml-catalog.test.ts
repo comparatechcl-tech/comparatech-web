@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  WINNERS_CLOSED_DETAIL,
   discoverDomains,
   getHighlightedProducts,
   getSellers,
   getSubcategories,
   getTrendKeywords,
+  getWinners,
   mlErrorsSince,
+  resetWinnersGate,
+  retryWinnersNow,
   searchCatalogProducts,
+  winnersClosure,
 } from '@/lib/ml-catalog';
 
 /*
@@ -30,6 +35,7 @@ const BLOCKED = {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  resetWinnersGate();
 });
 
 describe('getHighlightedProducts', () => {
@@ -308,6 +314,119 @@ describe('getSellers', () => {
     );
     const sellers = await getSellers([1, 2], 'tok');
     expect([...sellers.keys()]).toEqual([1]);
+  });
+});
+
+/*
+ * Desde el 23-11-2026 ML responde 403 PolicyAgent a /products/{id}/items, a
+ * propósito. Lo que importa: que el sitio deje de pedir los 1.300 productos
+ * cada media hora (ML bloquea aplicaciones por exceso de llamadas), que siga
+ * probando de a una consulta por si la reabre, y que un tropiezo cualquiera
+ * no la dé por cerrada.
+ */
+describe('getWinners con la consulta de precios cerrada por ML', () => {
+  const T0 = new Date('2026-11-24T14:00:00Z').getTime();
+  const CLOSED = { status: 'error', detail: WINNERS_CLOSED_DETAIL };
+  const offers = (price: number) => json(200, { results: [{ item_id: 'MLC9', seller_id: 7, price }], paging: { total: 1 } });
+
+  /** Cierra la ruta con cinco rechazos seguidos y devuelve el fetch falso. */
+  async function close() {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json(403, BLOCKED));
+    vi.stubGlobal('fetch', fetchMock);
+    for (let i = 0; i < 5; i++) await getWinners(`MLC${i}`, 'tok');
+    return fetchMock;
+  }
+
+  it('con cinco rechazos por política seguidos se da por cerrada y deja de llamar a ML', async () => {
+    const fetchMock = await close();
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(winnersClosure()).toMatchObject({ closed: true, skipped: 0 });
+
+    const later = await Promise.all(Array.from({ length: 20 }, (_, i) => getWinners(`MLC1${i}`, 'tok')));
+    expect(later.every((r) => r.status === 'error' && r.detail === WINNERS_CLOSED_DETAIL)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(winnersClosure().skipped).toBe(20);
+  });
+
+  it('pasado el rato hace una sola consulta de prueba, aunque lleguen muchas juntas, y si ML sigue negando cierra otro rato', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    const fetchMock = await close();
+
+    vi.setSystemTime(T0 + 54 * 60_000);
+    expect(await getWinners('MLC1', 'tok')).toEqual(CLOSED);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+
+    vi.setSystemTime(T0 + 56 * 60_000);
+    const batch = await Promise.all(Array.from({ length: 12 }, (_, i) => getWinners(`MLC2${i}`, 'tok')));
+    expect(batch).toEqual(Array.from({ length: 12 }, () => CLOSED));
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+
+    vi.setSystemTime(T0 + 100 * 60_000);
+    expect(await getWinners('MLC3', 'tok')).toEqual(CLOSED);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it('si ML vuelve a responder, la prueba la reabre y las demás consultas salen normalmente', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    const fetchMock = await close();
+    fetchMock.mockImplementation(async () => offers(59_990));
+
+    vi.setSystemTime(T0 + 56 * 60_000);
+    const batch = await Promise.all(['MLC1', 'MLC2', 'MLC3'].map((id) => getWinners(id, 'tok')));
+    expect(batch.map((r) => r.status)).toEqual(['ok', 'ok', 'ok']);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(winnersClosure()).toMatchObject({ closed: false, since: null });
+  });
+
+  it('una respuesta buena entre medio corta la cuenta: la ruta no se cierra', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
+      String(url).includes('MLC-OK') ? json(404, { message: 'No winners found' }) : json(403, BLOCKED)
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    for (const id of ['MLC1', 'MLC2', 'MLC3', 'MLC4', 'MLC-OK', 'MLC5', 'MLC6', 'MLC7', 'MLC8']) await getWinners(id, 'tok');
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+    expect(winnersClosure().closed).toBe(false);
+  });
+
+  it('un 403 que no es de política no la cierra', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json(403, { error: 'forbidden' }));
+    vi.stubGlobal('fetch', fetchMock);
+    for (let i = 0; i < 8; i++) expect(await getWinners(`MLC${i}`, 'tok')).toEqual({ status: 'error', detail: 'HTTP 403' });
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(winnersClosure().closed).toBe(false);
+  });
+
+  it('una revisión lanzada a mano prueba altiro, sin esperar el rato', async () => {
+    const fetchMock = await close();
+    expect(await getWinners('MLC1', 'tok')).toEqual(CLOSED);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+
+    retryWinnersNow();
+    expect(await getWinners('MLC2', 'tok')).toEqual(CLOSED);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(await getWinners('MLC3', 'tok')).toEqual(CLOSED);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it('si la consulta de prueba no dice nada (ML caído), espera un minuto en vez de probar con cada producto', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    const fetchMock = await close();
+    fetchMock.mockImplementation(async () => json(503, { message: 'unavailable' }));
+
+    vi.setSystemTime(T0 + 56 * 60_000);
+    const pending = Promise.all(Array.from({ length: 6 }, (_, i) => getWinners(`MLC${i}`, 'tok')));
+    await vi.advanceTimersByTimeAsync(2000);
+    const batch = await pending;
+    // La de prueba gastó sus dos intentos (un 5xx se reintenta una vez); las otras cinco no salieron.
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(batch.filter((r) => r.status === 'error' && r.detail === 'HTTP 503')).toHaveLength(1);
+    expect(batch.filter((r) => r.status === 'error' && r.detail === WINNERS_CLOSED_DETAIL)).toHaveLength(5);
+
+    expect(await getWinners('MLC7', 'tok')).toEqual(CLOSED);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 });
 
