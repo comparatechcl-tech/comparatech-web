@@ -73,6 +73,15 @@ describe('buildDigestSubject', () => {
     );
   });
 
+  it('con los precios cerrados por Mercado Libre no avisa los días sin publicar: no hay candidatos que aprobar', () => {
+    expect(buildDigestSubject(input({ daysSinceLastApproval: 9, pendingTotal: 0, pricesClosed: true }))).toBe(
+      'ComparaTech · sin novedades hoy'
+    );
+    expect(buildDigestSubject(input({ daysSinceLastApproval: 9, pendingTotal: 2, pricesClosed: true }))).toBe(
+      'ComparaTech · 2 por revisar'
+    );
+  });
+
   it('usa singular con un solo candidato listo', () => {
     expect(buildDigestSubject(input({ daysSinceLastApproval: 4, pendingTotal: 1 }))).toBe(
       'ComparaTech · 4 días sin publicar · 1 listo para aprobar'
@@ -235,6 +244,11 @@ describe('líneas fijas', () => {
 
   it('salud y errores', () => {
     expect(healthLine(5)).toBe('Salud: precios revisados hace 5 min');
+    // Con la consulta de precios cerrada por Mercado Libre no se alarma por los precios viejos: se dice la causa.
+    const closed = healthLine(1400, 1400, true);
+    expect(closed).toContain('Mercado Libre cerró la consulta automática el 23-11-2026');
+    expect(closed).toContain('No hay nada que arreglar');
+    expect(closed).not.toContain('⚠');
     expect(healthLine(null)).toContain('no se sabe');
     expect(healthLine(5, 40)).toBe('Salud: precios revisados hace 5 min · el más viejo de lo que está a la venta, hace 40 min');
     expect(healthLine(5, 300)).toBe(

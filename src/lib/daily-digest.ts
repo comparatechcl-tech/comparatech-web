@@ -65,6 +65,12 @@ export interface DigestInput {
    * si no se sabe. Muestra si la revisión alcanza a todo el catálogo.
    */
   oldestPriceMinutes?: number | null;
+  /**
+   * Mercado Libre tiene cerrada la consulta de precios (lo anota el refresco,
+   * ver winnersGate en lib/ml-catalog). Entonces el correo no alarma por los
+   * precios viejos ni por los días sin publicar: no se arreglan desde acá.
+   */
+  pricesClosed?: boolean;
   /** Clics hacia Mercado Libre ayer (hora de Chile); null si no se miden todavía. */
   clicsAyer: number | null;
   /** Consultas que fallaron al armar el correo. */
@@ -184,7 +190,13 @@ export function linkModeLine(input: Pick<DigestInput, 'linkMode' | 'attribution'
 const OLDEST_PRICE_ALERT_MIN = 240;
 
 /** "Salud: precios revisados hace 12 min · el más viejo de lo que está a la venta, hace 40 min". */
-export function healthLine(minutes: number | null, oldestMinutes: number | null = null): string {
+export function healthLine(minutes: number | null, oldestMinutes: number | null = null, pricesClosed = false): string {
+  if (pricesClosed) {
+    return (
+      'Precios: Mercado Libre cerró la consulta automática el 23-11-2026. El sitio muestra cada precio con su fecha ' +
+      'y la búsqueda diaria no puede revisar productos nuevos. No hay nada que arreglar.'
+    );
+  }
   if (minutes === null) return 'Salud: no se sabe cuándo se revisaron los precios por última vez';
   const latest = `Salud: precios revisados hace ${minutes} min`;
   if (oldestMinutes === null) return latest;
@@ -215,8 +227,10 @@ export function buildDigestSubject(input: DigestInput): string {
   }
 
   // Lo más caro de todo es no publicar: el ingreso sale de productos nuevos
-  // en el sitio. Cuando eso pasa, el asunto lo dice antes que nada.
-  if (isStale(daysSinceLastApproval)) {
+  // en el sitio. Cuando eso pasa, el asunto lo dice antes que nada. Salvo que
+  // Mercado Libre tenga cerrados los precios: ahí no entran candidatos y no
+  // hay nada que aprobar.
+  if (isStale(daysSinceLastApproval) && !input.pricesClosed) {
     return (
       `ComparaTech · ${daysSinceLastApproval} días sin publicar · ` +
       `${pendingTotal} ${plural(pendingTotal, 'listo para aprobar', 'listos para aprobar')}`
@@ -285,7 +299,7 @@ export function buildDigestHtml(input: DigestInput): string {
         ${escapeHtml(sourceProblemLine(sourceProblem))}
       </div>`
     : '';
-  const staleNote = isStale(daysSinceLastApproval)
+  const staleNote = isStale(daysSinceLastApproval) && !input.pricesClosed
     ? `<div style="font-size:13px;color:${WARN_TEXT};margin-top:8px;font-weight:600;">
          ${daysSinceLastApproval} días sin publicar productos nuevos
        </div>`
@@ -420,7 +434,7 @@ export function buildDigestHtml(input: DigestInput): string {
           <p style="font-size:12px;color:${MUTED};margin:28px 0 24px;border-top:1px solid ${BORDER};padding-top:16px;line-height:1.6;">
             ${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.${clicksLine}<br>
             ${escapeHtml(linkModeLine(input))}<br>
-            ${escapeHtml(healthLine(input.lastPriceCheckMinutes, input.oldestPriceMinutes ?? null))}
+            ${escapeHtml(healthLine(input.lastPriceCheckMinutes, input.oldestPriceMinutes ?? null, input.pricesClosed))}
           </p>
 
         </td></tr>
@@ -449,7 +463,7 @@ export function buildDigestText(input: DigestInput): string {
   const lines = [`ComparaTech — qué aprobar hoy`, ``];
   if (sourceProblem) lines.push(`⚠ ${sourceProblemLine(sourceProblem)}`, ``);
   if (errors.length > 0) lines.push(errorsLine(errors), ``);
-  if (isStale(daysSinceLastApproval)) lines.push(`${daysSinceLastApproval} días sin publicar productos nuevos.`);
+  if (isStale(daysSinceLastApproval) && !input.pricesClosed) lines.push(`${daysSinceLastApproval} días sin publicar productos nuevos.`);
 
   lines.push(
     `${pendingTotal} ${plural(pendingTotal, 'producto listo', 'productos listos')} para aprobar.`,
@@ -486,6 +500,6 @@ export function buildDigestText(input: DigestInput): string {
 
   lines.push('', `${publishedTotal} ${plural(publishedTotal, 'producto publicado', 'productos publicados')} en el sitio.`);
   if (clicsAyer !== null) lines.push(`${clicsAyer} ${plural(clicsAyer, 'clic', 'clics')} hacia Mercado Libre ayer.`);
-  lines.push(linkModeLine(input), healthLine(input.lastPriceCheckMinutes, input.oldestPriceMinutes ?? null));
+  lines.push(linkModeLine(input), healthLine(input.lastPriceCheckMinutes, input.oldestPriceMinutes ?? null, input.pricesClosed));
   return lines.join('\n');
 }

@@ -3,7 +3,13 @@ import { SITE_URL } from '@/lib/site';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { readAffiliateSettings } from '@/lib/settings';
 import { readAttributionStatus } from '@/lib/admin-settings';
-import { fetchAllRows, minutesSince, readDaysSinceLastApproval } from '@/lib/admin-stats';
+import {
+  fetchAllRows,
+  minutesSince,
+  readDaysSinceLastApproval,
+  readRefreshRuns,
+  refreshStatusFromRuns,
+} from '@/lib/admin-stats';
 import { chileDateKey, chileDayStart, shiftDateKey } from '@/lib/clicks';
 import {
   pickTopToApprove,
@@ -125,7 +131,7 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
   // zona horaria del servidor y del cambio de hora en Chile.
   const since = now.getTime() - 24 * 60 * 60 * 1000;
 
-  const [pendingRes, publishedRes, offSiteRes, approvalRes, priceRes, oldestRes, clicksRes, settingsRes, attributionRes] =
+  const [pendingRes, publishedRes, offSiteRes, approvalRes, priceRes, oldestRes, clicksRes, settingsRes, attributionRes, refreshRes] =
     await Promise.all([
       settle(readPending(admin)),
       settle(
@@ -153,6 +159,8 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
       settle(readClicksYesterday(admin, now)),
       settle(readAffiliateSettings(admin)),
       settle(readAttributionStatus(admin)),
+      // Las últimas pasadas del refresco: dicen si Mercado Libre tiene cerrada la consulta de precios.
+      settle(readRefreshRuns(admin)),
     ]);
 
   // Cola de revisión
@@ -206,6 +214,10 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
   failed('prueba de atribución', attributionRes.thrown);
   const attribution: DigestAttribution = attributionRes.value?.status ?? 'pendiente';
 
+  // Si no se puede leer la bitácora del refresco, el correo sale como siempre.
+  const refreshRuns = refreshRes.value?.data ?? [];
+  const pricesClosed = refreshRuns.length > 0 && refreshStatusFromRuns(refreshRuns, now).state === 'ml_cerro';
+
   return {
     newCandidates,
     topToApprove: pickTopToApprove(ranked),
@@ -219,6 +231,7 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
     attribution,
     lastPriceCheckMinutes,
     oldestPriceMinutes,
+    pricesClosed,
     clicsAyer,
     errors,
   };
