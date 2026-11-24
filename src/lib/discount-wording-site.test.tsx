@@ -81,7 +81,8 @@ function product(over: Partial<Product> = {}): Product {
     created_at: '2026-01-01T00:00:00Z',
     inactive_reason: null,
     inactive_since: null,
-    price_checked_at: null,
+    // Revisado recién: el descuento va solo con el precio de hoy (lib/price-freshness).
+    price_checked_at: new Date().toISOString(),
     winner_item_id: null,
     link_target_product_id: null,
     link_checked_at: null,

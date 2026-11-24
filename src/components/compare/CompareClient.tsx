@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react';
-import { formatCLP, formatDayMonth, formatDiscountPct, formatTimeAgo, specLabel } from '@/lib/format';
+import { formatCLP, formatDayMonth, formatDiscountPct, formatFullDate, formatTimeAgo, specLabel } from '@/lib/format';
+import { priceState } from '@/lib/price-freshness';
 import { AffiliateButton } from '@/components/product/AffiliateButton';
 import mlImageLoader from '@/lib/ml-image-loader';
 import {
@@ -439,7 +440,11 @@ function TimeAgo({ iso }: { iso: string | null }) {
   const [label, setLabel] = useState<string | null>(null);
 
   useEffect(() => {
-    const update = () => setLabel(formatTimeAgo(iso));
+    // Si la revisión no es de hoy (lib/price-freshness), la fecha: "hace 3 días" no dice de qué día es el precio.
+    const update = () => {
+      const date = formatFullDate(iso);
+      setLabel(priceState(iso) === 'hoy' || !date ? formatTimeAgo(iso) : `el ${date}`);
+    };
     update();
     const timer = setInterval(update, 60_000);
     return () => clearInterval(timer);
@@ -518,7 +523,8 @@ function offerRows(a: CompareOffer, b: CompareOffer): TableRow[] {
       winner: a.free_shipping === b.free_shipping ? null : a.free_shipping ? 'a' : 'b',
     });
   }
-  rows.push({ label: 'Vendedor', a: a.seller, b: b.seller });
+  // Sin el dato en los dos (precio sin revisar hoy), la fila no va.
+  if (a.seller || b.seller) rows.push({ label: 'Vendedor', a: a.seller || '—', b: b.seller || '—' });
   if (a.warranty || b.warranty) {
     rows.push({ label: 'Garantía', a: a.warranty ?? 'No informa garantía', b: b.warranty ?? 'No informa garantía' });
   }
@@ -573,6 +579,10 @@ function ValueRow({ row: { label, a, b, winner }, striped }: { row: TableRow; st
  */
 function CompareSummaryNote({ a, b }: { a: CompareDetail; b: CompareDetail }) {
   const summary = compareSummary(a, b);
+  // Sin un precio que mostrar en alguno, no hay diferencia que decir.
+  if (a.offer.no_price || b.offer.no_price) return null;
+  // Con precios que no son de hoy, la frase va en pasado y dice dónde está el de hoy.
+  const dated = Boolean(a.offer.price_date || b.offer.price_date);
   const [cheaper, other] = summary.cheaper === 'a' ? ['izquierda', 'derecha'] : ['derecha', 'izquierda'];
   // "Izquierda" y "derecha" no le dicen nada a un lector de pantalla: ahí va el nombre.
   const [cheaperName, otherName] = summary.cheaper === 'a' ? [a.name, b.name] : [b.name, a.name];
@@ -581,15 +591,18 @@ function CompareSummaryNote({ a, b }: { a: CompareDetail; b: CompareDetail }) {
     <p className="border-t border-border bg-surface2 px-4 py-3 text-sm text-fg">
       {summary.cheaper ? (
         <>
-          El de la {cheaper}
-          <span className="sr-only"> ({cheaperName})</span> cuesta{' '}
+          {dated ? 'En nuestra última revisión, el' : 'El'} de la {cheaper}
+          <span className="sr-only"> ({cheaperName})</span> {dated ? 'costaba' : 'cuesta'}{' '}
           <strong className="font-semibold">{formatCLP(summary.diff)} menos</strong> que el de la {other}
           <span className="sr-only"> ({otherName})</span>
           {summary.pct > 0 ? ` (${summary.pct}% menos)` : ''}.
         </>
+      ) : dated ? (
+        'En nuestra última revisión, los dos costaban lo mismo.'
       ) : (
         'Los dos cuestan lo mismo.'
       )}
+      {dated && ' El precio de hoy de cada uno está en Mercado Libre.'}
     </p>
   );
 }
@@ -645,13 +658,21 @@ function CompareTable({ pair: { a, b }, busy, stale }: { pair: Pair; busy: boole
                 {p.name}
               </Link>
               <div>
-                <p
-                  className={`font-heading text-lg font-bold sm:text-xl ${
-                    p.price <= Math.min(a.price, b.price) ? 'text-accent' : 'text-fg'
-                  }`}
-                >
-                  {formatCLP(p.price)}
-                </p>
+                {/* Sin revisar hoy, el precio va con su día o no va (lib/price-freshness). */}
+                {p.offer.no_price ? (
+                  <p className="text-xs text-muted">El precio de hoy está en Mercado Libre</p>
+                ) : (
+                  <p
+                    className={`font-heading text-lg font-bold sm:text-xl ${
+                      p.price <= Math.min(a.price, b.price) && !a.offer.no_price && !b.offer.no_price
+                        ? 'text-accent'
+                        : 'text-fg'
+                    }`}
+                  >
+                    {formatCLP(p.price)}
+                  </p>
+                )}
+                {p.offer.price_date && <p className="mt-0.5 text-xs text-muted">Precio del {p.offer.price_date}</p>}
                 {p.offer.list_price !== null && discount !== null && discount > 0 && (
                   <p
                     className="mt-0.5 text-xs text-muted"
@@ -666,6 +687,7 @@ function CompareTable({ pair: { a, b }, busy, stale }: { pair: Pair; busy: boole
                 productId={p.id}
                 productName={p.name}
                 placement="comparador"
+                label={p.offer.price_date || p.offer.no_price ? 'Ver precio de hoy' : undefined}
                 className="mt-auto w-full text-xs sm:text-sm"
               />
             </div>

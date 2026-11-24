@@ -8,6 +8,7 @@ import { getAllCategories } from '@/lib/categories';
 import { changeSince, lowestPriceNote, type PriceChange, type PriceStats } from '@/lib/deals';
 import { reputationLabel, salesLabel, warrantyValue } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
+import { priceDateLabel, priceState } from '@/lib/price-freshness';
 import { domainLabel, OTHER_TYPE_LABEL } from '@/lib/product-types';
 import type { OfferInfo, Product } from '@/lib/types';
 
@@ -58,6 +59,14 @@ export interface CompareOffer {
   change: PriceChange | null;
   /** La frase sobre el mínimo que el historial permite afirmar, o null. */
   lowest: string | null;
+  /**
+   * "23/11": el precio no se revisó hoy sino ese día (lib/price-freshness).
+   * Entonces no se afirma nada de la oferta: `seller` va vacío y lo demás en
+   * false o null. null si el precio es de hoy.
+   */
+  price_date: string | null;
+  /** No hay un precio que mostrar: nunca se revisó, o hace más de un mes. */
+  no_price: boolean;
 }
 
 /** Solo los campos para elegir: lo demás del producto no viaja. */
@@ -78,6 +87,24 @@ function toCompareOffer(product: Product, stats: PriceStats | null, now: number)
   const list = product.original_price;
   const sales = product.seller_sales_count > 0 ? ` · ${salesLabel(product.seller_sales_count)}` : '';
 
+  // Con el precio sin revisar hoy, lo de la oferta (envío, vendedor, garantía)
+  // y lo que el historial dice del precio "de hoy" ya no se puede afirmar.
+  const state = priceState(product.price_checked_at, now);
+  if (state !== 'hoy') {
+    return {
+      list_price: null,
+      checked_at: product.price_checked_at ?? null,
+      free_shipping: false,
+      is_full: false,
+      seller: '',
+      warranty: null,
+      change: null,
+      lowest: null,
+      price_date: state === 'referencia' && product.price_checked_at ? priceDateLabel(product.price_checked_at) : null,
+      no_price: state === 'sin_precio',
+    };
+  }
+
   return {
     list_price: typeof list === 'number' && list > product.price ? list : null,
     checked_at: product.price_checked_at ?? null,
@@ -91,6 +118,8 @@ function toCompareOffer(product: Product, stats: PriceStats | null, now: number)
     warranty: typeof info.warranty === 'string' && info.warranty.trim() ? warrantyValue(info.warranty) : null,
     change: changeSince(stats, product.price, now, product.original_price, product.created_at),
     lowest: lowestPriceNote(stats, product.price),
+    price_date: null,
+    no_price: false,
   };
 }
 

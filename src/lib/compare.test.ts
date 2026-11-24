@@ -108,6 +108,8 @@ describe('groupByType', () => {
 });
 
 describe('lo que viaja al navegador', () => {
+  /** Revisado recién: los datos de la oferta van solo con el precio de hoy (lib/price-freshness). */
+  const CHECKED = new Date().toISOString();
   const product: Product = {
     id: 'id-1',
     slug: 'parlante-jbl-go-5',
@@ -134,7 +136,7 @@ describe('lo que viaja al navegador', () => {
     created_at: '2026-01-01T00:00:00Z',
     inactive_reason: null,
     inactive_since: null,
-    price_checked_at: null,
+    price_checked_at: CHECKED,
     winner_item_id: null,
     link_target_product_id: null,
     link_checked_at: null,
@@ -176,29 +178,36 @@ describe('lo que viaja al navegador', () => {
     // Sin offer_info ni precio de lista: nada se da por supuesto.
     expect(toCompareDetail({ ...product, original_price: null }).offer).toEqual({
       list_price: null,
-      checked_at: null,
+      checked_at: CHECKED,
       free_shipping: false,
       is_full: false,
       seller: 'Reputación verde · 1.200 ventas',
       warranty: null,
       change: null,
       lowest: null,
+      price_date: null,
+      no_price: false,
     });
 
-    const full = toCompareDetail({
-      ...product,
-      original_price: product.price + 10_000,
-      price_checked_at: '2026-10-11T18:00:00.000Z',
-      offer_info: {
-        free_shipping: true,
-        is_full: true,
-        sold_by_ml: false,
-        official_store: true,
-        warranty: 'Garantía de fábrica: 1 años',
-        offers_count: 3,
-        is_lowest: true,
+    const full = toCompareDetail(
+      {
+        ...product,
+        original_price: product.price + 10_000,
+        price_checked_at: '2026-10-11T18:00:00.000Z',
+        offer_info: {
+          free_shipping: true,
+          is_full: true,
+          sold_by_ml: false,
+          official_store: true,
+          warranty: 'Garantía de fábrica: 1 años',
+          offers_count: 3,
+          is_lowest: true,
+        },
       },
-    }).offer;
+      null,
+      // Una hora después de la revisión.
+      Date.parse('2026-10-11T19:00:00.000Z')
+    ).offer;
     expect(full).toMatchObject({
       list_price: product.price + 10_000,
       checked_at: '2026-10-11T18:00:00.000Z',
@@ -266,7 +275,9 @@ describe('lo que viaja al navegador', () => {
       ],
       now
     );
-    expect(toCompareDetail(product, dropped, now).offer).toMatchObject({
+    // Revisado una hora antes de `now`: es el precio de hoy.
+    const fresh = { ...product, price_checked_at: new Date(now - 3_600_000).toISOString() };
+    expect(toCompareDetail(fresh, dropped, now).offer).toMatchObject({
       change: { direction: 'down', amount: 5_000, since: at(2) },
       lowest: 'Precio más bajo desde que lo seguimos (10 días)',
     });
@@ -278,10 +289,53 @@ describe('lo que viaja al navegador', () => {
       ],
       now
     );
-    expect(toCompareDetail(product, rose, now).offer).toMatchObject({
+    expect(toCompareDetail(fresh, rose, now).offer).toMatchObject({
       change: { direction: 'up', amount: 5_000, since: at(2) },
       lowest: null,
     });
+  });
+
+  /*
+   * Desde el 23-11-2026 Mercado Libre no entrega precios. Con el precio sin
+   * revisar hoy, la tabla no afirma nada de la oferta ni del precio "de hoy":
+   * lleva el día de la revisión, y pasado un mes ni el precio.
+   */
+  it('con el precio sin revisar hoy no lleva vendedor, envío, garantía ni cambios: solo de qué día es', () => {
+    const now = Date.parse('2026-11-25T15:00:00Z');
+    const at = (days: number) => new Date(now - days * 86_400_000).toISOString();
+    const dropped = priceStats(
+      [
+        { price: product.price + 5_000, observed_at: at(10) },
+        { price: product.price, observed_at: at(3) },
+      ],
+      now
+    );
+    const info = { free_shipping: true, is_full: true, sold_by_ml: true, official_store: false, warranty: '12 meses', offers_count: 3, is_lowest: true };
+    // Revisado el 23-11 a las 13:33 de Chile.
+    const dated = { ...product, price_checked_at: '2026-11-23T16:33:00Z', offer_info: info };
+    expect(toCompareDetail(dated, dropped, now).offer).toEqual({
+      list_price: null,
+      checked_at: '2026-11-23T16:33:00Z',
+      free_shipping: false,
+      is_full: false,
+      seller: '',
+      warranty: null,
+      change: null,
+      lowest: null,
+      price_date: '23/11',
+      no_price: false,
+    });
+    // El precio sigue viajando: se muestra con su día.
+    expect(toCompareDetail(dated, dropped, now).price).toBe(product.price);
+
+    for (const checkedAt of [null, '2026-10-01T12:00:00Z']) {
+      expect(toCompareDetail({ ...product, price_checked_at: checkedAt, offer_info: info }, dropped, now).offer).toMatchObject({
+        seller: '',
+        change: null,
+        price_date: null,
+        no_price: true,
+      });
+    }
   });
 
   it('sin destino precalculado usa el link guardado, nunca uno fuera de la lista', () => {
