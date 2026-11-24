@@ -99,7 +99,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }
 vi.mock('@/lib/settings', () => ({ readAffiliateSettings: vi.fn() }));
 vi.mock('@/lib/queries/price-history', () => ({ getPriceStatsMany: vi.fn(), getPriceStatsManyChecked: vi.fn() }));
 // De las historias, la acción solo usa el plazo de 14 días.
-vi.mock('@/lib/social/stories', () => ({ STORY_RULES: { repeatAfterDays: 14 } }));
+vi.mock('@/lib/social/stories', () => ({ STORY_RULES: { repeatAfterDays: 14, maxPriceAgeMs: 6 * 3_600_000 } }));
 
 import { revalidatePath, revalidateTag } from 'next/cache';
 import { logAdminEvent } from '@/lib/admin-audit';
@@ -108,7 +108,18 @@ import { markStoryPublished, undoStoryPublished } from '@/app/admin/historias/ac
 const PRODUCT = '00000000-0000-4000-8000-000000000001';
 
 function product(over: Row = {}): Row {
-  return { id: PRODUCT, slug: 'parlante-jbl', name: 'Parlante JBL Go 4', price: 49_990, is_active: true, is_hidden: false, deleted_at: null, ...over };
+  return {
+    id: PRODUCT,
+    slug: 'parlante-jbl',
+    name: 'Parlante JBL Go 4',
+    price: 49_990,
+    // Recién revisado: el precio de la base vale para comparar.
+    price_checked_at: new Date().toISOString(),
+    is_active: true,
+    is_hidden: false,
+    deleted_at: null,
+    ...over,
+  };
 }
 
 const posts = () => db.tables.social_posts ?? [];
@@ -160,6 +171,15 @@ describe('markStoryPublished', () => {
       warning: 'Ojo: el precio cambió a $45.990 desde que cargaste la lista. Si ya la subiste, revisa la publicación.',
     });
     expect(posts()[0].posted_price).toBe(49_990);
+  });
+
+  it('con el precio de la base sin revisar hace rato no avisa: la historia de un aviso lleva el precio del aviso', async () => {
+    // Mercado Libre no entrega precios desde el 23-11-2026: el de la base es de otro día y no dice nada del de hoy.
+    for (const checked of ['2026-11-23T16:33:00.000Z', null]) {
+      db.tables = { products: [product({ price: 59_990, price_checked_at: checked })], social_posts: [] };
+      expect(await markStoryPublished(PRODUCT, 49_990), String(checked)).toEqual({ ok: true, postId: expect.any(Number) });
+      expect(posts()[0].posted_price).toBe(49_990);
+    }
   });
 
   it('un segundo toque no la anota dos veces, y repite el aviso', async () => {

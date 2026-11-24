@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { categoryFromDomain } from '@/lib/categories';
+import { priceCheckedWithin } from '@/lib/price-freshness';
 import { captionDiscount } from '@/lib/content/captions';
 import { searchCatalogProducts, type CatalogSearchHit } from '@/lib/ml-catalog';
 import { inspectCatalogProduct, type ProductPreview, type ReviewContext } from '@/lib/manual-add';
@@ -37,6 +38,9 @@ const MAX_INSPECT = 2;
 const NOT_FOUND =
   'No encontré su ficha en Mercado Libre. Si es de tecnología, búscala allá y pega el link de la ficha (con /p/MLC…) en Agregar.';
 const ML_DOWN = 'Mercado Libre no respondió. Toca Revisar de nuevo en un rato.';
+const NO_PRICE_TODAY =
+  'El aviso no trae el precio de este producto y el sitio no tiene el de hoy: no se puede armar su historia.';
+
 
 interface Found {
   id: string;
@@ -85,16 +89,32 @@ async function readCatalog(admin: SupabaseClient, ids: string[]): Promise<Social
 }
 
 async function storyOf(product: SocialProduct, deal: NoticeDeal, ctx: DealContext): Promise<DealResult> {
+  // Desde el 23-11-2026 Mercado Libre no entrega precios y el del sitio queda
+  // viejo: con él la historia saldría con el precio de otro día. Se arma con
+  // el del aviso, que viene del canal oficial de afiliados de Mercado Libre.
+  // Sin descuento, envío ni fecha de revisión, que el aviso no trae: la
+  // imagen dice "Precio sujeto a cambios".
+  //
+  // "Viejo" es el mismo plazo que exige Compartir cuando no se puede revisar
+  // en vivo (historias/rules: shareGate): con más que eso, la tarjeta con el
+  // precio del sitio quedaría bloqueada igual.
+  const fresh = priceCheckedWithin(product.price_checked_at, STORY_RULES.maxPriceAgeMs, ctx.now.getTime());
+  if (!fresh && !deal.price) return { kind: 'sin_ficha', deal, message: NO_PRICE_TODAY };
+  const shown: SocialProduct =
+    fresh || !deal.price
+      ? product
+      : { ...product, price: deal.price, original_price: null, offer_info: null, price_checked_at: null };
+
   const [history, settings] = await Promise.all([ctx.storyHistory(), ctx.affiliateSettings()]);
   const h = history.get(product.id);
   // Sin `history`: la tarjeta lo leería como "bajó desde que la subiste", y puede que no haya bajado.
   const item = buildStoryItem(
-    { product, discount: captionDiscount(product), drop: null, score: null },
+    { product: shown, discount: captionDiscount(shown), drop: null, score: null },
     { now: ctx.now, settings, key: ctx.key }
   );
   if (!item) return { kind: 'sin_ficha', deal, message: 'No se pudo armar la imagen de este producto.' };
   const last = h ? { price: h.lowest, at: h.lowestAt ?? h.lastAt } : null;
-  return { kind: 'historia', deal, item: { ...item, reason: noticeNote(deal, product.price, last) } };
+  return { kind: 'historia', deal, item: { ...item, reason: noticeNote(deal, shown.price, last, !fresh) } };
 }
 
 /** Qué hacer con un producto del aviso. Lanza solo si falla la base. */

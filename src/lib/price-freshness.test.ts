@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buyLabel, priceDateLabel, priceState, priceStateChangedSince, withoutStaleOffer } from '@/lib/price-freshness';
+import {
+  buyLabel,
+  priceCheckedWithin,
+  priceDateLabel,
+  priceState,
+  priceStateChangedSince,
+  withoutStaleOffer,
+} from '@/lib/price-freshness';
 
 /*
  * Desde el 23-11-2026 Mercado Libre no entrega precios a la aplicación y cada
@@ -100,5 +107,28 @@ describe('withoutStaleOffer', () => {
     const out = withoutStaleOffer(bare, NOW);
     expect(out.original_price).toBeNull();
     expect('offer_info' in out).toBe(false);
+  });
+});
+
+describe('priceCheckedWithin: los plazos más cortos que "hoy" (historias y videos)', () => {
+  const NOW = Date.parse('2026-11-24T16:00:00Z');
+  const SIX_HOURS = 6 * 3_600_000;
+
+  it('revisado dentro del plazo, sí; pasado el plazo, sin fecha o con una fecha que no se entiende, no', () => {
+    expect(priceCheckedWithin('2026-11-24T10:00:00Z', SIX_HOURS, NOW)).toBe(true);
+    expect(priceCheckedWithin('2026-11-24T09:59:59Z', SIX_HOURS, NOW)).toBe(false);
+    expect(priceCheckedWithin('2026-11-23T16:33:00Z', SIX_HOURS, NOW)).toBe(false);
+    expect(priceCheckedWithin(null, SIX_HOURS, NOW)).toBe(false);
+    expect(priceCheckedWithin(undefined, SIX_HOURS, NOW)).toBe(false);
+    expect(priceCheckedWithin('no es una fecha', SIX_HOURS, NOW)).toBe(false);
+  });
+
+  it('una fecha del futuro (más que un desfase de relojes) no cuenta como revisada', () => {
+    expect(priceCheckedWithin('2026-11-24T16:03:00Z', SIX_HOURS, NOW)).toBe(true);
+    expect(priceCheckedWithin('2026-11-24T17:00:00Z', SIX_HOURS, NOW)).toBe(false);
+  });
+
+  it('sin plazo (una regla mal armada) no deja pasar nada', () => {
+    expect(priceCheckedWithin('2026-11-24T15:59:00Z', undefined as unknown as number, NOW)).toBe(false);
   });
 });

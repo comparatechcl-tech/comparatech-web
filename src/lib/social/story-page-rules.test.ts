@@ -229,6 +229,24 @@ describe('postedAlert: lo que avisa una historia ya subida', () => {
     });
   });
 
+  it('con el precio del sitio sin revisar hace rato no alarma: no se sabe cuánto cuesta hoy', () => {
+    // Mercado Libre no entrega precios desde el 23-11-2026: comparar con el de otro día daría "bórrala" en falso.
+    const fresh = { now: T0, maxPriceAgeMs: 6 * HOUR };
+    const old = new Date(T0 - 26 * HOUR).toISOString();
+    expect(postedAlert(posted({ price: 59_990, checkedAt: old }), undefined, fresh)).toBeNull();
+    expect(postedAlert(posted({ price: 39_990, checkedAt: old }), UNKNOWN(), fresh)).toBeNull();
+    expect(postedAlert(posted({ price: 59_990, checkedAt: null }), SAME(), fresh)).toBeNull();
+    // Lo que sí se sabe se sigue avisando: la revisión en vivo encontró otro precio, o ya no se vende.
+    expect(postedAlert(posted({ price: 59_990, checkedAt: old }), CHANGED(55_990), fresh)).toMatchObject({
+      tone: 'bad',
+      text: expect.stringContaining('a $55.990'),
+    });
+    expect(postedAlert(posted({ onSale: false, checkedAt: old }), undefined, fresh)).toMatchObject({ tone: 'bad' });
+    expect(postedAlert(posted({ checkedAt: old }), UNAVAILABLE(), fresh)).toMatchObject({ tone: 'bad' });
+    // Con el precio recién revisado, como siempre.
+    expect(postedAlert(posted({ price: 50_490 }), undefined, fresh)).toMatchObject({ tone: 'bad' });
+  });
+
   it('sin precio anotado no hay con qué comparar', () => {
     expect(postedAlert(posted({ postedPrice: null, price: 99_990 }), undefined)).toBeNull();
     expect(postedAlert(posted({ postedPrice: 0, price: 99_990 }), undefined)).toBeNull();

@@ -169,4 +169,16 @@ describe('noticeNote', () => {
       'Mismo precio que el aviso. Ya la subiste como historia el 30/10 a $271.990'
     );
   });
+
+  it('cuando la historia lleva el precio del aviso no dice "mismo precio": nadie lo comparó', () => {
+    expect(noticeNote({ price: 248_990, coupon: null }, 248_990, null, true)).toBe(
+      'La historia lleva el precio del aviso: el sitio no tiene el de hoy. Míralo en Mercado Libre antes de subirla'
+    );
+    expect(noticeNote({ price: 84_990, coupon: 'LOCURASDD' }, 84_990, null, true)).toBe(
+      'La historia lleva el precio del aviso, que es con el cupón LOCURASDD: escríbelo en la historia. Mira el precio en Mercado Libre antes de subirla'
+    );
+    expect(noticeNote({ price: 248_990, coupon: null }, 248_990, { price: 271_990, at: '2026-10-30T11:46:05Z' }, true)).toContain(
+      'Ya la subiste como historia el 30/10 a $271.990'
+    );
+  });
 });

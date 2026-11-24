@@ -195,7 +195,7 @@ export function StoryCard({
   const line = liveLine(check, now, mlUrl !== null);
   const gate = shareGate(check, { now, openedAt, checkedAt: item.checkedAt, maxPriceAgeMs });
   const cover = coverText(gate);
-  const alert = posted ? postedAlert(posted, check) : null;
+  const alert = posted ? postedAlert(posted, check, { now, maxPriceAgeMs }) : null;
   const help = kind === 'offer' && item.warning ? explainWarning(item.warning) : [];
 
   return (

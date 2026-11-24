@@ -179,14 +179,25 @@ export function nameMatch(noticeName: string, candidate: string): number {
 /**
  * Lo que la tarjeta de la historia dice del aviso, en frases cortas (la
  * tarjeta agrega el punto final). Puro.
+ *
+ * `fromNotice`: el sitio no tenía un precio revisado hace poco y la historia
+ * lleva el del aviso (lib/social/deal-notice-review). Nadie lo comparó con
+ * Mercado Libre: la tarjeta lo dice, y si es con cupón, que hay que escribirlo.
  */
 export function noticeNote(
   deal: Pick<NoticeDeal, 'price' | 'coupon'>,
   price: number,
-  lastStory: { price: number | null; at: string } | null
+  lastStory: { price: number | null; at: string } | null,
+  fromNotice = false
 ): string {
   const parts: string[] = [];
-  if (deal.coupon) {
+  if (fromNotice) {
+    parts.push(
+      deal.coupon
+        ? `La historia lleva el precio del aviso, que es con el cupón ${deal.coupon}: escríbelo en la historia. Mira el precio en Mercado Libre antes de subirla`
+        : 'La historia lleva el precio del aviso: el sitio no tiene el de hoy. Míralo en Mercado Libre antes de subirla'
+    );
+  } else if (deal.coupon) {
     parts.push(
       deal.price
         ? `El aviso trae el cupón ${deal.coupon}: con él queda en ${formatPrice(deal.price)}. Si quieres, escríbelo en la historia`

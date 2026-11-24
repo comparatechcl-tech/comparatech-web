@@ -13,9 +13,21 @@ vi.mock('@/lib/social/telegram', () => ({
 }));
 vi.mock('@/lib/settings', () => ({ readAffiliateSettings: vi.fn() }));
 vi.mock('@/lib/social/stories', () => ({
-  STORY_RULES: { repeatAfterDays: 14 },
+  STORY_RULES: { repeatAfterDays: 14, maxPriceAgeMs: 6 * 3_600_000 },
   readStoryHistory: vi.fn(),
-  buildStoryItem: (pick: { product: { id: string; price: number } }) => ({ id: pick.product.id, price: pick.product.price, reason: '' }),
+  // Devuelve lo que la tarjeta y la imagen van a mostrar, para poder revisarlo.
+  buildStoryItem: (pick: {
+    product: { id: string; price: number; original_price: number | null; price_checked_at: string | null; offer_info?: unknown };
+    discount: number;
+  }) => ({
+    id: pick.product.id,
+    price: pick.product.price,
+    listPrice: pick.product.original_price,
+    discount: pick.discount,
+    checkedAt: pick.product.price_checked_at,
+    offerInfo: pick.product.offer_info ?? null,
+    reason: '',
+  }),
 }));
 
 import { dealContext, reviewDeal, similarHits, type DealContext } from './deal-notice-review';
@@ -28,6 +40,9 @@ const product = (ml: string, extra: Record<string, unknown> = {}) => ({
   name: `Producto ${ml}`,
   price: 79_990,
   original_price: 159_990,
+  // Revisado hace 20 minutos (la hora de ctx): el precio del sitio vale.
+  price_checked_at: '2026-11-11T16:40:00Z',
+  offer_info: { free_shipping: true, is_full: true },
   is_active: true,
   is_hidden: false,
   deleted_at: null,
@@ -74,6 +89,70 @@ describe('reviewDeal', () => {
     expect(result.kind).toBe('historia');
     if (result.kind === 'historia') expect(result.item.reason).toBe('El aviso dice $79.990; hoy está a $78.990');
     expect(inspect).not.toHaveBeenCalled();
+  });
+
+  describe('cuando el sitio no tiene un precio reciente (Mercado Libre no entrega precios desde el 23-11-2026)', () => {
+    const found = { status: 'ok', items: [hit('MLC2', 'Freidora De Aire Max Edition 12l Kitchen-it Gris')] };
+    // Revisado el día anterior: más que las 6 horas que exige una historia.
+    const stale = (extra: Record<string, unknown> = {}) =>
+      product('MLC2', { price: 99_990, price_checked_at: '2026-11-10T16:33:00Z', ...extra });
+
+    it('la historia lleva el precio del aviso, sin descuento, envío ni fecha de revisión', async () => {
+      search.mockResolvedValue(found);
+      select.mockResolvedValue({ rows: [stale()], error: null });
+      const result = await reviewDeal(deal({ price: 79_990 }), ctx());
+      expect(result.kind).toBe('historia');
+      if (result.kind !== 'historia') return;
+      expect(result.item).toMatchObject({
+        id: 'uuid-MLC2',
+        price: 79_990,
+        listPrice: null,
+        discount: 0,
+        checkedAt: null,
+        offerInfo: null,
+      });
+      expect(result.item.reason).toBe(
+        'La historia lleva el precio del aviso: el sitio no tiene el de hoy. Míralo en Mercado Libre antes de subirla'
+      );
+    });
+
+    it('si el precio del aviso es con cupón, la tarjeta dice que hay que escribirlo', async () => {
+      search.mockResolvedValue(found);
+      select.mockResolvedValue({ rows: [stale()], error: null });
+      const result = await reviewDeal(deal({ price: 74_990, coupon: 'LOCURASDD' }), ctx());
+      expect(result.kind).toBe('historia');
+      if (result.kind !== 'historia') return;
+      expect(result.item.price).toBe(74_990);
+      expect(result.item.reason).toContain('es con el cupón LOCURASDD: escríbelo en la historia');
+    });
+
+    it('sin fecha de revisión también va con el precio del aviso', async () => {
+      search.mockResolvedValue(found);
+      select.mockResolvedValue({ rows: [stale({ price_checked_at: null })], error: null });
+      const result = await reviewDeal(deal({ price: 79_990 }), ctx());
+      expect(result).toMatchObject({ kind: 'historia', item: { price: 79_990, checkedAt: null } });
+    });
+
+    it('si el aviso no trae precio no hay con qué armarla: se salta y dice por qué', async () => {
+      search.mockResolvedValue(found);
+      select.mockResolvedValue({ rows: [stale()], error: null });
+      const result = await reviewDeal(deal({ price: null }), ctx());
+      expect(result).toEqual({
+        kind: 'sin_ficha',
+        deal: deal({ price: null }),
+        message: 'El aviso no trae el precio de este producto y el sitio no tiene el de hoy: no se puede armar su historia.',
+      });
+    });
+
+    it('con el precio del sitio recién revisado, todo sigue como siempre', async () => {
+      search.mockResolvedValue(found);
+      select.mockResolvedValue({ rows: [product('MLC2', { price: 78_990 })], error: null });
+      const result = await reviewDeal(deal({ price: 79_990 }), ctx());
+      expect(result).toMatchObject({
+        kind: 'historia',
+        item: { price: 78_990, listPrice: 159_990, checkedAt: '2026-11-11T16:40:00Z', offerInfo: { free_shipping: true, is_full: true } },
+      });
+    });
   });
 
   it('lo que falta pasa por la revisión de Agregar, primero las fichas con caja de compra', async () => {

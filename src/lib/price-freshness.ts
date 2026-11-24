@@ -45,6 +45,20 @@ export function priceState(checkedAt: string | null | undefined, now: number = D
 }
 
 /**
+ * ¿El precio se revisó hace `maxAgeMs` o menos? Para las reglas que exigen
+ * algo más reciente que "hoy": una historia o un video se suben con el precio
+ * escrito, y ahí el plazo es de horas (lib/social: maxPriceAgeMs).
+ */
+export function priceCheckedWithin(
+  checkedAt: string | null | undefined,
+  maxAgeMs: number,
+  now: number = Date.now()
+): boolean {
+  const checked = checkedAt ? Date.parse(checkedAt) : NaN;
+  return Number.isFinite(checked) && checked <= now + 5 * 60_000 && now - checked <= maxAgeMs;
+}
+
+/**
  * ¿Algún precio cambió de estado entre `since` y `now` (dejó de ser el de hoy,
  * o dejó de servir de referencia)? Las páginas se guardan armadas y solo se
  * vuelven a armar cuando alguien las pide después de vencidas: sin borrarlas

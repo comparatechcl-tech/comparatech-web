@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { requireAdmin } from '@/lib/admin-auth';
 import { logAdminEvent } from '@/lib/admin-audit';
+import { priceCheckedWithin } from '@/lib/price-freshness';
 import { markPriceWarning } from '@/lib/social/live-price';
 import { STORY_MARK } from '@/lib/social/networks';
 import { STORY_RULES } from '@/lib/social/stories';
@@ -71,7 +72,12 @@ export async function markStoryPublished(
       : product.price
   );
   // El precio cambió desde que se cargó la lista: se anota lo que se subió y se avisa.
-  const warning = markPriceWarning(price, product.price);
+  // Solo si el precio de la base es reciente: con uno viejo (Mercado Libre no
+  // entrega precios desde el 23-11-2026) la historia de un aviso del canal
+  // lleva el precio del aviso, y compararlo con el de otro día sería un aviso falso.
+  const warning = priceCheckedWithin(product.price_checked_at, STORY_RULES.maxPriceAgeMs)
+    ? markPriceWarning(price, product.price)
+    : null;
   const changed = warning ? { priceNow: product.price, warning } : {};
 
   // Un segundo toque sobre la misma historia (la respuesta del primero se

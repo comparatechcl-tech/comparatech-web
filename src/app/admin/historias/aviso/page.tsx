@@ -38,7 +38,8 @@ export default function AvisoPage() {
         </li>
         <li>
           Para cada historia: si dice <strong>✓ Mismo precio que en Mercado Libre</strong>, toca{' '}
-          <strong>Compartir</strong> y elige Instagram, Historia. El link queda copiado: ponlo con el sticker{' '}
+          <strong>Compartir</strong> y elige Instagram, Historia. Si dice que no pudo revisar, mira antes el precio
+          con el botón <strong>Ver en Mercado Libre</strong>. El link queda copiado: ponlo con el sticker{' '}
           <strong>Enlace</strong> bajo el precio. Después marca <strong>Ya la publiqué</strong>.
         </li>
       </ol>
@@ -46,8 +47,9 @@ export default function AvisoPage() {
       <NoticeView maxPriceAgeMs={STORY_RULES.maxPriceAgeMs} />
 
       <p className="mt-6 text-xs text-muted">
-        La historia lleva el precio de ahora, que puede no ser el del aviso: el precio cambia seguido y el porcentaje
-        de descuento se calcula como en el resto del sitio. Hasta 8 productos por aviso.
+        Si el sitio revisó el precio hace poco, la historia lleva ese precio, que puede no ser el del aviso. Si no
+        (Mercado Libre no entrega precios al sitio desde el 23-11-2026), lleva el precio del aviso, sin descuento ni
+        envío: míralo en Mercado Libre antes de subirla. Hasta 8 productos por aviso.
       </p>
     </div>
   );

@@ -1,4 +1,5 @@
 import { formatPrice } from '@/lib/content/captions';
+import { priceCheckedWithin } from '@/lib/price-freshness';
 import {
   LIVE_CHECK_MAX_ITEMS,
   LIVE_LINE,
@@ -183,10 +184,16 @@ export interface PostedAlert {
  * si ahora está más cara (1% o más) o ya no se vende: la historia promete
  * algo que no existe. Sin rojo si bajó 3% o más: no engaña, y la oferta
  * vuelve arriba para subirla de nuevo. null si no cambió lo suficiente. Puro.
+ *
+ * Con `fresh` (la hora y el plazo de la lista), el precio de la base solo
+ * cuenta si se revisó hace poco: desde el 23-11-2026 Mercado Libre no entrega
+ * precios, y comparar la historia con el precio de otro día daría una alerta
+ * roja falsa ("ahora está más cara: bórrala").
  */
 export function postedAlert(
-  item: Pick<PostedStory, 'price' | 'postedPrice'> & { onSale?: boolean },
-  check: CardCheck | undefined
+  item: Pick<PostedStory, 'price' | 'postedPrice'> & { onSale?: boolean; checkedAt?: string | null },
+  check: CardCheck | undefined,
+  fresh?: { now: number; maxPriceAgeMs: number }
 ): PostedAlert | null {
   const r = check?.last?.result;
   const said = item.postedPrice !== null && item.postedPrice > 0 ? formatPrice(item.postedPrice) : null;
@@ -199,6 +206,8 @@ export function postedAlert(
     };
   }
   if (!said || item.postedPrice === null) return null;
+  // Sin una revisión en vivo que diga otro precio, el de la base tiene que ser reciente.
+  if (r?.status !== 'changed' && fresh && !priceCheckedWithin(item.checkedAt, fresh.maxPriceAgeMs, fresh.now)) return null;
   const now = r?.status === 'changed' ? r.price : item.price;
   const shift = postedPriceShift(item.postedPrice, now);
   if (shift === 'higher') {
