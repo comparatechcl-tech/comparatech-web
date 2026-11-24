@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { getSupabase } from '@/lib/supabase/client';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { BrandOgTemplate, OG_SIZES, productImageResponse, type OgProduct } from '@/lib/content/og-template';
+import { priceState, withoutStaleOffer } from '@/lib/price-freshness';
 
 /**
  * Vista previa de la ficha al compartirla (WhatsApp, Telegram, Facebook).
@@ -56,7 +57,14 @@ export default async function Image({ params }: { params: { slug: string } }) {
   // Sin vendedor no hay precio que mostrar: uno viejo en la vista previa
   // promete algo que la ficha ya no ofrece.
   if (!product.is_active) {
-    return new ImageResponse(<BrandOgTemplate format="og" title="Mira alternativas con precio revisado hoy" />, size);
+    return new ImageResponse(<BrandOgTemplate format="og" title="Mira alternativas y su historial de precios" />, size);
   }
-  return productImageResponse(product, 'og');
+  // Como la ficha (lib/price-freshness): con el precio sin revisar hoy, la
+  // imagen lo muestra con su fecha (ya la lleva: "Precio revisado…") pero sin
+  // descuento, envío ni Full; y sin un precio que mostrar, solo la marca.
+  const state = priceState(product.price_checked_at);
+  if (state === 'sin_precio') {
+    return new ImageResponse(<BrandOgTemplate format="og" title="Mira su precio de hoy en Mercado Libre" />, size);
+  }
+  return productImageResponse(withoutStaleOffer(product), 'og');
 }

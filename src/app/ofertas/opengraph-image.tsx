@@ -26,6 +26,11 @@ export default async function Image() {
   if (!deals) {
     return new ImageResponse(<BrandOgTemplate format="og" title="Ofertas del día en tecnología" />, size);
   }
+  // Sin ofertas (no hay precios revisados hoy, ver lib/price-freshness) no se
+  // anuncia "0 ofertas": va lo que la página sí tiene.
+  if (deals.length === 0) {
+    return new ImageResponse(<BrandOgTemplate format="og" title="Precios de tecnología en Chile con historial" />, size);
+  }
 
   const top = deals.slice(0, 3);
   const photos = await Promise.all(top.map((p) => loadPhoto(p.image_url, 'O')));
