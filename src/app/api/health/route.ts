@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
+import { readRefreshRuns, refreshStatusFromRuns } from '@/lib/admin-stats';
+import { siteHealthy } from '@/lib/health';
 
 /**
  * Estado del sitio para un monitor externo (UptimeRobot, healthchecks.io…).
@@ -10,6 +12,12 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
  * Un cron que deja de correr no avisa por sí solo: el sitio sigue arriba,
  * pero con precios viejos, y el comprador ve en Mercado Libre otro precio
  * que el publicado. Este endpoint convierte eso en una alerta.
+ *
+ * Desde el 23-11-2026 Mercado Libre no entrega precios a esta aplicación.
+ * Mientras el refresco corra y anote eso (`consulta_de_precios:
+ * "cerrada_por_mercado_libre"`), los precios viejos no cuentan como falla:
+ * no se arreglan desde acá, y un 503 permanente dejaría de avisar lo que sí
+ * importa (ver lib/health).
  *
  * Público a propósito (el monitor no tiene credenciales), así que solo
  * devuelve antigüedades en minutos y horas: nada de nombres, errores de la
@@ -122,15 +130,23 @@ async function latestProspect(admin: SupabaseClient): Promise<string | null> {
 export async function GET() {
   const headers = { 'cache-control': 'no-store, max-age=0' };
   const admin = getSupabaseAdmin();
-  const unknown = { ok: false, precios_hace_min: null, precio_mas_viejo_hace_min: null, prospeccion_hace_h: null };
+  const unknown = {
+    ok: false,
+    precios_hace_min: null,
+    precio_mas_viejo_hace_min: null,
+    prospeccion_hace_h: null,
+    consulta_de_precios: null,
+  };
   if (!admin) return NextResponse.json(unknown, { status: 503, headers });
 
   try {
     const now = Date.now();
-    const [priceAt, oldestAt, prospectAt] = await Promise.all([
+    const [priceAt, oldestAt, prospectAt, refreshRuns] = await Promise.all([
       latestPriceCheck(admin),
       oldestVisiblePriceCheck(admin),
       latestProspect(admin),
+      // No lanza: sin bitácora (o si falla la lectura) vale la regla de siempre.
+      readRefreshRuns(admin),
     ]);
     const priceAge = ageMs(priceAt, now);
     const oldestAge = ageMs(oldestAt, now);
@@ -140,14 +156,20 @@ export async function GET() {
     const masViejoHaceMin = oldestAge === null ? null : Math.floor(oldestAge / 60_000);
     const prospeccionHaceH = prospectAge === null ? null : Math.round((prospectAge / 3_600_000) * 10) / 10;
 
-    // Sin productos visibles revisados no hay "más viejo" que medir: lo cubre
-    // la última revisión.
-    const ok =
-      preciosHaceMin !== null &&
-      preciosHaceMin <= maxPriceAgeMin() &&
-      (masViejoHaceMin === null || masViejoHaceMin <= maxOldestPriceAgeMin()) &&
-      prospeccionHaceH !== null &&
-      prospeccionHaceH <= MAX_PROSPECT_AGE_H;
+    // El refresco corre y su última revisión anotó que Mercado Libre tiene
+    // cerrada la consulta de precios. Si el refresco se detiene, deja de valer.
+    const pricesClosed =
+      !!refreshRuns.data && refreshStatusFromRuns(refreshRuns.data, new Date(now)).state === 'ml_cerro';
+
+    const ok = siteHealthy({
+      priceAgeMin: preciosHaceMin,
+      oldestAgeMin: masViejoHaceMin,
+      prospectAgeH: prospeccionHaceH,
+      pricesClosed,
+      maxPriceAgeMin: maxPriceAgeMin(),
+      maxOldestPriceAgeMin: maxOldestPriceAgeMin(),
+      maxProspectAgeH: MAX_PROSPECT_AGE_H,
+    });
 
     return NextResponse.json(
       {
@@ -155,6 +177,7 @@ export async function GET() {
         precios_hace_min: preciosHaceMin,
         precio_mas_viejo_hace_min: masViejoHaceMin,
         prospeccion_hace_h: prospeccionHaceH,
+        consulta_de_precios: pricesClosed ? 'cerrada_por_mercado_libre' : 'abierta',
       },
       { status: ok ? 200 : 503, headers }
     );
