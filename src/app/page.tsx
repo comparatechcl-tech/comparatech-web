@@ -10,7 +10,6 @@ import { selectHomeDeals } from '@/lib/home-deals';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { DealStrip } from '@/components/product/DealStrip';
 import { DealSpotlight } from '@/components/product/DealSpotlight';
-import { BrandFace } from '@/components/brand/BrandFace';
 import { BRAND_GRADIENT, COMPARADOR_ICON, IconTile, categoryIconStyle } from '@/components/brand/CategoryIcon';
 import { QuickCompare } from '@/components/compare/QuickCompare';
 import { getSiteCategories } from '@/lib/queries/site-categories';
@@ -383,10 +382,6 @@ export default async function HomePage() {
             </div>
           ))}
         </div>
-      </section>
-
-      <section>
-        <BrandFace />
       </section>
     </div>
   );

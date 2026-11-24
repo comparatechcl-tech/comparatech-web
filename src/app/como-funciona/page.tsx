@@ -65,8 +65,7 @@ export default function ComoFuncionaPage() {
 
       <Section id="quienes" title="Quiénes somos">
         <p>
-          ComparaTech es un proyecto independiente hecho en Chile: no somos parte de Mercado Libre. En redes nos presenta
-          Roxy, un personaje creado con inteligencia artificial.
+          ComparaTech es un proyecto independiente hecho en Chile: no somos parte de Mercado Libre.
         </p>
         <p>
           ¿Una duda o un precio que no coincide?{' '}

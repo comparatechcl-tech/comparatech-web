@@ -37,7 +37,7 @@ Este archivo es público, como todo el repositorio: no lleva secretos ni datos d
 
 ## Voz de marca (todo texto público: sitio, redes, videos, Telegram)
 
-- Roxy es un personaje creado con inteligencia artificial, el rostro de la marca. Nunca "fundadora", nunca alguien que revisa, prueba o recomienda productos.
+- Roxy es un personaje creado con inteligencia artificial, el rostro de la marca. Nunca "fundadora", nunca alguien que revisa, prueba o recomienda productos. Mientras el avatar no esté implementado, el sitio no la menciona ni la muestra (decisión del dueño, 24-11-2026): no se vuelve a poner sin que él lo pida.
 - No se afirma que alguien revise cada producto. Lo cierto: los productos salen de listas de Mercado Libre por un proceso automático y se agregaron cuando su vendedor tenía reputación verde; cada precio es el de su última revisión, con su fecha, y el de hoy está en Mercado Libre; la comisión influye en qué aparece.
 - Ya no se dice que los precios "se actualizan solos" o "varias veces al día", ni "solo vendedores con reputación verde" en presente: desde el 23-11-2026 no se puede volver a revisar ni el precio ni quién vende.
 - Un precio que no se revisó hoy nunca va como "hoy": va con su fecha ("Precio del 23/11", "en nuestra última revisión, el 23-11-2026") y sin descuento, envío, vendedor ni bajas. El botón dice "Ver precio de hoy en Mercado Libre".

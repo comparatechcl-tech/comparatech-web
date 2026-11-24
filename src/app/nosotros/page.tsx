@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { ListOrdered, ShieldCheck, RefreshCw, ThumbsUp } from 'lucide-react';
-import { BrandFace } from '@/components/brand/BrandFace';
 import { SocialLinks } from '@/components/brand/SocialLinks';
 
 /**
@@ -70,8 +69,7 @@ export default function NosotrosPage() {
       </p>
 
       <div className="mt-10">
-        <BrandFace compact />
-        <SocialLinks className="mt-4 justify-center" />
+        <SocialLinks className="justify-center" />
       </div>
 
       <div className="mt-10 space-y-4 text-sm leading-relaxed text-muted">
