@@ -17,7 +17,8 @@ import { MAX_CLICKS_PER_CLIENT_PER_DAY, clickClientKey } from '@/lib/click-clien
  * contamos qué se descartó ni por qué.
  *
  * Qué NO se guarda: IP, user-agent, cookies ni la URL completa. Solo el
- * producto, desde dónde salió el clic, el tipo de link, el origen de la
+ * producto (ninguno en el botón de las ofertas de Mercado Libre, que no es
+ * de un producto), desde dónde salió el clic, el tipo de link, el origen de la
  * visita, si era celular y una llave diaria irreversible del cliente para el
  * tope por cliente (lib/click-client-key, ver /privacidad).
  */

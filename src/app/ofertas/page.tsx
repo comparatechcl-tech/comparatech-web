@@ -1,12 +1,15 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Flame, TrendingDown } from 'lucide-react';
+import { Flame, TrendingDown, TrendingUp } from 'lucide-react';
 import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
 import { getRankedDeals } from '@/lib/queries/deals';
 import { getSiteCategories } from '@/lib/queries/site-categories';
 import { ALL_DEALS, countHotDeals, dealsBatch } from '@/lib/deals-listing';
 import { DealsBrowser } from '@/components/product/DealsBrowser';
 import { AffiliateButton } from '@/components/product/AffiliateButton';
+import { ProductGrid } from '@/components/product/ProductGrid';
+import { getPopularProducts } from '@/lib/queries/popular';
+import { POPULAR_MIN } from '@/lib/popular';
 import { getAffiliateSettings } from '@/lib/settings';
 import { mlOffersUrl } from '@/lib/outbound';
 
@@ -23,6 +26,9 @@ export const metadata: Metadata = {
 // Vercel y 140% de las escrituras de páginas: armar cada 5 minutos lo mismo
 // era la mayor parte.
 export const revalidate = 3600;
+
+/** Cuántos de los más populares se muestran cuando no hay ofertas de hoy: tres filas en escritorio. */
+const POPULAR_LIMIT = 12;
 
 /**
  * Ofertas ordenadas por descuento.
@@ -47,6 +53,13 @@ export default async function OfertasPage() {
   ]);
   const confirmed = Object.keys(drops).length;
 
+  // Sin ofertas de hoy (no hay precios revisados hoy, ver lib/price-freshness)
+  // la página no queda en un texto y un botón: muestra los productos que más
+  // se abren en Mercado Libre desde el sitio (lib/popular), como la portada.
+  // Con menos de POPULAR_MIN, nada.
+  const popularFound = deals.length === 0 ? await getPopularProducts(POPULAR_LIMIT) : [];
+  const popular = popularFound.length >= POPULAR_MIN ? popularFound : [];
+
   // Solo las categorías que hoy tienen ofertas, en el orden del menú.
   const counts = new Map<string, number>();
   for (const p of deals) counts.set(p.category, (counts.get(p.category) ?? 0) + 1);
@@ -57,9 +70,12 @@ export default async function OfertasPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <div className="mb-6">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-500/10 px-3 py-1 text-xs font-semibold text-orange-600 dark:text-orange-400">
-          <Flame size={13} /> Descuentos que informa cada vendedor en Mercado Libre
-        </span>
+        {/* Sin ofertas a la vista no hay descuentos de los que hablar. */}
+        {deals.length > 0 && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-500/10 px-3 py-1 text-xs font-semibold text-orange-600 dark:text-orange-400">
+            <Flame size={13} /> Descuentos que informa cada vendedor en Mercado Libre
+          </span>
+        )}
         <h1 className="mt-3 font-heading text-2xl font-bold sm:text-3xl">Ofertas del día</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
           {deals.length > 0 ? (
@@ -79,6 +95,7 @@ export default async function OfertasPage() {
           <div className="mt-5">
             <AffiliateButton
               href={mlOffersUrl(affiliate)}
+              placement="ofertas-ml"
               label="Ver las ofertas de hoy en Mercado Libre"
               className="w-full sm:w-auto"
             />
@@ -109,6 +126,19 @@ export default async function OfertasPage() {
           </p>
         )}
       </div>
+
+      {popular.length > 0 && (
+        <section className="mt-8">
+          <h2 className="flex items-center gap-2 font-heading text-xl font-bold sm:text-2xl">
+            <TrendingUp size={22} className="text-accent" aria-hidden />
+            Los más populares
+          </h2>
+          <p className="mb-4 mt-1 max-w-2xl text-sm text-muted">
+            Los productos que más personas fueron a ver a Mercado Libre desde ComparaTech en los últimos 30 días.
+          </p>
+          <ProductGrid products={popular} eagerImages={4} />
+        </section>
+      )}
 
       {deals.length > 0 && (
         <DealsBrowser

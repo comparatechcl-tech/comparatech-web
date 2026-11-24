@@ -28,17 +28,30 @@ export const PLACEMENTS = [
   'guia-regalos',
   'guia-notebook',
   'historial',
+  'ofertas-ml',
   'otro',
 ] as const;
 
 /** Desde qué parte del sitio salió el clic. */
 export type Placement = (typeof PLACEMENTS)[number];
 
+/**
+ * Botones que llevan a Mercado Libre sin ser de un producto: el de "Ver las
+ * ofertas de hoy en Mercado Libre" (lib/outbound, mlOffersUrl). Su clic se
+ * anota sin producto. El 24-11-2026 el Generador de links de Mercado Libre
+ * respondió que la página de ofertas "no corresponde a un producto", y su
+ * asistente, que compartir ofertas está permitido y puede dar comisión:
+ * contar estos clics es lo que permite compararlos después con la Central
+ * de Afiliados.
+ */
+export const NON_PRODUCT_PLACEMENTS: readonly Placement[] = ['ofertas-ml'];
+
 export const LINK_MODES = ['meli_la', 'directo', 'otro'] as const;
 export type LinkMode = (typeof LINK_MODES)[number];
 
 export interface ClickBody {
-  productId: string;
+  /** null solo en los botones que no son de un producto (NON_PRODUCT_PLACEMENTS). */
+  productId: string | null;
   placement: Placement;
   linkMode: LinkMode;
   src: string | null;
@@ -220,11 +233,18 @@ export function parseClickBody(text: string): ClickBody | null {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   const body = data as Record<string, unknown>;
 
-  const productId = body.p;
-  if (typeof productId !== 'string' || !UUID_RE.test(productId)) return null;
-
   const placement = body.s;
   if (typeof placement !== 'string' || !(PLACEMENTS as readonly string[]).includes(placement)) {
+    return null;
+  }
+
+  // Un botón que no es de un producto se anota sin producto, y solo ese: en
+  // cualquier otro lugar del sitio, un clic sin producto no es un clic bien formado.
+  const nonProduct = NON_PRODUCT_PLACEMENTS.includes(placement as Placement);
+  const productId = body.p;
+  if (nonProduct) {
+    if (productId !== undefined && productId !== null) return null;
+  } else if (typeof productId !== 'string' || !UUID_RE.test(productId)) {
     return null;
   }
 
@@ -234,7 +254,7 @@ export function parseClickBody(text: string): ClickBody | null {
       : 'otro';
 
   return {
-    productId: productId.toLowerCase(),
+    productId: typeof productId === 'string' ? productId.toLowerCase() : null,
     placement: placement as Placement,
     linkMode,
     src: normalizeSrc(body.src),

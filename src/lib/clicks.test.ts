@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_CLICKS_PER_CLIENT_PER_DAY, clickClientKey } from '@/lib/click-client-key';
 import {
   MAX_CLICKS_PER_DAY,
+  NON_PRODUCT_PLACEMENTS,
   chileDateKey,
   chileDayStart,
   isBotUserAgent,
@@ -108,6 +109,24 @@ describe('parseClickBody', () => {
       mobile: false,
       src: null,
     });
+  });
+
+  it('el botón de las ofertas de Mercado Libre no es de un producto: su clic se anota sin producto', () => {
+    expect(parseClickBody(JSON.stringify({ s: 'ofertas-ml', m: 'otro', src: 'chatgpt.com', mob: true }))).toEqual({
+      productId: null,
+      placement: 'ofertas-ml',
+      linkMode: 'otro',
+      src: 'chatgpt.com',
+      mobile: true,
+    });
+    expect(parseClickBody(JSON.stringify({ s: 'ofertas-ml', p: null }))).toMatchObject({ productId: null });
+    // Con un producto no es ese botón: algo viene mal armado y no se guarda.
+    expect(parseClickBody(JSON.stringify({ s: 'ofertas-ml', p: ID }))).toBeNull();
+    // Y en el resto del sitio un clic sin producto sigue sin valer.
+    for (const s of ['ficha', 'home', 'ofertas', 'black-friday', 'otro']) {
+      expect(parseClickBody(JSON.stringify({ s })), s).toBeNull();
+    }
+    expect(NON_PRODUCT_PLACEMENTS).toEqual(['ofertas-ml']);
   });
 
   it.each([
@@ -248,6 +267,16 @@ describe('POST /api/e', () => {
       { product_id: ID, placement: 'home-ofertas', link_mode: 'meli_la', src: 'telegram', is_mobile: true },
     ]);
     expect(JSON.stringify(db.inserts)).not.toContain('200.1.2.3');
+  });
+
+  it('el clic del botón de las ofertas de Mercado Libre se guarda sin producto', async () => {
+    const res = await post(JSON.stringify({ s: 'ofertas-ml', m: 'otro', src: 'instagram', mob: true }), {
+      'sec-fetch-site': 'same-origin',
+    });
+    expect(res.status).toBe(204);
+    expect(db.inserts).toEqual([
+      { product_id: null, placement: 'ofertas-ml', link_mode: 'otro', src: 'instagram', is_mobile: true },
+    ]);
   });
 
   it('un body inválido no inserta', async () => {

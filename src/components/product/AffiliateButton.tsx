@@ -3,6 +3,7 @@
 import type { MouseEvent } from 'react';
 import { usePathname } from 'next/navigation';
 import {
+  NON_PRODUCT_PLACEMENTS,
   SRC_STORAGE_KEY,
   clickDedupKey,
   hrefForSource,
@@ -39,13 +40,16 @@ export function AffiliateButton({
   const pathname = usePathname();
 
   function track() {
-    if (!productId) return;
+    // Sin producto solo se cuentan los botones que no son de un producto
+    // (el de las ofertas de Mercado Libre), que lo dicen con su `placement`.
+    const nonProduct = !productId && placement !== undefined && NON_PRODUCT_PLACEMENTS.includes(placement);
+    if (!productId && !nonProduct) return;
 
-    // Un clic por producto y por sesión: abrir tres veces el mismo link no
-    // son tres compradores. Si el navegador bloquea sessionStorage (modo
-    // privado estricto) se cuenta igual, sin deduplicar.
+    // Un clic por producto (o por botón) y por sesión: abrir tres veces el
+    // mismo link no son tres compradores. Si el navegador bloquea
+    // sessionStorage (modo privado estricto) se cuenta igual, sin deduplicar.
     try {
-      const key = clickDedupKey(productId);
+      const key = clickDedupKey(productId ?? (placement as string));
       if (sessionStorage.getItem(key)) return;
       sessionStorage.setItem(key, '1');
     } catch {
@@ -67,7 +71,7 @@ export function AffiliateButton({
     }
 
     const body = JSON.stringify({
-      p: productId,
+      ...(productId ? { p: productId } : {}),
       s: placement ?? placementFromPath(pathname ?? '/'),
       m: linkModeFromHref(href),
       src,
@@ -124,7 +128,7 @@ export function AffiliateButton({
       aria-label={
         productName
           ? `Ver ${productName} en Mercado Libre (se abre en otra pestaña)`
-          : 'Ver en Mercado Libre (se abre en otra pestaña)'
+          : `${label} (se abre en otra pestaña)`
       }
       onClick={handleClick}
       onAuxClick={handleAuxClick}

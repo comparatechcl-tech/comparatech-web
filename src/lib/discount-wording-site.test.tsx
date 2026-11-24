@@ -22,6 +22,8 @@ vi.mock('@/lib/queries/products', async () => {
   return { MIN_DEAL_DISCOUNT, discountPercent: discountOf };
 });
 vi.mock('@/lib/queries/deals', () => ({ getRankedDeals: vi.fn() }));
+// Los más populares salen de los clics propios (lee la base): acá los decide cada test.
+vi.mock('@/lib/queries/popular', () => ({ getPopularProducts: vi.fn(async () => []) }));
 vi.mock('@/lib/queries/site-categories', () => ({ getSiteCategories: vi.fn(async () => []) }));
 
 import OfertasPage, { metadata as ofertasMetadata } from '@/app/ofertas/page';
@@ -31,6 +33,7 @@ import { OffersOgTemplate } from '@/lib/content/og-template';
 import { DealSpotlight } from '@/components/product/DealSpotlight';
 import { toCompareDetail } from '@/lib/compare';
 import { getRankedDeals } from '@/lib/queries/deals';
+import { getPopularProducts } from '@/lib/queries/popular';
 import type { Product } from '@/lib/types';
 
 /** Lo que el sitio ya no dice en nada que se lea, ni dice nunca. */
@@ -156,6 +159,8 @@ describe('Comparador', () => {
 describe('/ofertas', () => {
   beforeEach(() => {
     vi.mocked(getRankedDeals).mockReset();
+    vi.mocked(getPopularProducts).mockReset();
+    vi.mocked(getPopularProducts).mockResolvedValue([]);
   });
 
   it('el título y la descripción para Google no hablan de precio de lista', () => {
@@ -198,5 +203,43 @@ describe('/ofertas', () => {
     // Sin ofertas no hay cifras tachadas que explicar.
     expect(read).not.toContain('El descuento y la cifra tachada');
     expect(html).not.toMatch(AVOIDED);
+    // El botón no es de un producto: quien lo lee con lector de pantalla oye lo mismo que dice.
+    expect(attributes(html)).toContain('Ver las ofertas de hoy en Mercado Libre (se abre en otra pestaña)');
+    // Sin productos populares que mostrar, la sección no aparece.
+    expect(read).not.toContain('Los más populares');
+    // Y sin ofertas a la vista, la etiqueta de los descuentos tampoco.
+    expect(read).not.toContain('Descuentos que informa cada vendedor');
+  });
+
+  it('sin ofertas muestra los más populares, cada uno con el precio de su última revisión y su fecha', async () => {
+    vi.mocked(getRankedDeals).mockResolvedValue({ ranked: [], drops: {}, best: null });
+    // Revisados el 23-11: ya no son precios de hoy.
+    const popular = Array.from({ length: 5 }, () =>
+      product({ price: 59_990, original_price: null, price_checked_at: '2026-11-23T16:33:00Z' })
+    );
+    vi.mocked(getPopularProducts).mockResolvedValue(popular);
+    const html = renderToStaticMarkup(await OfertasPage());
+    const read = text(html);
+    expect(read).toContain('Los más populares');
+    expect(read).toContain('Los productos que más personas fueron a ver a Mercado Libre desde ComparaTech en los últimos 30 días.');
+    for (const p of popular) expect(read).toContain(p.name);
+    expect(read).toContain('Precio del 23/11');
+    expect(read).toContain('Ver precio de hoy');
+    // No se piden más de los que caben, y solo cuando no hay ofertas.
+    expect(vi.mocked(getPopularProducts)).toHaveBeenCalledWith(12);
+    expect(html).not.toMatch(AVOIDED);
+    for (const attr of attributes(html)) expect(attr).not.toMatch(AVOIDED);
+  });
+
+  it('con menos de 4 populares no arma una sección a medias, y con ofertas ni los pide', async () => {
+    vi.mocked(getRankedDeals).mockResolvedValue({ ranked: [], drops: {}, best: null });
+    vi.mocked(getPopularProducts).mockResolvedValue([product(), product(), product()]);
+    expect(text(renderToStaticMarkup(await OfertasPage()))).not.toContain('Los más populares');
+
+    vi.mocked(getPopularProducts).mockClear();
+    const deal = product({ price: 55_000, original_price: 100_000 });
+    vi.mocked(getRankedDeals).mockResolvedValue({ ranked: [deal], drops: {}, best: deal });
+    expect(text(renderToStaticMarkup(await OfertasPage()))).not.toContain('Los más populares');
+    expect(vi.mocked(getPopularProducts)).not.toHaveBeenCalled();
   });
 });

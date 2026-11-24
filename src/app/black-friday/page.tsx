@@ -114,6 +114,7 @@ export default async function BlackFridayPage() {
         <div className="mt-5">
           <AffiliateButton
             href={mlOffersUrl(affiliate)}
+            placement="ofertas-ml"
             label="Ver las ofertas de hoy en Mercado Libre"
             className="w-full sm:w-auto"
           />

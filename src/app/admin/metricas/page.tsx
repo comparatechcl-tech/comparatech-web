@@ -5,6 +5,7 @@ import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { getCategoryInfo } from '@/lib/categories';
 import { formatCLP } from '@/lib/format';
 import {
+  NON_PRODUCT_PLACEMENTS,
   chileDateKey,
   chileDayStart,
   shiftDateKey,
@@ -44,8 +45,12 @@ const PLACEMENT_LABELS: Record<Placement, string> = {
   'guia-regalos': 'Guía · regalos tecnológicos',
   'guia-notebook': 'Guía · notebook para la universidad',
   historial: 'Historial de precios',
+  'ofertas-ml': 'Botón "Ver las ofertas de hoy en Mercado Libre"',
   otro: 'Otro',
 };
+
+/** Los clics de un botón que no es de un producto: no son un "producto eliminado". */
+const NO_PRODUCT_LABEL = 'Página de ofertas de Mercado Libre';
 
 const LINK_MODE_LABELS: Record<LinkMode, string> = {
   meli_la: 'meli.la (link generado en ML)',
@@ -233,6 +238,7 @@ export default async function MetricasPage() {
   const byCategory = sortedEntries(
     countBy(
       recent.map((c) => {
+        if (!c.product_id && (NON_PRODUCT_PLACEMENTS as readonly string[]).includes(c.placement)) return NO_PRODUCT_LABEL;
         const product = c.product_id ? productsById.get(c.product_id) : undefined;
         if (!product) return 'Producto eliminado';
         return getCategoryInfo(product.category)?.name ?? product.category;

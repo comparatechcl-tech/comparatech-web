@@ -349,6 +349,7 @@ export default async function HomePage() {
             <div className="mt-6 flex justify-center">
               <AffiliateButton
                 href={offersUrl}
+                placement="ofertas-ml"
                 label="Ver las ofertas de hoy en Mercado Libre"
                 className="w-full text-sm sm:w-auto"
               />
