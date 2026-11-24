@@ -174,6 +174,30 @@ function isSlugConflict(error: PostgrestError): boolean {
 }
 
 /**
+ * Cuándo se vio el precio con que entra el producto: lo leyó la prospección
+ * (checked_at, de la migración 0018; sin ella, prospected_at).
+ *
+ * Con la consulta de precios cerrada por Mercado Libre (desde el 23-11-2026)
+ * ya no se revisa el precio al aprobar, y el producto quedaba sin fecha de
+ * revisión: el sitio no mostraba un precio que sí se había visto
+ * (lib/price-freshness). Con esta fecha lo muestra como lo que es: el precio
+ * de ese día. Si ML responde, la revisión de después pone la hora real.
+ */
+async function priceSeenAt(admin: SupabaseAdmin, candidateId: string): Promise<string | null> {
+  for (const columns of ['checked_at, prospected_at', 'prospected_at']) {
+    const { data, error } = await admin.from('product_candidates').select(columns).eq('id', candidateId).maybeSingle();
+    if (error) {
+      if (isMissingSchemaError(error)) continue;
+      return null;
+    }
+    const row = data as { checked_at?: string | null; prospected_at?: string | null } | null;
+    const seenAt = row?.checked_at ?? row?.prospected_at ?? null;
+    return typeof seenAt === 'string' && !Number.isNaN(Date.parse(seenAt)) ? seenAt : null;
+  }
+  return null;
+}
+
+/**
  * Pasa el candidato a `products` con su link. Devuelve el id y el slug del
  * producto nuevo.
  *
@@ -210,12 +234,14 @@ async function promote(
   if (error) return { ok: false, error: promoteErrorMessage(error) };
 
   if (newProductId) {
+    const seenAt = await priceSeenAt(admin, candidate.id);
     await admin
       .from('products')
       .update({
         ml_item_id: itemId,
         link_target_product_id: linkVerified ? candidate.ml_product_id : null,
         link_checked_at: linkVerified ? new Date().toISOString() : null,
+        ...(seenAt ? { price_checked_at: seenAt } : {}),
       })
       .eq('id', newProductId);
   }

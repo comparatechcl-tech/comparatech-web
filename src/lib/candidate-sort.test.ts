@@ -463,6 +463,61 @@ describe('acciones de candidatos', async () => {
     expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toMatchObject({ action: 'aprobar' });
   });
 
+  it('el producto entra con la fecha en que la prospección vio su precio', async () => {
+    // Con la consulta de precios cerrada por Mercado Libre no hay revisión al aprobar: sin esta
+    // fecha el sitio no mostraría un precio que sí se vio.
+    vi.mocked(inspectAffiliateLink).mockResolvedValue({
+      ok: true,
+      info: { itemId: 'MLC999', featuredProductId: 'MLC111', mattWord: 'comparatech', mattTool: '12345' },
+    });
+    const seen = { checked_at: '2026-11-23T12:07:38.000Z', prospected_at: '2026-11-20T12:07:00.000Z' };
+    db.handler = (op) => {
+      if (op.method === 'rpc') return { data: 'prod-1', error: null };
+      if (op.table === 'product_candidates' && op.method === 'select' && op.single) {
+        return { data: op.cols?.includes('prospected_at') ? seen : pendingCandidate, error: null };
+      }
+      return { data: null, error: null };
+    };
+    const res = await actions.approveCandidate('cand-1', 'https://meli.la/abc123');
+    expect(res.ok).toBe(true);
+    const saved = db.ops.find((o) => o.table === 'products' && o.method === 'update');
+    expect(saved?.patch).toMatchObject({ ml_item_id: 'MLC999', price_checked_at: '2026-11-23T12:07:38.000Z' });
+  });
+
+  it('sin la columna checked_at (migración 0018) usa la fecha en que entró a la cola; sin ninguna, no inventa', async () => {
+    vi.mocked(inspectAffiliateLink).mockResolvedValue({
+      ok: true,
+      info: { itemId: 'MLC999', featuredProductId: 'MLC111', mattWord: 'comparatech', mattTool: '12345' },
+    });
+    db.handler = (op) => {
+      if (op.method === 'rpc') return { data: 'prod-1', error: null };
+      if (op.table === 'product_candidates' && op.method === 'select' && op.single) {
+        if (op.cols === 'checked_at, prospected_at') {
+          return { data: null, error: { code: '42703', message: 'column product_candidates.checked_at does not exist' } };
+        }
+        if (op.cols === 'prospected_at') return { data: { prospected_at: '2026-11-20T12:07:00.000Z' }, error: null };
+        return { data: pendingCandidate, error: null };
+      }
+      return { data: null, error: null };
+    };
+    await actions.approveCandidate('cand-1', 'https://meli.la/abc123');
+    expect(db.ops.find((o) => o.table === 'products' && o.method === 'update')?.patch).toMatchObject({
+      price_checked_at: '2026-11-20T12:07:00.000Z',
+    });
+
+    // Un candidato sin fechas: el producto queda sin fecha de revisión, como antes.
+    db.ops = [];
+    db.handler = (op) => {
+      if (op.method === 'rpc') return { data: 'prod-2', error: null };
+      if (op.table === 'product_candidates' && op.method === 'select' && op.single) {
+        return { data: op.cols?.includes('prospected_at') ? { checked_at: null, prospected_at: null } : pendingCandidate, error: null };
+      }
+      return { data: null, error: null };
+    };
+    await actions.approveCandidate('cand-1', 'https://meli.la/abc123');
+    expect(db.ops.find((o) => o.table === 'products' && o.method === 'update')?.patch).not.toHaveProperty('price_checked_at');
+  });
+
   it('en bloque, sin pegar links y sin atribución confirmada, no aprueba', async () => {
     db.handler = (op) =>
       op.table === 'product_candidates' && op.method === 'select'
