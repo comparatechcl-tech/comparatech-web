@@ -30,28 +30,32 @@ export default function ComoFuncionaPage() {
       </p>
 
       <Section id="productos" title="Los productos">
+        {/* En pasado: desde el 23-11-2026 Mercado Libre no deja volver a mirar quién vende cada producto. */}
         <p>
-          Salen de lo más vendido y lo más buscado en Mercado Libre Chile, solo de vendedores con reputación verde. Las
-          especificaciones son las que publica Mercado Libre.
+          Salen de lo más vendido y lo más buscado en Mercado Libre Chile. Los agregamos cuando su vendedor tenía
+          reputación verde. Las especificaciones son las que publica Mercado Libre.
         </p>
       </Section>
 
       <Section id="precios" title="El precio">
         <p>
-          Es el que muestra Mercado Libre en la ficha del producto y se actualiza varias veces al día. El que vale es el
-          que ves en Mercado Libre al momento de comprar.
+          Es el que mostraba Mercado Libre en la ficha del producto la última vez que lo revisamos: esa fecha va junto
+          al precio. El de hoy es el que ves en Mercado Libre al momento de comprar.
         </p>
       </Section>
 
       <Section id="historial" title="El historial de precios">
         <p>
-          Anotamos cada cambio de precio que vemos. En cada ficha hay un gráfico, el promedio de los últimos 30 días y el
-          precio más bajo y más alto que registramos.
+          Anotamos cada cambio de precio que vimos, hasta la última revisión. En cada ficha hay un gráfico, el promedio
+          y el precio más bajo y más alto que registramos.
         </p>
       </Section>
 
       <Section id="etiquetas" title="Qué significa cada etiqueta">
         <dl className="space-y-3">
+          <Term name="Precio del… (con una fecha)">
+            El precio de la última revisión, con su día. El de hoy está en Mercado Libre.
+          </Term>
           <Term name="% de descuento">Lo informa el vendedor en Mercado Libre.</Term>
           <Term name="Bajó $X">El precio de hoy es menor que el que registramos antes.</Term>
           <Term name="Destacado">Productos que elegimos mostrar primero.</Term>

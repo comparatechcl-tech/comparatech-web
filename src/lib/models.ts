@@ -392,13 +392,22 @@ export function modelHeading(model: ModelDef): string {
 
 const versions = (n: number) => (n === 1 ? '1 versión' : `${n} versiones`);
 
-/** Meta description: cuántas versiones, desde cuánto y que hay historial. */
-export function modelMetaDescription(model: ModelDef, onSalePrices: number[]): string {
+/**
+ * Meta description: cuántas versiones, desde cuánto y que hay historial.
+ *
+ * `priceDate` ("23-11-2026"): los precios no se revisaron hoy sino ese día
+ * (lib/price-freshness). Entonces nada dice "hoy": se dice de cuándo son.
+ */
+export function modelMetaDescription(model: ModelDef, onSalePrices: number[], priceDate: string | null = null): string {
   if (onSalePrices.length === 0) {
-    return `${model.name}: hoy sin versiones a la venta con vendedor de reputación verde en Mercado Libre Chile. Mira su historial de precios.`;
+    return priceDate
+      ? `${model.name}: sin versiones a la venta en Mercado Libre Chile en nuestra última revisión, el ${priceDate}. Mira su historial de precios.`
+      : `${model.name}: hoy sin versiones a la venta con vendedor de reputación verde en Mercado Libre Chile. Mira su historial de precios.`;
   }
   const min = Math.min(...onSalePrices);
-  return `${model.name}: ${versions(onSalePrices.length)} a la venta en Mercado Libre Chile desde ${formatCLP(min)}. Mira el historial de precios y el más bajo que registramos.`;
+  return priceDate
+    ? `${model.name}: ${versions(onSalePrices.length)} en Mercado Libre Chile, desde ${formatCLP(min)} el ${priceDate}. Mira el historial de precios y el más bajo que registramos.`
+    : `${model.name}: ${versions(onSalePrices.length)} a la venta en Mercado Libre Chile desde ${formatCLP(min)}. Mira el historial de precios y el más bajo que registramos.`;
 }
 
 /**
@@ -406,10 +415,30 @@ export function modelMetaDescription(model: ModelDef, onSalePrices: number[]): s
  * recomendaciones: cuántas hay y entre qué precios. Sin artículo delante del
  * nombre ("versiones de PS5"): el iPhone, la PS5, el Kindle.
  */
-export function modelIntro(model: ModelDef, onSalePrices: number[], pausedCount: number): string {
+export function modelIntro(
+  model: ModelDef,
+  onSalePrices: number[],
+  pausedCount: number,
+  /** "23-11-2026": los precios son de esa revisión, no de hoy (ver modelMetaDescription). */
+  priceDate: string | null = null,
+): string {
   const what = model.alias ? `${model.name} (${model.alias})` : model.name;
   if (onSalePrices.length === 0) {
-    return `Hoy ninguna versión de ${what} tiene un vendedor con reputación verde en Mercado Libre. Abajo está el último precio que vimos de cada una.`;
+    return priceDate
+      ? `En nuestra última revisión, el ${priceDate}, ninguna versión de ${what} tenía un vendedor con reputación verde en Mercado Libre. Abajo está el último precio que vimos de cada una.`
+      : `Hoy ninguna versión de ${what} tiene un vendedor con reputación verde en Mercado Libre. Abajo está el último precio que vimos de cada una.`;
+  }
+  const min = Math.min(...onSalePrices);
+  const max = Math.max(...onSalePrices);
+  const range = min === max ? `a ${formatCLP(min)}` : `desde ${formatCLP(min)} hasta ${formatCLP(max)}`;
+  if (priceDate) {
+    const paused =
+      pausedCount === 0
+        ? ''
+        : pausedCount === 1
+          ? ' Otra no tenía vendedor con reputación verde.'
+          : ` Otras ${pausedCount} no tenían vendedor con reputación verde.`;
+    return `En nuestra última revisión, el ${priceDate}, encontramos ${versions(onSalePrices.length)} de ${what} a la venta en Mercado Libre, ${range}.${paused} El precio de hoy está en Mercado Libre.`;
   }
   const paused =
     pausedCount === 0
@@ -417,8 +446,5 @@ export function modelIntro(model: ModelDef, onSalePrices: number[], pausedCount:
       : pausedCount === 1
         ? ' Otra no tiene vendedor con reputación verde hoy.'
         : ` Otras ${pausedCount} no tienen vendedor con reputación verde hoy.`;
-  const min = Math.min(...onSalePrices);
-  const max = Math.max(...onSalePrices);
-  const range = min === max ? `a ${formatCLP(min)}` : `desde ${formatCLP(min)} hasta ${formatCLP(max)}`;
-  return `Encontramos ${versions(onSalePrices.length)} de ${what} a la venta en Mercado Libre, ${range}.${paused} Revisamos los precios varias veces al día.`;
+  return `Encontramos ${versions(onSalePrices.length)} de ${what} a la venta en Mercado Libre, ${range}.${paused}`;
 }

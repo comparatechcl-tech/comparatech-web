@@ -125,8 +125,10 @@ async function shown(): Promise<{ social: string[] | null; deals: string[] }> {
       .filter(Boolean)
   );
   const hasSocial = html.includes('Lo que mostramos en redes</h2>');
-  expect(grids).toHaveLength(hasSocial ? 2 : 1);
-  return { social: hasSocial ? grids[0] : null, deals: grids[grids.length - 1] };
+  // La de descuentos sale solo si hay alguno (con precios revisados hoy): sin ellos no hay "de hoy" que mostrar.
+  const hasDeals = html.includes('Mayores descuentos de hoy');
+  expect(grids).toHaveLength((hasSocial ? 1 : 0) + (hasDeals ? 1 : 0));
+  return { social: hasSocial ? grids[0] : null, deals: hasDeals ? grids[grids.length - 1] : [] };
 }
 
 let warn: MockInstance<typeof console.warn>;

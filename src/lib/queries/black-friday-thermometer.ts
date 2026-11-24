@@ -183,8 +183,12 @@ const readSummary = unstable_cache(async (_slot: string) => computeSummary(), ['
  * buildWatchList), del lunes 23 hasta que termina el evento. Fuera de esas
  * fechas no lee nada. Son unos 16 modelos: el historial de cada uno sale de
  * la misma lectura que usa su ficha. Nunca lanza: sin datos, no hay lista.
+ *
+ * `asOf`: hasta cuándo se mira el historial. Si los precios no se revisaron
+ * hoy (lib/price-freshness), la página pasa la fecha de la última revisión:
+ * así nada se mide como si el último precio siguiera vigente.
  */
-export async function getWatchList(now: number = Date.now()): Promise<WatchItem[]> {
+export async function getWatchList(now: number = Date.now(), asOf: number = now): Promise<WatchItem[]> {
   if (!showWatchList(now)) return [];
   try {
     const candidates = watchCandidates(await getAllProducts());
@@ -197,7 +201,7 @@ export async function getWatchList(now: number = Date.now()): Promise<WatchItem[
         if (stat) stats.set(cheapest.id, stat);
       })
     );
-    return buildWatchList(candidates, histories, stats, now);
+    return buildWatchList(candidates, histories, stats, Math.min(now, asOf));
   } catch (err) {
     console.warn('[termometro] no se pudo armar la lista a vigilar:', err instanceof Error ? err.message : String(err));
     return [];

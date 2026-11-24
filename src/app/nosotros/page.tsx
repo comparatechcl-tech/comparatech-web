@@ -12,9 +12,10 @@ import { SocialLinks } from '@/components/brand/SocialLinks';
 const STEPS = [
   // Desde el 17-10-2026 también de lo más buscado: ML cerró la lista de más vendidos (ver lib/prospect-source).
   { icon: ListOrdered, title: 'Traemos', desc: 'Los productos salen de lo más vendido y lo más buscado en Mercado Libre Chile.' },
-  { icon: ShieldCheck, title: 'Filtramos', desc: 'Solo mostramos productos de vendedores con buena reputación en Mercado Libre.' },
-  { icon: RefreshCw, title: 'Actualizamos', desc: 'El precio se actualiza solo, varias veces al día.' },
-  { icon: ThumbsUp, title: 'Tú decides', desc: 'Comparas acá y compras en Mercado Libre.' },
+  // En pasado y sin "se actualiza solo": desde el 23-11-2026 Mercado Libre no deja volver a revisar vendedor ni precio.
+  { icon: ShieldCheck, title: 'Filtramos', desc: 'Agregamos cada producto cuando su vendedor tenía buena reputación en Mercado Libre.' },
+  { icon: RefreshCw, title: 'Anotamos', desc: 'Cada precio va con la fecha en que lo revisamos, y guardamos su historial.' },
+  { icon: ThumbsUp, title: 'Tú decides', desc: 'Comparas acá. El precio de hoy y la compra están en Mercado Libre.' },
 ];
 
 export const metadata: Metadata = {

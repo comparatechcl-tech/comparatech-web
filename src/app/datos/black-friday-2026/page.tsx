@@ -1,8 +1,10 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { CalendarDays } from 'lucide-react';
 import { getThermometer } from '@/lib/queries/black-friday-thermometer';
 import { getCatalogProducts } from '@/lib/queries/products';
+import { hasPricesToday } from '@/lib/price-freshness';
 import { BLACK_FRIDAY, daysUntilBlackFriday } from '@/lib/black-friday';
 import {
   BASELINE_WINDOWS,
@@ -67,7 +69,14 @@ const PRE_LABEL = rangeLabel(EVENT_WINDOWS.preStart, EVENT_WINDOWS.eventStart);
  */
 export default async function TermometroBlackFridayPage() {
   const now = Date.now();
-  const [summary, catalog] = await Promise.all([getThermometer(now), getCatalogProducts()]);
+  const catalog = await getCatalogProducts();
+  // El termómetro mide con precios revisados hoy. Desde el 23-11-2026 Mercado
+  // Libre no los entrega (lib/price-freshness): medir con los precios de ese
+  // día sería publicar como resultado del Black Friday lo que había antes.
+  // Mientras siga así, la página queda en pausa y lleva a /black-friday, que
+  // muestra lo que sí hay (redirección temporal: si los precios vuelven, vuelve).
+  if (!hasPricesToday(catalog, now)) redirect('/black-friday');
+  const summary = await getThermometer(now);
   const phase = summary?.phase ?? thermometerPhase(now);
   const tracked = catalog.length.toLocaleString('es-CL');
   const event = summary?.event ?? null;

@@ -49,16 +49,19 @@ const WEBSITE_JSON_LD = jsonLdString({
 // era la mayor parte.
 export const revalidate = 3600;
 
+// Sin "Precios actualizados" ni "ofertas a la vista": desde el 23-11-2026
+// Mercado Libre no entrega precios y cada uno va con la fecha de su última
+// revisión (lib/price-freshness). Lo que el sitio tiene es el historial.
 const BENEFITS = [
   'Comparación lado a lado',
-  'Precios actualizados',
+  'Historial de precios',
   'Enlaces directos a Mercado Libre',
   'Fácil y rápido',
 ];
 
 const WHY_US = [
   { icon: Search, title: 'Ahorra tiempo', desc: 'Compara varios productos en segundos.' },
-  { icon: Tags, title: 'Ofertas a la vista', desc: 'Mira qué productos aparecen con descuento en Mercado Libre y cuáles bajaron de precio.' },
+  { icon: Tags, title: 'Historial de precios', desc: 'Mira cuánto costaba cada producto y cómo se movió su precio, para saber si una oferta es real.' },
   { icon: ChartNoAxesColumn, title: 'Información clara', desc: 'Especificaciones ordenadas y fáciles de entender.' },
   { icon: Link2, title: 'Enlaces directos', desc: 'Ve directamente a comprar en Mercado Libre.' },
 ];

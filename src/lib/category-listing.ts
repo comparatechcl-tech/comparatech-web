@@ -6,7 +6,8 @@
  * escrita a mano: así no quedan desactualizados cuando cambian los precios.
  */
 import type { Product } from '@/lib/types';
-import { formatCLP } from '@/lib/format';
+import { formatCLP, formatFullDate } from '@/lib/format';
+import { latestPriceCheck, priceState } from '@/lib/price-freshness';
 import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
 import { domainLabel, isTypeSlug, OTHER_TYPE_LABEL, typeSlug } from '@/lib/product-types';
 import { normalizeName } from '@/lib/text';
@@ -154,11 +155,16 @@ export function indexableTypes(products: Product[], category: { slug: string; na
 
 /** Meta description de la página de un tipo: conteo y rango de precios, como la de la categoría. */
 export function typeMetaDescription(label: string, summary: CategorySummary): string {
-  const { count, minPrice, maxPrice } = summary;
+  const { count, minPrice, maxPrice, priceDate } = summary;
+  const what = `${label} en Chile: ${count} ${count === 1 ? 'producto' : 'productos'} de Mercado Libre`;
+  if (minPrice === 0) return `${what}, con sus especificaciones y su historial de precios.`;
   const range =
     minPrice === maxPrice ? `a ${formatCLP(minPrice)}` : `desde ${formatCLP(minPrice)} hasta ${formatCLP(maxPrice)}`;
-  return `${label} en Chile: ${count} ${count === 1 ? 'producto' : 'productos'} de Mercado Libre, ${range}. Precios revisados varias veces al día.`;
+  return `${what}, ${range}${priceDate ? ` el ${priceDate}` : ''}. ${PRICE_DATE_NOTE}`;
 }
+
+/** Lo que las descripciones dicen de los precios: cierto se revisen hoy o no (lib/price-freshness). */
+const PRICE_DATE_NOTE = 'Cada precio con la fecha de su revisión y su historial.';
 
 /** "A", "A y B", "A, B y C". */
 function joinSpanish(items: string[]): string {
@@ -185,21 +191,33 @@ export function topBrands(products: Product[], limit = 3): string[] {
 
 export interface CategorySummary {
   count: number;
+  /** El rango de los precios que se muestran (lib/price-freshness); 0 si no hay ninguno que mostrar. */
   minPrice: number;
   maxPrice: number;
   brands: string[];
   /** Productos con MIN_DEAL_DISCOUNT % o más de descuento. */
   dealCount: number;
+  /**
+   * "23-11-2026": los precios no se revisaron hoy sino ese día, y los textos
+   * lo dicen en vez de hablar de "hoy". null si hay precios revisados hoy.
+   */
+  priceDate: string | null;
 }
 
-export function summarizeCategory(products: Product[]): CategorySummary {
-  const prices = products.map((p) => p.price).filter((n) => Number.isFinite(n) && n > 0);
+export function summarizeCategory(products: Product[], now: number = Date.now()): CategorySummary {
+  // Un precio sin revisar hace más de un mes no se muestra: tampoco entra al rango.
+  const prices = products
+    .filter((p) => priceState(p.price_checked_at, now) !== 'sin_precio')
+    .map((p) => p.price)
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const lastCheck = latestPriceCheck(products);
   return {
     count: products.length,
     minPrice: prices.length ? Math.min(...prices) : 0,
     maxPrice: prices.length ? Math.max(...prices) : 0,
     brands: topBrands(products),
     dealCount: products.filter((p) => discountPercent(p) >= MIN_DEAL_DISCOUNT).length,
+    priceDate: lastCheck && priceState(lastCheck, now) !== 'hoy' ? formatFullDate(lastCheck) : null,
   };
 }
 
@@ -209,15 +227,22 @@ export function summarizeCategory(products: Product[]): CategorySummary {
  * página) sin inventar nada: el descuento es el que informa Mercado Libre.
  */
 export function categoryIntro(summary: CategorySummary): string {
-  const { count, minPrice, maxPrice, brands, dealCount } = summary;
+  const { count, minPrice, maxPrice, brands, dealCount, priceDate } = summary;
   if (count === 0) return '';
 
   const what = count === 1 ? '1 producto' : `${count} productos`;
   const from = brands.length > 0 ? ` de ${joinSpanish(brands)}` : '';
+  // Sin ningún precio que mostrar (lib/price-freshness): solo qué hay y dónde está el precio.
+  if (minPrice === 0) return `Comparamos ${what}${from}. El precio de hoy de cada uno está en Mercado Libre.`;
   const range =
     minPrice === maxPrice
       ? `; a ${formatCLP(minPrice)}`
       : `; desde ${formatCLP(minPrice)} hasta ${formatCLP(maxPrice)}`;
+
+  // Con los precios sin revisar hoy no se habla de "hoy" ni de descuentos: se dice de cuándo son.
+  if (priceDate) {
+    return `Comparamos ${what}${from}${range} en nuestra última revisión de precios, el ${priceDate}. El precio de hoy de cada uno está en Mercado Libre.`;
+  }
 
   const deals =
     dealCount === 0
@@ -231,12 +256,14 @@ export function categoryIntro(summary: CategorySummary): string {
 
 /** Meta description: conteo y rango de precios, que es lo que se busca. */
 export function categoryMetaDescription(name: string, summary: CategorySummary): string {
-  const { count, minPrice, maxPrice } = summary;
+  const { count, minPrice, maxPrice, priceDate } = summary;
+  const what = `Compara ${count} ${count === 1 ? 'producto' : 'productos'} de ${name.toLowerCase()} en Chile`;
+  if (minPrice === 0) return `${what}, con sus especificaciones y su historial de precios en Mercado Libre.`;
   const range =
     minPrice === maxPrice
       ? `a ${formatCLP(minPrice)}`
       : `desde ${formatCLP(minPrice)} hasta ${formatCLP(maxPrice)}`;
-  return `Compara ${count} ${count === 1 ? 'producto' : 'productos'} de ${name.toLowerCase()} en Chile, ${range}. Precios de Mercado Libre revisados varias veces al día.`;
+  return `${what}, ${range}${priceDate ? ` el ${priceDate}` : ''}. Precios de Mercado Libre, cada uno con la fecha de su revisión.`;
 }
 
 /**

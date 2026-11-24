@@ -156,7 +156,7 @@ describe('/ofertas', () => {
   it('el título y la descripción para Google no hablan de precio de lista', () => {
     expect(ofertasMetadata.title).toBe('Ofertas del día');
     expect(ofertasMetadata.description).toBe(
-      'Los mayores descuentos del catálogo, tal como los informa el vendedor en Mercado Libre, con los precios revisados varias veces al día.'
+      'Los descuentos del catálogo, tal como los informa el vendedor en Mercado Libre, y el historial de precios de cada producto.'
     );
   });
 
@@ -179,10 +179,17 @@ describe('/ofertas', () => {
     expect(read).not.toContain('el mayor');
   });
 
-  it('sin ofertas lo dice con las mismas palabras', async () => {
+  it('sin ofertas dice dónde están las de hoy y qué hay acá, sin prometer que los precios se actualizan', async () => {
     vi.mocked(getRankedDeals).mockResolvedValue({ ranked: [], drops: {}, best: null });
     const html = renderToStaticMarkup(await OfertasPage());
-    expect(text(html)).toContain('Hoy no hay productos con 20% o más de descuento en el catálogo.');
+    const read = text(html);
+    expect(read).toContain(
+      'Las ofertas de hoy están en Mercado Libre. Acá puedes ver cuánto costaba cada producto en nuestra última revisión y cómo se movió su precio, para saber si una oferta es real.'
+    );
+    expect(html).toContain('href="/historial-de-precios"');
+    expect(read).not.toContain('varias veces al día');
+    // Sin ofertas no hay cifras tachadas que explicar.
+    expect(read).not.toContain('El descuento y la cifra tachada');
     expect(html).not.toMatch(AVOIDED);
   });
 });

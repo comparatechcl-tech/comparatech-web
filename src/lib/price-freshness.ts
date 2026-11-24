@@ -63,6 +63,28 @@ export function priceStateChangedSince(
   });
 }
 
+/** La revisión de precio más reciente entre varios productos; null si ninguno tiene una fecha válida. */
+export function latestPriceCheck(products: { price_checked_at?: string | null }[]): string | null {
+  let latest: string | null = null;
+  let latestMs = -Infinity;
+  for (const p of products) {
+    const t = p.price_checked_at ? Date.parse(p.price_checked_at) : NaN;
+    if (Number.isFinite(t) && t > latestMs) {
+      latestMs = t;
+      latest = p.price_checked_at ?? null;
+    }
+  }
+  return latest;
+}
+
+/**
+ * ¿Hay precios revisados hoy en esta lista? Sin ninguno, una página no puede
+ * hablar de "hoy": ni ofertas del día, ni bajas, ni mediciones.
+ */
+export function hasPricesToday(products: { price_checked_at?: string | null }[], now: number = Date.now()): boolean {
+  return priceState(latestPriceCheck(products), now) === 'hoy';
+}
+
 /** "23/11": el día de la última revisión, para acompañar un precio de referencia. */
 export function priceDateLabel(checkedAt: string): string {
   return formatDayMonth(checkedAt);

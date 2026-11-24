@@ -56,7 +56,8 @@ function product(over: Partial<Product>): Product {
     created_at: '2026-01-01T00:00:00Z',
     inactive_reason: null,
     inactive_since: null,
-    price_checked_at: null,
+    // Revisado recién: los textos de "hoy" valen solo con precios de hoy (lib/price-freshness).
+    price_checked_at: new Date().toISOString(),
     winner_item_id: null,
     link_target_product_id: null,
     link_checked_at: null,
@@ -183,6 +184,7 @@ describe('textos', () => {
       maxPrice: 90000,
       brands: ['Sony', 'Xiaomi', 'JBL'],
       dealCount: 2,
+      priceDate: null,
     });
   });
 
@@ -201,9 +203,60 @@ describe('textos', () => {
   });
 
   it('meta description con conteo y rango', () => {
-    expect(categoryMetaDescription('Audio', summarizeCategory(catalog))).toContain(
-      'Compara 5 productos de audio en Chile, desde $5.000 hasta $90.000.'
+    expect(categoryMetaDescription('Audio', summarizeCategory(catalog))).toBe(
+      'Compara 5 productos de audio en Chile, desde $5.000 hasta $90.000. Precios de Mercado Libre, cada uno con la fecha de su revisión.'
     );
+  });
+
+  /*
+   * Desde el 23-11-2026 Mercado Libre no entrega precios. Con los precios sin
+   * revisar hoy, los textos dicen de qué día son y no hablan de "hoy" ni de
+   * descuentos; con precios de hace más de un mes (o sin fecha), no dan cifras.
+   */
+  describe('con precios que no son de hoy', () => {
+    // Revisados el 23-11 a las 13:33 de Chile; se leen el 25-11.
+    const NOW = Date.parse('2026-11-25T15:00:00Z');
+    const dated = catalog.map((p) => ({ ...p, price_checked_at: '2026-11-23T16:33:00Z' }));
+
+    it('el resumen trae la fecha de la última revisión', () => {
+      expect(summarizeCategory(dated, NOW)).toMatchObject({ minPrice: 5000, maxPrice: 90000, priceDate: '23-11-2026' });
+      expect(summarizeCategory(catalog.map((p) => ({ ...p, price_checked_at: '2026-11-25T14:00:00Z' })), NOW).priceDate).toBeNull();
+    });
+
+    it('la intro dice de cuándo son los precios y dónde está el de hoy', () => {
+      const intro = categoryIntro(summarizeCategory(dated, NOW));
+      expect(intro).toBe(
+        'Comparamos 5 productos de Sony, Xiaomi y JBL; desde $5.000 hasta $90.000 en nuestra última revisión de precios, el 23-11-2026. El precio de hoy de cada uno está en Mercado Libre.'
+      );
+      expect(intro).not.toMatch(/descuento|Hoy /);
+    });
+
+    it('las descripciones para Google llevan la fecha', () => {
+      expect(categoryMetaDescription('Audio', summarizeCategory(dated, NOW))).toBe(
+        'Compara 5 productos de audio en Chile, desde $5.000 hasta $90.000 el 23-11-2026. Precios de Mercado Libre, cada uno con la fecha de su revisión.'
+      );
+      expect(typeMetaDescription('Audífonos', summarizeCategory(dated, NOW))).toBe(
+        'Audífonos en Chile: 5 productos de Mercado Libre, desde $5.000 hasta $90.000 el 23-11-2026. Cada precio con la fecha de su revisión y su historial.'
+      );
+    });
+
+    it('sin ningún precio que mostrar (más de un mes, o sin fecha), no dan cifras', () => {
+      const old = catalog.map((p) => ({ ...p, price_checked_at: '2026-10-01T12:00:00Z' }));
+      const none = catalog.map((p) => ({ ...p, price_checked_at: null }));
+      for (const list of [old, none]) {
+        const summary = summarizeCategory(list, NOW);
+        expect(summary).toMatchObject({ minPrice: 0, maxPrice: 0 });
+        expect(categoryIntro(summary)).toBe(
+          'Comparamos 5 productos de Sony, Xiaomi y JBL. El precio de hoy de cada uno está en Mercado Libre.'
+        );
+        expect(categoryMetaDescription('Audio', summary)).toBe(
+          'Compara 5 productos de audio en Chile, con sus especificaciones y su historial de precios en Mercado Libre.'
+        );
+        expect(typeMetaDescription('Audífonos', summary)).toBe(
+          'Audífonos en Chile: 5 productos de Mercado Libre, con sus especificaciones y su historial de precios.'
+        );
+      }
+    });
   });
 
   it('ItemList JSON-LD válido y sin "<"', () => {
@@ -270,7 +323,7 @@ describe('páginas por tipo', () => {
 
   it('meta description con el nombre del tipo, conteo y rango', () => {
     expect(typeMetaDescription('Audífonos', summarizeCategory(productsOfType(products, 'audifonos')))).toBe(
-      'Audífonos en Chile: 6 productos de Mercado Libre, desde $10.000 hasta $15.000. Precios revisados varias veces al día.',
+      'Audífonos en Chile: 6 productos de Mercado Libre, desde $10.000 hasta $15.000. Cada precio con la fecha de su revisión y su historial.',
     );
   });
 });

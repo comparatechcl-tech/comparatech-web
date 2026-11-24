@@ -147,8 +147,8 @@ export default async function GuiaPage({ params }: { params: Params }) {
             <li key={line}>{line}</li>
           ))}
           <li>
-            No probamos los productos. Los precios se actualizan solos varias veces al día y pueden cambiar: el que vale
-            es el que ves en Mercado Libre al comprar.{' '}
+            No probamos los productos. Cada precio es el de su última revisión, con su fecha, y puede haber cambiado:
+            el que vale es el que ves en Mercado Libre al comprar.{' '}
             <Link href="/como-funciona" className="text-accent hover:underline">
               Cómo funciona ComparaTech
             </Link>

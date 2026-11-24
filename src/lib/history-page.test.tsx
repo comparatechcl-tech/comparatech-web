@@ -61,7 +61,10 @@ describe('/historial-de-precios', () => {
     expect(html).toMatch(/<form[^>]*action="\/buscar"[^>]*method="get"/);
     expect(html).toContain('name="q"');
     expect(t).toContain('Historial de precios de Mercado Libre');
-    expect(t).toContain('el precio de 1 productos');
+    expect(t).toContain('cada cambio de precio que vimos en 1 productos');
+    // Sin "varias veces al día": desde el 23-11-2026 cada precio va con la fecha de su última revisión.
+    expect(t).not.toContain('varias veces al día');
+    expect(t).toContain('¿De cuándo es el precio que veo?');
   });
 
   it('las páginas por modelo, solo las que tienen alguna versión a la venta', async () => {
@@ -72,12 +75,16 @@ describe('/historial-de-precios', () => {
     expect(text(empty)).not.toContain('Historial por modelo');
   });
 
-  it('sin bajas lo dice; explica cómo saber si un descuento es real y cómo se arma el registro', async () => {
+  it('sin bajas no hay sección de bajas; explica cómo saber si un descuento es real y cómo se arma el registro', async () => {
     const t = text(await render([]));
-    expect(t).toContain('Hoy no registramos bajas de precio en las ofertas.');
+    // Una baja "de hoy" necesita un precio revisado hoy: sin ninguna, la sección no va.
+    expect(t).not.toContain('Bajaron de precio según nuestro registro');
+    expect(t).not.toContain('Hoy no registramos bajas');
     expect(t).toContain('Cómo saber si un descuento es de verdad');
     expect(t).toContain('Cómo armamos el historial');
-    expect(t).toContain('"Bajó $X" sale solo cuando el precio de hoy es 3% o más menor');
+    expect(t).toContain('"Bajó $X" sale solo junto a un precio revisado hoy, cuando es 3% o más menor');
+    // Lo que ya no se puede afirmar: que solo aparecen vendedores con reputación verde.
+    expect(t).not.toContain('solo aparecen vendedores');
     expect(t).not.toMatch(AVOIDED);
   });
 });

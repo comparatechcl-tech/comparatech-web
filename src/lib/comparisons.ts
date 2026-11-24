@@ -75,9 +75,26 @@ export function comparisonTitle(a: ModelDef, b: ModelDef): string {
  * Lo primero que dice la página: desde cuánto está cada uno hoy y cuánto
  * más cuesta uno que el otro. Solo precios: no dice cuál conviene.
  */
-export function priceGapText(a: ModelDef, b: ModelDef, fromA: number | null, fromB: number | null): string {
+export function priceGapText(
+  a: ModelDef,
+  b: ModelDef,
+  fromA: number | null,
+  fromB: number | null,
+  /** "23-11-2026": los precios son de esa revisión, no de hoy (lib/price-freshness). */
+  priceDate: string | null = null,
+): string {
   const na = shortModelName(a);
   const nb = shortModelName(b);
+  if (priceDate) {
+    const when = `En nuestra última revisión, el ${priceDate},`;
+    if (fromA === null && fromB === null) return `${when} ni ${na} ni ${nb} tenían versiones a la venta con vendedor de reputación verde en Mercado Libre.`;
+    if (fromA === null) return `${when} ${nb} estaba desde ${formatCLP(fromB!)} en Mercado Libre; ${na} no tenía versiones a la venta con vendedor de reputación verde.`;
+    if (fromB === null) return `${when} ${na} estaba desde ${formatCLP(fromA)} en Mercado Libre; ${nb} no tenía versiones a la venta con vendedor de reputación verde.`;
+    const gap = Math.abs(fromA - fromB);
+    const versus = `${when} ${na} estaba desde ${formatCLP(fromA)} y ${nb} desde ${formatCLP(fromB)} en Mercado Libre`;
+    if (gap === 0) return `${versus}: costaban lo mismo.`;
+    return `${versus}: ${fromA > fromB ? na : nb} costaba ${formatCLP(gap)} más.`;
+  }
   if (fromA === null && fromB === null) return `Hoy ni ${na} ni ${nb} tienen versiones a la venta con vendedor de reputación verde en Mercado Libre.`;
   if (fromA === null) return `Hoy ${nb} está desde ${formatCLP(fromB!)} en Mercado Libre; ${na} no tiene versiones a la venta con vendedor de reputación verde.`;
   if (fromB === null) return `Hoy ${na} está desde ${formatCLP(fromA)} en Mercado Libre; ${nb} no tiene versiones a la venta con vendedor de reputación verde.`;

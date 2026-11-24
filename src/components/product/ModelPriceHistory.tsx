@@ -9,9 +9,10 @@ import type { Product } from '@/lib/types';
 
 const day = (t: number) => formatDayMonth(new Date(t).toISOString());
 
-/** "de los últimos 30 días", o desde el primer registro si hay menos. */
-function averageWhen(summary: PriceHistorySummary): string {
-  return summary.averageFrom <= summary.trackedSince ? `desde el ${day(summary.trackedSince)}` : 'de los últimos 30 días';
+/** "de los últimos 30 días", o desde el primer registro si hay menos. Con `priceDate`, hasta ese día. */
+function averageWhen(summary: PriceHistorySummary, priceDate: string | null): string {
+  if (summary.averageFrom <= summary.trackedSince) return `desde el ${day(summary.trackedSince)}`;
+  return priceDate ? `de los 30 días hasta el ${priceDate}` : 'de los últimos 30 días';
 }
 
 interface Row {
@@ -30,18 +31,24 @@ interface Row {
  * registró de cada versión. Solo hechos: no dice si conviene comprar.
  *
  * Componente de servidor, sin JavaScript en el navegador.
+ *
+ * Si los precios no se revisaron hoy (lib/price-freshness), la página pasa en
+ * `now` el momento de la última revisión y en `priceDate` su día ("23/11"):
+ * el historial termina ahí y donde decía "hoy" dice "el 23/11".
  */
 export function ModelPriceHistory({
   model,
   versions,
   histories,
   now,
+  priceDate = null,
 }: {
   model: ModelDef;
   /** A la venta primero, después las que hoy no tienen vendedor. */
   versions: Product[];
   histories: Map<string, PricePoint[] | null>;
   now: number;
+  priceDate?: string | null;
 }) {
   const inputs: VersionHistory[] = versions.map((p) => ({
     id: p.id,
@@ -82,18 +89,31 @@ export function ModelPriceHistory({
         <>
           <p className="text-sm leading-relaxed text-muted">
             {summary.recent.length === 1
-              ? `El precio más bajo entre las versiones de ${model.name} a la venta no ha cambiado desde el ${day(
-                  summary.trackedSince,
-                )}, cuando empezamos a seguirlo.`
-              : `El gráfico muestra el precio más bajo entre las versiones de ${model.name} a la venta en cada momento, desde el ${day(
-                  summary.trackedSince,
-                )}. Lo anotamos cada vez que lo vemos cambiar.`}
+              ? priceDate
+                ? `El precio más bajo entre las versiones de ${model.name} a la venta no cambió entre el ${day(
+                    summary.trackedSince,
+                  )} y el ${priceDate}, la última vez que revisamos los precios.`
+                : `El precio más bajo entre las versiones de ${model.name} a la venta no ha cambiado desde el ${day(
+                    summary.trackedSince,
+                  )}, cuando empezamos a seguirlo.`
+              : priceDate
+                ? `El gráfico muestra el precio más bajo entre las versiones de ${model.name} a la venta en cada momento, desde el ${day(
+                    summary.trackedSince,
+                  )} hasta el ${priceDate}, la última vez que revisamos los precios.`
+                : `El gráfico muestra el precio más bajo entre las versiones de ${model.name} a la venta en cada momento, desde el ${day(
+                    summary.trackedSince,
+                  )}. Lo anotamos cada vez que lo vemos cambiar.`}
           </p>
-          <PriceChart summary={summary} price={today} end="hoy" />
+          <PriceChart summary={summary} price={today} end={priceDate ? 'ultima_revision' : 'hoy'} />
           {summary.recent.length > 1 && (
-            <Numbers summary={summary} today={today} minLabel={labelOf(sourceAt(series, summary.minAt))} />
+            <Numbers
+              summary={summary}
+              today={today}
+              minLabel={labelOf(sourceAt(series, summary.minAt))}
+              priceDate={priceDate}
+            />
           )}
-          {summary.changes48h >= BUSY_CHANGES_48H && (
+          {!priceDate && summary.changes48h >= BUSY_CHANGES_48H && (
             <p className="mt-3 text-xs text-muted">
               El precio más bajo cambió {summary.changes48h} veces en las últimas 48 horas. Revisa el de Mercado Libre
               antes de comprar.
@@ -102,7 +122,7 @@ export function ModelPriceHistory({
         </>
       )}
 
-      <VersionTable rows={rows} />
+      <VersionTable rows={rows} priceDate={priceDate} />
 
       <p className="mt-3 text-xs text-muted">
         <Link href="/como-funciona#historial" className="hover:text-accent hover:underline">
@@ -113,19 +133,33 @@ export function ModelPriceHistory({
   );
 }
 
-function Numbers({ summary, today, minLabel }: { summary: PriceHistorySummary; today: number; minLabel: string | null }) {
+function Numbers({
+  summary,
+  today,
+  minLabel,
+  priceDate,
+}: {
+  summary: PriceHistorySummary;
+  today: number;
+  minLabel: string | null;
+  priceDate: string | null;
+}) {
   const diff = vsAverage(today, summary.average);
   // Si el más bajo es el de hoy, no terminó: "por unas 3 horas" haría creer que ya pasó.
   const ongoing = summary.stretches[summary.stretches.length - 1]?.price === summary.min;
   const held = ongoing ? null : heldLabel(summary.minHeldMs);
-  const when = ongoing ? `Sigue hoy, desde el ${day(summary.minAt)}` : `El ${day(summary.minAt)}${held ? `, ${held}` : ''}`;
+  const when = ongoing
+    ? priceDate
+      ? `Seguía el ${priceDate}, desde el ${day(summary.minAt)}`
+      : `Sigue hoy, desde el ${day(summary.minAt)}`
+    : `El ${day(summary.minAt)}${held ? `, ${held}` : ''}`;
   const items = [
     {
-      term: 'Hoy, desde',
+      term: priceDate ? `El ${priceDate}, desde` : 'Hoy, desde',
       value: formatCLP(today),
       note: diff === 0 ? 'Igual al promedio' : `${Math.abs(diff)}% ${diff < 0 ? 'bajo' : 'sobre'} el promedio`,
     },
-    { term: `Promedio ${averageWhen(summary)}`, value: formatCLP(summary.average) },
+    { term: `Promedio ${averageWhen(summary, priceDate)}`, value: formatCLP(summary.average) },
     {
       term: 'Más bajo registrado',
       value: formatCLP(summary.min),
@@ -147,7 +181,7 @@ function Numbers({ summary, today, minLabel }: { summary: PriceHistorySummary; t
 }
 
 /** El precio de cada versión y el más bajo que le registramos, con el link a su ficha. */
-function VersionTable({ rows }: { rows: Row[] }) {
+function VersionTable({ rows, priceDate }: { rows: Row[]; priceDate: string | null }) {
   return (
     <div className="mt-6 overflow-x-auto">
       <table className="w-full min-w-[22rem] text-left text-sm">
@@ -158,7 +192,7 @@ function VersionTable({ rows }: { rows: Row[] }) {
               Versión
             </th>
             <th scope="col" className="py-2 pr-3 font-medium">
-              Hoy
+              {priceDate ? `El ${priceDate}` : 'Hoy'}
             </th>
             <th scope="col" className="py-2 font-medium">
               Más bajo registrado
@@ -177,7 +211,9 @@ function VersionTable({ rows }: { rows: Row[] }) {
                 {product.is_active ? (
                   <span className="font-medium text-fg">{formatCLP(product.price)}</span>
                 ) : (
-                  <span className="text-muted">Sin vendedor hoy (último {formatCLP(product.price)})</span>
+                  <span className="text-muted">
+                    {priceDate ? 'Sin vendedor' : 'Sin vendedor hoy'} (último {formatCLP(product.price)})
+                  </span>
                 )}
               </td>
               <td className="py-2 text-muted">

@@ -13,7 +13,7 @@ export default function TerminosPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
       <h1 className="font-heading text-2xl font-bold">Términos de uso</h1>
-      <p className="mt-2 text-xs text-muted">Última actualización: octubre de 2026</p>
+      <p className="mt-2 text-xs text-muted">Última actualización: noviembre de 2026</p>
 
       <div className="mt-6 space-y-4 text-sm leading-relaxed text-muted">
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Qué es ComparaTech</h2>
@@ -28,17 +28,17 @@ export default function TerminosPage() {
           Los precios son informados por Mercado Libre y pueden cambiar en cualquier momento.
         </p>
         <p>
-          Se actualizan de forma automática varias veces al día, pero entre una actualización y otra el vendedor puede
-          cambiar el precio, el
-          stock o las condiciones de despacho. Lo que vale es lo que ves en Mercado Libre al momento de comprar. El
-          precio, la entrega, la garantía y las devoluciones son responsabilidad del vendedor y de Mercado Libre.
+          Cada precio que mostramos es el de su última revisión, y esa fecha va junto a él: desde entonces el vendedor
+          puede haber cambiado el precio, el stock o las condiciones de despacho. Lo que vale es lo que ves en Mercado
+          Libre al momento de comprar. El precio, la entrega, la garantía y las devoluciones son responsabilidad del
+          vendedor y de Mercado Libre.
         </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Links de afiliado</h2>
         <p>
-          ComparaTech participa en el Programa de Afiliados y Creadores de Mercado Libre: los botones &quot;Ver en
-          Mercado Libre&quot; son links de afiliado y pueden generar una comisión para el sitio, sin costo adicional
-          para ti.
+          ComparaTech participa en el Programa de Afiliados y Creadores de Mercado Libre: los botones que llevan a
+          Mercado Libre son links de afiliado y pueden generar una comisión para el sitio, sin costo adicional para
+          ti.
         </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Contenido</h2>

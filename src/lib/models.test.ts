@@ -282,10 +282,10 @@ describe('textos de la página', () => {
 
   it('la introducción nombra el alias: Xbox Series X y S, Grand Theft Auto VI', () => {
     expect(modelIntro(getModel('xbox-series')!, [530_107, 952_831], 0)).toBe(
-      'Encontramos 2 versiones de Xbox Series X|S (Xbox Series X y Xbox Series S) a la venta en Mercado Libre, desde $530.107 hasta $952.831. Revisamos los precios varias veces al día.',
+      'Encontramos 2 versiones de Xbox Series X|S (Xbox Series X y Xbox Series S) a la venta en Mercado Libre, desde $530.107 hasta $952.831.',
     );
     expect(modelIntro(getModel('gta-6')!, [94_990], 0)).toBe(
-      'Encontramos 1 versión de GTA 6 (Grand Theft Auto VI) a la venta en Mercado Libre, a $94.990. Revisamos los precios varias veces al día.',
+      'Encontramos 1 versión de GTA 6 (Grand Theft Auto VI) a la venta en Mercado Libre, a $94.990.',
     );
   });
 
@@ -295,14 +295,45 @@ describe('textos de la página', () => {
 
   it('la introducción dice cuántas hay y entre qué precios', () => {
     expect(modelIntro(ps5, [679_990, 769_990, 1_089_990], 0)).toBe(
-      'Encontramos 3 versiones de PS5 (PlayStation 5) a la venta en Mercado Libre, desde $679.990 hasta $1.089.990. Revisamos los precios varias veces al día.',
+      'Encontramos 3 versiones de PS5 (PlayStation 5) a la venta en Mercado Libre, desde $679.990 hasta $1.089.990.',
     );
     expect(modelIntro(iphone, [1_073_674], 2)).toBe(
-      'Encontramos 1 versión de iPhone 17 a la venta en Mercado Libre, a $1.073.674. Otras 2 no tienen vendedor con reputación verde hoy. Revisamos los precios varias veces al día.',
+      'Encontramos 1 versión de iPhone 17 a la venta en Mercado Libre, a $1.073.674. Otras 2 no tienen vendedor con reputación verde hoy.',
     );
     expect(modelIntro(iphone, [1_073_674, 1_074_804], 1)).toContain('Otra no tiene vendedor con reputación verde hoy.');
     expect(modelIntro(iphone, [], 3)).toBe(
       'Hoy ninguna versión de iPhone 17 tiene un vendedor con reputación verde en Mercado Libre. Abajo está el último precio que vimos de cada una.',
+    );
+  });
+
+  /*
+   * Desde el 23-11-2026 Mercado Libre no entrega precios: si los de un modelo
+   * no se revisaron hoy, los textos dicen de qué día son en vez de "hoy".
+   */
+  it('con precios que no son de hoy, la introducción dice de cuándo son', () => {
+    expect(modelIntro(ps5, [679_990, 769_990, 1_089_990], 0, '23-11-2026')).toBe(
+      'En nuestra última revisión, el 23-11-2026, encontramos 3 versiones de PS5 (PlayStation 5) a la venta en Mercado Libre, desde $679.990 hasta $1.089.990. El precio de hoy está en Mercado Libre.',
+    );
+    expect(modelIntro(iphone, [1_073_674], 2, '23-11-2026')).toContain('Otras 2 no tenían vendedor con reputación verde.');
+    expect(modelIntro(iphone, [1_073_674, 1_074_804], 1, '23-11-2026')).toContain('Otra no tenía vendedor con reputación verde.');
+    expect(modelIntro(iphone, [], 3, '23-11-2026')).toBe(
+      'En nuestra última revisión, el 23-11-2026, ninguna versión de iPhone 17 tenía un vendedor con reputación verde en Mercado Libre. Abajo está el último precio que vimos de cada una.',
+    );
+    for (const text of [modelIntro(ps5, [679_990], 1, '23-11-2026'), modelIntro(iphone, [], 3, '23-11-2026')]) {
+      expect(text).not.toMatch(/hoy(?! está en Mercado Libre)/i);
+    }
+  });
+
+  it('con precios que no son de hoy, la descripción para Google lleva la fecha y cabe en 155 caracteres', () => {
+    for (const m of MODELS) {
+      expect(modelMetaDescription(m, [3_259_990, 9_999_999], '23-11-2026').length).toBeLessThanOrEqual(155);
+      expect(modelMetaDescription(m, [], '23-11-2026').length).toBeLessThanOrEqual(155);
+    }
+    expect(modelMetaDescription(iphone, [1_074_804, 1_073_674], '23-11-2026')).toBe(
+      'iPhone 17: 2 versiones en Mercado Libre Chile, desde $1.073.674 el 23-11-2026. Mira el historial de precios y el más bajo que registramos.',
+    );
+    expect(modelMetaDescription(iphone, [], '23-11-2026')).toBe(
+      'iPhone 17: sin versiones a la venta en Mercado Libre Chile en nuestra última revisión, el 23-11-2026. Mira su historial de precios.',
     );
   });
 

@@ -16,7 +16,8 @@ import {
 import { itemListJsonLd } from '@/lib/category-listing';
 import { GUIDES, guidePath } from '@/lib/guides';
 import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
-import { formatCLP } from '@/lib/format';
+import { formatCLP, formatFullDate } from '@/lib/format';
+import { latestPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { SITE_URL } from '@/lib/site';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
@@ -51,25 +52,38 @@ export const revalidate = 3600;
  */
 export default async function BlackFridayPage() {
   const now = Date.now();
-  const [{ deals, stats }, catalog, siteCategories, watch] = await Promise.all([
+  const [{ deals, stats }, catalog, siteCategories] = await Promise.all([
     getDealsWithStats(),
     getCatalogProducts(),
     getSiteCategories(),
-    // Del lunes 23 al lunes 30 de noviembre; fuera de esas fechas no lee nada.
-    getWatchList(now),
   ]);
+  // ¿Hay precios revisados hoy? Si no (desde el 23-11-2026 Mercado Libre no
+  // los entrega, ver lib/price-freshness), la página no promete ver qué bajó:
+  // muestra cuánto costaba cada cosa en la última revisión, que es lo que hay.
+  const lastCheck = latestPriceCheck(catalog);
+  const today = priceState(lastCheck, now) === 'hoy';
+  const lastCheckDate = lastCheck ? formatFullDate(lastCheck) : '';
+  // Del lunes 23 al lunes 30 de noviembre; fuera de esas fechas no lee nada.
+  const watch = await getWatchList(now, today || !lastCheck ? now : Date.parse(lastCheck));
   const { dropped, lowest, drops } = blackFridayPicks(deals, stats, now);
   const categories = dealsByCategory(deals, siteCategories);
   const phase = blackFridayPhase(now);
   const days = daysUntilBlackFriday(now);
   const thermometer = thermometerPhase(now);
 
-  const lead =
-    phase === 'antes'
-      ? `El Black Friday ${year} en Chile es ${BLACK_FRIDAY.label}, según sus organizadores. Ese fin de semana muchas ofertas van a decir 40% o 60% de descuento: acá vas a poder ver si el precio de verdad bajó, porque seguimos el precio de ${catalog.length.toLocaleString('es-CL')} productos de tecnología y hogar en Mercado Libre desde octubre.`
+  const tracked = catalog.length.toLocaleString('es-CL');
+  const upTo = lastCheckDate ? ` hasta el ${lastCheckDate}` : '';
+  const lead = today
+    ? phase === 'antes'
+      ? `El Black Friday ${year} en Chile es ${BLACK_FRIDAY.label}, según sus organizadores. Ese fin de semana muchas ofertas van a decir 40% o 60% de descuento: acá vas a poder ver si el precio de verdad bajó, porque seguimos el precio de ${tracked} productos de tecnología y hogar en Mercado Libre desde octubre.`
       : phase === 'durante'
         ? `El Black Friday ${year} está en curso, hasta el lunes 30 de noviembre. Estas son las ofertas de tecnología y hogar en Mercado Libre que de verdad bajaron, según el precio que registramos los días anteriores.`
-        : `El Black Friday ${year} fue ${BLACK_FRIDAY.label}. Seguimos registrando los precios de ${catalog.length.toLocaleString('es-CL')} productos en Mercado Libre: estas son las bajas de hoy.`;
+        : `El Black Friday ${year} fue ${BLACK_FRIDAY.label}. Seguimos registrando los precios de ${tracked} productos en Mercado Libre: estas son las bajas de hoy.`
+    : phase === 'antes'
+      ? `El Black Friday ${year} en Chile es ${BLACK_FRIDAY.label}, según sus organizadores. Ese fin de semana muchas ofertas van a decir 40% o 60% de descuento: acá puedes ver cuánto costaba cada producto antes. Registramos el precio de ${tracked} productos de tecnología y hogar en Mercado Libre desde octubre${upTo}.`
+      : phase === 'durante'
+        ? `El Black Friday ${year} está en curso, hasta el lunes 30 de noviembre. Antes de comprar, mira cuánto costaba cada producto antes del evento: registramos el precio de ${tracked} productos de tecnología y hogar en Mercado Libre desde octubre${upTo}.`
+        : `El Black Friday ${year} fue ${BLACK_FRIDAY.label}. Registramos el precio de ${tracked} productos en Mercado Libre desde octubre${upTo}: el historial de cada uno está en su ficha.`;
 
   const listed = dropped.length > 0 ? dropped : lowest;
 
@@ -91,35 +105,48 @@ export default async function BlackFridayPage() {
       </span>
       <h1 className="mt-3 font-heading text-2xl font-bold sm:text-3xl">Black Friday {year} en Mercado Libre</h1>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{lead}</p>
-      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
-        <Link href={THERMOMETER_PATH} className="font-medium text-accent hover:underline">
-          Termómetro del Black Friday {year}
-        </Link>
-        {thermometer === 'antes'
-          ? ': cómo vamos a medir qué bajó de verdad.'
-          : thermometer === 'preliminar'
-            ? ': el dato preliminar de qué está bajando de verdad.'
-            : ': el balance de qué bajó de verdad.'}
-      </p>
-
-      {watch.length > 0 && <WatchSection items={watch} inEvent={phase === 'durante'} />}
-
-      <section aria-labelledby="bajaron" className="mt-10">
-        <h2 id="bajaron" className="flex items-center gap-2 font-heading text-lg font-semibold">
-          <TrendingDown size={18} className="text-accent" aria-hidden /> Bajaron de precio según nuestro registro
-        </h2>
-        <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
-          Ofertas con {MIN_DEAL_DISCOUNT}% o más de descuento cuyo precio de hoy es menor que el que registramos antes.
-          El chip &quot;Bajó&quot; dice cuánto.
+      {/* El termómetro mide con precios revisados hoy: sin ellos está en pausa y no se enlaza. */}
+      {today && (
+        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
+          <Link href={THERMOMETER_PATH} className="font-medium text-accent hover:underline">
+            Termómetro del Black Friday {year}
+          </Link>
+          {thermometer === 'antes'
+            ? ': cómo vamos a medir qué bajó de verdad.'
+            : thermometer === 'preliminar'
+              ? ': el dato preliminar de qué está bajando de verdad.'
+              : ': el balance de qué bajó de verdad.'}
         </p>
-        {dropped.length > 0 ? (
-          <ProductGrid products={dropped} placement="black-friday" drops={drops} eagerImages={4} />
-        ) : (
-          <p className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
-            Hoy no registramos bajas de precio en las ofertas. Los precios se actualizan varias veces al día.
+      )}
+
+      {/* Sin precios de hoy y sin saber de cuándo son, la lista no dice nada cierto. */}
+      {watch.length > 0 && (today || lastCheck) && (
+        <WatchSection
+          items={watch}
+          inEvent={phase === 'durante'}
+          priceDate={!today && lastCheck ? priceDateLabel(lastCheck) : null}
+        />
+      )}
+
+      {/* Una baja "de hoy" necesita un precio revisado hoy: sin eso, la sección no va. */}
+      {(today || dropped.length > 0) && (
+        <section aria-labelledby="bajaron" className="mt-10">
+          <h2 id="bajaron" className="flex items-center gap-2 font-heading text-lg font-semibold">
+            <TrendingDown size={18} className="text-accent" aria-hidden /> Bajaron de precio según nuestro registro
+          </h2>
+          <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
+            Ofertas con {MIN_DEAL_DISCOUNT}% o más de descuento cuyo precio de hoy es menor que el que registramos antes.
+            El chip &quot;Bajó&quot; dice cuánto.
           </p>
-        )}
-      </section>
+          {dropped.length > 0 ? (
+            <ProductGrid products={dropped} placement="black-friday" drops={drops} eagerImages={4} />
+          ) : (
+            <p className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
+              Hoy no registramos bajas de precio en las ofertas.
+            </p>
+          )}
+        </section>
+      )}
 
       {lowest.length > 0 && (
         <section aria-labelledby="mas-bajo" className="mt-10">
@@ -211,16 +238,17 @@ export default async function BlackFridayPage() {
             </dd>
           </div>
           <div>
-            <dt className="font-medium text-fg">¿Cada cuánto se actualizan los precios?</dt>
+            <dt className="font-medium text-fg">¿De cuándo es el precio que veo?</dt>
             <dd className="mt-1 text-muted">
-              Varias veces al día. El precio que vale es el que muestra Mercado Libre al momento de comprar.
+              De la fecha que aparece junto a él: es la última vez que lo revisamos. El precio de hoy es el que muestra
+              Mercado Libre al momento de comprar.
             </dd>
           </div>
           <div>
             <dt className="font-medium text-fg">¿ComparaTech vende los productos?</dt>
             <dd className="mt-1 text-muted">
-              No. Mostramos el precio que tienen en Mercado Libre y cómo se ha movido; la compra se hace en Mercado
-              Libre.
+              No. Mostramos el precio que tenían en Mercado Libre en nuestra última revisión y cómo se movió; la compra
+              se hace en Mercado Libre.
             </dd>
           </div>
         </dl>
@@ -236,17 +264,34 @@ export default async function BlackFridayPage() {
  * termómetro. Las etiquetas salen solo si el historial las confirma
  * (lib/black-friday-thermometer, buildWatchList).
  */
-function WatchSection({ items, inEvent }: { items: WatchItem[]; inEvent: boolean }) {
+function WatchSection({
+  items,
+  inEvent,
+  priceDate,
+}: {
+  items: WatchItem[];
+  inEvent: boolean;
+  /** "23/11": los precios no son de hoy sino de ese día (lib/price-freshness); null si son de hoy. */
+  priceDate: string | null;
+}) {
   const reference = rangeLabel(EVENT_WINDOWS.refStart, EVENT_WINDOWS.refEnd);
   return (
     <section aria-labelledby="vigilar" className="mt-10">
       <h2 id="vigilar" className="flex items-center gap-2 font-heading text-lg font-semibold">
-        <Eye size={18} className="text-accent" aria-hidden /> {inEvent ? 'Lo que estamos vigilando' : 'Lo que vamos a vigilar'}
+        <Eye size={18} className="text-accent" aria-hidden />{' '}
+        {priceDate ? 'Los más buscados, antes del Black Friday' : inEvent ? 'Lo que estamos vigilando' : 'Lo que vamos a vigilar'}
       </h2>
-      <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
-        Productos muy buscados, con su precio de hoy y el precio habitual que tuvieron {reference}.
-        {!inEvent && ' En el Black Friday vas a ver acá si bajan de verdad.'}
-      </p>
+      {priceDate ? (
+        <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
+          Productos muy buscados, con el precio de nuestra última revisión, el {priceDate}, y el precio habitual que
+          tuvieron {reference}. Compáralos con el precio de hoy en Mercado Libre.
+        </p>
+      ) : (
+        <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
+          Productos muy buscados, con su precio de hoy y el precio habitual que tuvieron {reference}.
+          {!inEvent && ' En el Black Friday vas a ver acá si bajan de verdad.'}
+        </p>
+      )}
       <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => (
           <li key={item.path}>
@@ -259,7 +304,7 @@ function WatchSection({ items, inEvent }: { items: WatchItem[]; inEvent: boolean
               <span className="text-sm text-fg">
                 Desde {formatCLP(item.price)}{' '}
                 <span className="text-xs text-muted">
-                  hoy · {item.versions} {item.versions === 1 ? 'versión' : 'versiones'}
+                  {priceDate ? `el ${priceDate}` : 'hoy'} · {item.versions} {item.versions === 1 ? 'versión' : 'versiones'}
                 </span>
               </span>
               {item.note && (
@@ -279,7 +324,8 @@ function WatchSection({ items, inEvent }: { items: WatchItem[]; inEvent: boolean
                   {item.note.belowPct}% bajo su precio habitual
                 </span>
               )}
-              {item.drop && <DropChip amount={item.drop.amount} className="w-fit" />}
+              {/* "Bajó $X" habla del precio de hoy: solo con precios de hoy. */}
+              {!priceDate && item.drop && <DropChip amount={item.drop.amount} className="w-fit" />}
             </Link>
           </li>
         ))}

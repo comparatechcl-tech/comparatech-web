@@ -22,8 +22,7 @@ import type { Product } from '@/lib/types';
 
 export const metadata: Metadata = {
   title: 'Lo de hoy en redes',
-  description:
-    'Los productos que mostramos en redes esta semana y los mayores descuentos del día, con precios actualizados varias veces al día.',
+  description: 'Los productos que mostramos en redes esta semana, con su historial de precios.',
   alternates: { canonical: '/hoy' },
   robots: { index: false, follow: true },
 };
@@ -169,9 +168,10 @@ export default async function HoyPage() {
     <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
       <div className="mb-8">
         <h1 className="font-heading text-2xl font-bold sm:text-3xl">Lo de hoy</h1>
+        {/* Sin "se revisan varias veces al día": desde el 23-11-2026 Mercado Libre no entrega precios (lib/price-freshness). */}
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-          Lo que mostramos en redes y los mayores descuentos del día. Los precios se revisan contra Mercado Libre
-          varias veces al día y pueden cambiar.
+          Lo que mostramos en redes{topDeals.length > 0 ? ' y los mayores descuentos del día' : ''}. Cada precio va con
+          la fecha de su última revisión: el de hoy está en Mercado Libre.
         </p>
         {telegram && (
           <a
@@ -194,17 +194,26 @@ export default async function HoyPage() {
         </section>
       )}
 
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-semibold">
-          <Flame size={18} className="text-accent" /> Mayores descuentos de hoy
-        </h2>
-        <ProductGrid products={topDeals} placement="social" />
-        <div className="mt-6 text-center">
-          <Link href="/ofertas" className="text-sm font-medium text-accent hover:underline">
-            Ver todas las ofertas →
+      {/* Solo con descuentos de precios revisados hoy: sin ellos no hay "de hoy" que mostrar. */}
+      {topDeals.length > 0 ? (
+        <section>
+          <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-semibold">
+            <Flame size={18} className="text-accent" /> Mayores descuentos de hoy
+          </h2>
+          <ProductGrid products={topDeals} placement="social" />
+          <div className="mt-6 text-center">
+            <Link href="/ofertas" className="text-sm font-medium text-accent hover:underline">
+              Ver todas las ofertas →
+            </Link>
+          </div>
+        </section>
+      ) : (
+        <p className="text-center text-sm text-muted">
+          <Link href="/" className="font-medium text-accent hover:underline">
+            Ver todas las categorías →
           </Link>
-        </div>
-      </section>
+        </p>
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { Flame, TrendingDown } from 'lucide-react';
 import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
 import { getRankedDeals } from '@/lib/queries/deals';
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
   title: 'Ofertas del día',
   alternates: { canonical: '/ofertas' },
   description:
-    'Los mayores descuentos del catálogo, tal como los informa el vendedor en Mercado Libre, con los precios revisados varias veces al día.',
+    'Los descuentos del catálogo, tal como los informa el vendedor en Mercado Libre, y el historial de precios de cada producto.',
 };
 
 // Cada hora (antes cada 5 minutos), como los datos que lee: el catálogo se
@@ -63,12 +64,23 @@ export default async function OfertasPage() {
               {best && <> — {deals.length === 1 ? 'llega a' : 'el mayor llega a'} {discountPercent(best)}%</>}.
             </>
           ) : (
+            // Una oferta se muestra solo con el precio revisado hoy (lib/price-freshness).
             <>
-              Hoy no hay productos con {MIN_DEAL_DISCOUNT}% o más de descuento en el catálogo. Los precios se
-              actualizan varias veces al día, así que vuelve pronto.
+              Las ofertas de hoy están en Mercado Libre. Acá puedes ver cuánto costaba cada producto en nuestra última
+              revisión y cómo se movió su precio, para saber si una oferta es real.
             </>
           )}
         </p>
+        {deals.length === 0 && (
+          <p className="mt-4 flex flex-wrap gap-3 text-sm">
+            <Link href="/historial-de-precios" className="font-medium text-accent hover:underline">
+              Ver el historial de precios →
+            </Link>
+            <Link href="/" className="font-medium text-accent hover:underline">
+              Ver las categorías →
+            </Link>
+          </p>
+        )}
         {confirmed > 0 && (
           <p className="mt-3 inline-flex max-w-2xl items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs leading-relaxed text-emerald-700 dark:text-emerald-400">
             <TrendingDown size={15} className="mt-0.5 shrink-0" aria-hidden />
@@ -78,9 +90,11 @@ export default async function OfertasPage() {
             </span>
           </p>
         )}
-        <p className="mt-2 max-w-2xl text-xs text-muted">
-          El descuento y la cifra tachada los informa el vendedor en Mercado Libre.
-        </p>
+        {deals.length > 0 && (
+          <p className="mt-2 max-w-2xl text-xs text-muted">
+            El descuento y la cifra tachada los informa el vendedor en Mercado Libre.
+          </p>
+        )}
       </div>
 
       {deals.length > 0 && (

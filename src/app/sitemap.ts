@@ -11,6 +11,7 @@ import { THERMOMETER_PATH, thermometerLastModified } from '@/lib/black-friday-th
 import { GUIDES, guidePath } from '@/lib/guides';
 import { getGuideView } from '@/lib/queries/guides';
 import { SITE_URL } from '@/lib/site';
+import { hasPricesToday } from '@/lib/price-freshness';
 import type { Product } from '@/lib/types';
 
 /**
@@ -50,12 +51,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       ...withDate(latestOf(deals.length > 0 ? deals : products)),
     },
     // El termómetro: su fecha es la del último dato que muestra (lib/black-friday-thermometer).
-    {
-      url: `${SITE_URL}${THERMOMETER_PATH}`,
-      changeFrequency: 'daily',
-      priority: 0.7,
-      ...withDate(thermometerLastModified(Date.now())),
-    },
+    // Sin precios revisados hoy está en pausa y redirige a /black-friday: no va en el mapa.
+    ...(hasPricesToday(products)
+      ? [
+          {
+            url: `${SITE_URL}${THERMOMETER_PATH}`,
+            changeFrequency: 'daily' as const,
+            priority: 0.7,
+            ...withDate(thermometerLastModified(Date.now())),
+          },
+        ]
+      : []),
     // Cambia con las bajas y las ofertas del día, como /black-friday.
     {
       url: `${SITE_URL}/historial-de-precios`,

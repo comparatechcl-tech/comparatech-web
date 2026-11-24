@@ -16,7 +16,8 @@ import {
 import { modelPath, versionCapacity, type ModelDef } from '@/lib/models';
 import { lowestSeries } from '@/lib/model-history';
 import { summarizeHistory, type PriceHistorySummary } from '@/lib/price-chart';
-import { formatCLP, formatDayMonth } from '@/lib/format';
+import { formatCLP, formatDayMonth, formatFullDate } from '@/lib/format';
+import { latestPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { truncateAtWord } from '@/lib/text';
 import { dropsById } from '@/lib/deal-rank';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
@@ -62,6 +63,18 @@ async function load(par: string) {
 /** Desde cuánto está hoy un modelo (su versión a la venta de menor precio). */
 const fromPrice = (onSale: Product[]) => (onSale.length > 0 ? Math.min(...onSale.map((p) => p.price)) : null);
 
+/**
+ * De cuándo son los precios de estas versiones (lib/price-freshness). Revisados
+ * hoy: todo null y `asOf` es ahora. Si no, la fecha de la última revisión
+ * ("23-11-2026" y "23/11") y `asOf` en ese momento: hasta ahí llega lo que se
+ * sabe, y la página dice "el 23/11" donde decía "hoy".
+ */
+function priceDates(versions: { price_checked_at?: string | null }[], now: number) {
+  const lastCheck = latestPriceCheck(versions);
+  if (!lastCheck || priceState(lastCheck, now) === 'hoy') return { fullDate: null, shortDate: null, asOf: now };
+  return { fullDate: formatFullDate(lastCheck), shortDate: priceDateLabel(lastCheck), asOf: Date.parse(lastCheck) };
+}
+
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { par } = await params;
   const data = await load(par);
@@ -70,7 +83,11 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const fromA = fromPrice(va.onSale);
   const fromB = fromPrice(vb.onSale);
   const title = comparisonTitle(a, b);
-  const prices = fromA !== null && fromB !== null ? `: desde ${formatCLP(fromA)} y ${formatCLP(fromB)} hoy en Mercado Libre` : '';
+  const { fullDate } = priceDates([...va.onSale, ...va.paused, ...vb.onSale, ...vb.paused], Date.now());
+  const prices =
+    fromA !== null && fromB !== null
+      ? `: desde ${formatCLP(fromA)} y ${formatCLP(fromB)} ${fullDate ? `el ${fullDate}` : 'hoy'} en Mercado Libre`
+      : '';
   const description = truncateAtWord(
     `${shortModelName(a)} vs ${shortModelName(b)} en Chile${prices}. El precio más bajo que registramos y las diferencias de su ficha técnica.`,
     155,
@@ -121,10 +138,11 @@ export default async function CompararPage({ params }: { params: Params }) {
 
   const now = Date.now();
   const [ha, hb] = await Promise.all([getModelHistories(versionsA), getModelHistories(versionsB)]);
+  const { fullDate, shortDate, asOf } = priceDates([...versionsA, ...versionsB], now);
   const fromA = fromPrice(va.onSale);
   const fromB = fromPrice(vb.onSale);
-  const lowA = lowestOf(versionsA, ha.histories, now);
-  const lowB = lowestOf(versionsB, hb.histories, now);
+  const lowA = lowestOf(versionsA, ha.histories, asOf);
+  const lowB = lowestOf(versionsB, hb.histories, asOf);
   const nameA = shortModelName(a);
   const nameB = shortModelName(b);
 
@@ -136,7 +154,11 @@ export default async function CompararPage({ params }: { params: Params }) {
   const categoryName = getCategoryInfo(category)?.name ?? category;
 
   const rows: { label: string; a: string | null; b: string | null }[] = [
-    { label: 'Precio hoy, desde', a: fromA !== null ? formatCLP(fromA) : 'Sin vendedor hoy', b: fromB !== null ? formatCLP(fromB) : 'Sin vendedor hoy' },
+    {
+      label: shortDate ? `Precio el ${shortDate}, desde` : 'Precio hoy, desde',
+      a: fromA !== null ? formatCLP(fromA) : shortDate ? 'Sin vendedor' : 'Sin vendedor hoy',
+      b: fromB !== null ? formatCLP(fromB) : shortDate ? 'Sin vendedor' : 'Sin vendedor hoy',
+    },
     {
       label: 'Más bajo registrado',
       a: lowA ? `${formatCLP(lowA.min)} (el ${day(lowA.minAt)})` : null,
@@ -159,13 +181,14 @@ export default async function CompararPage({ params }: { params: Params }) {
         {nameA} vs {nameB}
       </h1>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
-        {priceGapText(a, b, fromA, fromB)} Revisamos los precios varias veces al día.
+        {priceGapText(a, b, fromA, fromB, fullDate)}
+        {fullDate && ' El precio de hoy está en Mercado Libre.'}
       </p>
 
       {cards.length > 0 && (
         <section aria-labelledby="precio-hoy" className="mt-8">
           <h2 id="precio-hoy" className="mb-4 font-heading text-lg font-semibold">
-            Precio de hoy
+            {shortDate ? `Precio del ${shortDate}` : 'Precio de hoy'}
           </h2>
           <div className="max-w-xl">
             <ProductGrid products={cards} placement="comparador" drops={drops} eagerImages={2} />
@@ -224,15 +247,14 @@ export default async function CompararPage({ params }: { params: Params }) {
           </h2>
           <p className="mb-2 text-sm text-muted">El precio más bajo entre las versiones a la venta de cada uno, desde que lo seguimos.</p>
           <div className="grid gap-6 md:grid-cols-2">
-            <ModelChart model={a} name={nameA} summary={lowA} today={fromA} />
-            <ModelChart model={b} name={nameB} summary={lowB} today={fromB} />
+            <ModelChart model={a} name={nameA} summary={lowA} today={fromA} dated={Boolean(shortDate)} />
+            <ModelChart model={b} name={nameB} summary={lowB} today={fromB} dated={Boolean(shortDate)} />
           </div>
         </section>
       )}
 
       <p className="mt-8 max-w-3xl text-xs leading-relaxed text-muted">
-        Los precios pueden cambiar en cualquier momento: el que vale es el que ves al comprar en Mercado Libre. Solo
-        mostramos vendedores con reputación verde.
+        Los precios pueden cambiar en cualquier momento: el que vale es el que ves al comprar en Mercado Libre.
       </p>
     </div>
   );
@@ -243,11 +265,14 @@ function ModelChart({
   name,
   summary,
   today,
+  dated,
 }: {
   model: ModelDef;
   name: string;
   summary: PriceHistorySummary | null;
   today: number | null;
+  /** Los precios no son de hoy: el gráfico termina en la última revisión. */
+  dated: boolean;
 }) {
   return (
     <div>
@@ -257,7 +282,7 @@ function ModelChart({
         </Link>
       </h3>
       {summary && today !== null ? (
-        <PriceChart summary={summary} price={today} end="hoy" />
+        <PriceChart summary={summary} price={today} end={dated ? 'ultima_revision' : 'hoy'} />
       ) : (
         <p className="mt-2 text-sm text-muted">Todavía no hay historial que mostrar.</p>
       )}

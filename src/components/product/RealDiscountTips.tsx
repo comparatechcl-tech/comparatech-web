@@ -14,15 +14,16 @@ export function RealDiscountTips({ id = 'descuento-real' }: { id?: string }) {
           eso un producto puede tener &quot;50% de descuento&quot; todo el año.
         </li>
         <li>
-          Mira el historial de precios en la ficha del producto: si el precio de hoy está igual a su promedio de los
-          últimos 30 días, no bajó.
+          Mira el historial de precios en la ficha del producto: si el precio de hoy en Mercado Libre está igual al
+          promedio que registramos, no bajó.
         </li>
         <li>Compáralo con el más bajo registrado: la ficha dice cuándo fue y cuánto duró.</li>
         <li>
-          Si el precio cambia muchas veces en pocas horas (pasa cuando dos vendedores se turnan la venta), revisa el de
-          Mercado Libre antes de comprar.
+          Si el precio cambia muchas veces en pocas horas (pasa cuando dos vendedores se turnan la venta), míralo de
+          nuevo en Mercado Libre justo antes de comprar.
         </li>
-        <li>Fíjate en el vendedor: en ComparaTech solo aparecen vendedores con reputación verde.</li>
+        {/* Sin "solo aparecen vendedores con reputación verde": desde el 23-11-2026 no se puede volver a revisar quién vende. */}
+        <li>Fíjate en el vendedor: en Mercado Libre, la reputación verde es la más alta.</li>
       </ol>
     </section>
   );

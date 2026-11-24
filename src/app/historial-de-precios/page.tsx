@@ -54,10 +54,10 @@ export default async function HistorialDePreciosPage() {
 
       <h1 className="font-heading text-2xl font-bold sm:text-3xl">Historial de precios de Mercado Libre</h1>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
-        Para saber si un descuento es real, sirve ver cómo cambió el precio en el tiempo. Revisamos varias veces al día
-        el precio de {catalog.length.toLocaleString('es-CL')} productos de tecnología y hogar en Mercado Libre y
-        guardamos cada cambio: en la ficha de cada uno está su gráfico, el promedio de los últimos 30 días y el precio
-        más bajo registrado.
+        Para saber si un descuento es real, sirve ver cómo cambió el precio en el tiempo. Guardamos cada cambio de
+        precio que vimos en {catalog.length.toLocaleString('es-CL')} productos de tecnología y hogar en Mercado Libre:
+        en la ficha de cada uno está su gráfico, el promedio y el precio más bajo registrado, hasta la fecha de su
+        última revisión.
       </p>
 
       <form action="/buscar" method="get" role="search" className="mt-6 flex max-w-xl gap-2">
@@ -108,21 +108,18 @@ export default async function HistorialDePreciosPage() {
         </section>
       )}
 
-      <section aria-labelledby="bajaron" className="mt-10">
-        <h2 id="bajaron" className="flex items-center gap-2 font-heading text-lg font-semibold">
-          <TrendingDown size={18} className="text-accent" aria-hidden /> Bajaron de precio según nuestro registro
-        </h2>
-        <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
-          Ofertas cuyo precio de hoy es menor que el que registramos antes. El chip &quot;Bajó&quot; dice cuánto.
-        </p>
-        {dropped.length > 0 ? (
-          <ProductGrid products={dropped} placement="historial" drops={drops} eagerImages={4} />
-        ) : (
-          <p className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
-            Hoy no registramos bajas de precio en las ofertas. Los precios se actualizan varias veces al día.
+      {/* Solo con precios revisados hoy hay una baja "de hoy" que mostrar (lib/price-freshness): sin ellas, la sección no va. */}
+      {dropped.length > 0 && (
+        <section aria-labelledby="bajaron" className="mt-10">
+          <h2 id="bajaron" className="flex items-center gap-2 font-heading text-lg font-semibold">
+            <TrendingDown size={18} className="text-accent" aria-hidden /> Bajaron de precio según nuestro registro
+          </h2>
+          <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
+            Ofertas cuyo precio de hoy es menor que el que registramos antes. El chip &quot;Bajó&quot; dice cuánto.
           </p>
-        )}
-      </section>
+          <ProductGrid products={dropped} placement="historial" drops={drops} eagerImages={4} />
+        </section>
+      )}
 
       {lowest.length > 0 && (
         <section aria-labelledby="mas-bajo" className="mt-10">
@@ -145,16 +142,16 @@ export default async function HistorialDePreciosPage() {
         </h2>
         <ul className="list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted">
           <li>
-            Revisamos el precio de cada producto varias veces al día y guardamos cada cambio. Los primeros registros son
-            de octubre de 2026.
+            Guardamos cada cambio de precio que vimos al revisar cada producto. Los primeros registros son de octubre de
+            2026, y cada ficha dice hasta qué fecha llega su historial.
           </li>
           <li>
-            El precio que guardamos es el que aparece en la ficha de Mercado Libre, del vendedor con reputación verde que
-            la gana en ese momento.
+            El precio que guardamos es el que aparecía en la ficha de Mercado Libre, del vendedor con reputación verde
+            que la ganaba en ese momento.
           </li>
           <li>
-            &quot;Bajó $X&quot; sale solo cuando el precio de hoy es {MIN_DROP_PCT}% o más menor que el que registramos
-            antes, ese precio anterior duró al menos un día y no es un precio que va y vuelve.
+            &quot;Bajó $X&quot; sale solo junto a un precio revisado hoy, cuando es {MIN_DROP_PCT}% o más menor que el
+            que registramos antes, ese precio anterior duró al menos un día y no es un precio que va y vuelve.
           </li>
           <li>
             Solo hay historial de los productos de nuestro catálogo, que se arma solo con lo más vendido y lo más
@@ -175,8 +172,8 @@ export default async function HistorialDePreciosPage() {
           <div>
             <dt className="font-medium text-fg">¿Dónde veo el historial de un producto?</dt>
             <dd className="mt-1 text-muted">
-              En su ficha en ComparaTech, en la sección &quot;Historial de precios&quot;: un gráfico de los últimos 90
-              días, el promedio de 30 días, el más alto y el más bajo registrados, y los últimos cambios.
+              En su ficha en ComparaTech, en la sección &quot;Historial de precios&quot;: un gráfico de hasta 90 días,
+              el promedio, el más alto y el más bajo registrados, y los últimos cambios.
             </dd>
           </div>
           <div>
@@ -191,9 +188,10 @@ export default async function HistorialDePreciosPage() {
             </dd>
           </div>
           <div>
-            <dt className="font-medium text-fg">¿Cada cuánto se actualizan los precios?</dt>
+            <dt className="font-medium text-fg">¿De cuándo es el precio que veo?</dt>
             <dd className="mt-1 text-muted">
-              Varias veces al día. El precio que vale es el que muestra Mercado Libre al momento de comprar.
+              De la fecha que aparece junto a él: es la última vez que lo revisamos. El precio de hoy es el que muestra
+              Mercado Libre al momento de comprar.
             </dd>
           </div>
           <div>

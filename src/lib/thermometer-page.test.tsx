@@ -8,12 +8,25 @@ import { renderToStaticMarkup } from 'react-dom/server';
  * balance. Con datos fijos.
  */
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/datos/black-friday-2026', useSearchParams: () => null }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/datos/black-friday-2026',
+  useSearchParams: () => null,
+  // Como el de Next: corta el armado de la página.
+  redirect: vi.fn((to: string) => {
+    throw new Error(`REDIRECT ${to}`);
+  }),
+}));
 vi.mock('@/lib/queries/black-friday-thermometer', () => ({ getThermometer: vi.fn() }));
-vi.mock('@/lib/queries/products', () => ({ getCatalogProducts: vi.fn(async () => new Array(1234).fill({})) }));
+// Con el precio revisado hace una hora: el termómetro solo se publica con precios de hoy.
+vi.mock('@/lib/queries/products', () => ({
+  getCatalogProducts: vi.fn(async () =>
+    new Array(1234).fill({ price_checked_at: new Date(Date.now() - 3_600_000).toISOString() })
+  ),
+}));
 
 import TermometroPage, { metadata } from '@/app/datos/black-friday-2026/page';
 import { getThermometer } from '@/lib/queries/black-friday-thermometer';
+import { getCatalogProducts } from '@/lib/queries/products';
 import {
   BASELINE_WINDOWS,
   EVENT_WINDOWS,
@@ -119,6 +132,24 @@ describe('metadata', () => {
     expect(metadata.alternates?.canonical).toBe('/datos/black-friday-2026');
     expect(String(metadata.description).length).toBeLessThanOrEqual(170);
     expect(`${title} ${metadata.description}`).not.toMatch(AVOIDED);
+  });
+});
+
+/*
+ * Desde el 23-11-2026 Mercado Libre no entrega precios. Medir el Black Friday
+ * con los precios de ese día sería publicar como resultado lo que había antes:
+ * sin precios revisados hoy, la página no se arma y lleva a /black-friday.
+ */
+describe('sin precios revisados hoy', () => {
+  it('no publica nada y lleva a /black-friday, sin calcular el termómetro', async () => {
+    const now = cl('2026-11-27 09:00');
+    vi.setSystemTime(now);
+    vi.mocked(getThermometer).mockClear();
+    vi.mocked(getCatalogProducts).mockResolvedValueOnce(
+      new Array(1234).fill({ price_checked_at: '2026-11-23T16:33:00Z' }) as never
+    );
+    await expect(TermometroPage()).rejects.toThrow('REDIRECT /black-friday');
+    expect(getThermometer).not.toHaveBeenCalled();
   });
 });
 

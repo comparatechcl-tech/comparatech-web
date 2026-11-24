@@ -17,7 +17,8 @@ import {
 } from '@/lib/models';
 import { domainLabel, indexableTypes, typePath, typeSlug } from '@/lib/category-listing';
 import { dropsById } from '@/lib/deal-rank';
-import { formatCLP } from '@/lib/format';
+import { formatCLP, formatFullDate } from '@/lib/format';
+import { latestPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { SITE_URL } from '@/lib/site';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
 import { ProductGrid } from '@/components/product/ProductGrid';
@@ -64,9 +65,11 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 
   const { model, onSale } = data;
   const title = modelTitle(model);
+  const { fullDate } = priceDates([...onSale, ...data.paused], Date.now());
   const description = modelMetaDescription(
     model,
     onSale.map((p) => p.price),
+    fullDate,
   );
   const url = modelPath(model.slug);
   const image = (onSale[0] ?? data.paused[0]).image_url;
@@ -79,6 +82,18 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   };
 }
 
+/**
+ * De cuándo son los precios de estas versiones (lib/price-freshness). Revisados
+ * hoy: todo null y `asOf` es ahora. Si no, la fecha de la última revisión
+ * ("23-11-2026" y "23/11") y `asOf` en ese momento: hasta ahí llega lo que se
+ * sabe, y la página dice "el 23/11" donde decía "hoy".
+ */
+function priceDates(versions: { price_checked_at?: string | null }[], now: number) {
+  const lastCheck = latestPriceCheck(versions);
+  if (!lastCheck || priceState(lastCheck, now) === 'hoy') return { fullDate: null, shortDate: null, asOf: now };
+  return { fullDate: formatFullDate(lastCheck), shortDate: priceDateLabel(lastCheck), asOf: Date.parse(lastCheck) };
+}
+
 export default async function ModeloPage({ params }: { params: Params }) {
   const { modelo } = await params;
   const data = await getModelVersions(modelo);
@@ -89,10 +104,11 @@ export default async function ModeloPage({ params }: { params: Params }) {
 
   const now = Date.now();
   const [{ histories, stats }, catalog] = await Promise.all([getModelHistories(versions), getCatalogProducts()]);
+  const { fullDate, shortDate, asOf } = priceDates(versions, now);
   const drops = dropsById(onSale, stats, now);
   const prices = onSale.map((p) => p.price);
   const viewer = viewerItems(versions[0], versions, (p) => versionLabel(model, p));
-  const description = modelMetaDescription(model, prices);
+  const description = modelMetaDescription(model, prices, fullDate);
 
   // Las migas, como en la ficha: la categoría y el tipo, si su página se indexa.
   const category = versions[0].category;
@@ -115,12 +131,14 @@ export default async function ModeloPage({ params }: { params: Params }) {
       />
 
       <h1 className="font-heading text-2xl font-bold sm:text-3xl">{modelHeading(model)}</h1>
-      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{modelIntro(model, prices, paused.length)}</p>
+      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">
+        {modelIntro(model, prices, paused.length, fullDate)}
+      </p>
 
       <section aria-labelledby="versiones" className="mt-8">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h2 id="versiones" className="font-heading text-lg font-semibold">
-            Versiones y precio de hoy
+            {shortDate ? `Versiones y precio del ${shortDate}` : 'Versiones y precio de hoy'}
           </h2>
           {/* Las fotos de todas las versiones en grande, una tras otra (lib/photo-viewer). */}
           <PhotoViewer variant="button" items={viewer.items} title={model.name} />
@@ -128,15 +146,19 @@ export default async function ModeloPage({ params }: { params: Params }) {
         {onSale.length > 0 ? (
           <ProductGrid products={onSale} placement="modelo" drops={drops} eagerImages={4} />
         ) : (
+          // Sin "la página se actualiza sola": desde el 23-11-2026 no se puede volver a revisar quién vende.
           <p className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
-            Hoy ninguna versión tiene un vendedor con reputación verde en Mercado Libre. Apenas vuelva a haber uno, la
-            página se actualiza sola.
+            {shortDate
+              ? 'En nuestra última revisión ninguna versión tenía un vendedor con reputación verde en Mercado Libre.'
+              : 'Hoy ninguna versión tiene un vendedor con reputación verde en Mercado Libre.'}
           </p>
         )}
 
         {paused.length > 0 && (
           <div className="mt-6">
-            <h3 className="text-sm font-semibold text-fg">Sin vendedor con reputación verde hoy</h3>
+            <h3 className="text-sm font-semibold text-fg">
+              {shortDate ? 'Sin vendedor con reputación verde en la última revisión' : 'Sin vendedor con reputación verde hoy'}
+            </h3>
             <ul className="mt-2 flex flex-wrap gap-2">
               {paused.map((p) => (
                 <li key={p.id}>
@@ -173,11 +195,11 @@ export default async function ModeloPage({ params }: { params: Params }) {
         </nav>
       )}
 
-      <ModelPriceHistory model={model} versions={versions} histories={histories} now={now} />
+      <ModelPriceHistory model={model} versions={versions} histories={histories} now={asOf} priceDate={shortDate} />
 
       <p className="mt-8 max-w-3xl text-xs leading-relaxed text-muted">
-        Los precios son los que muestra Mercado Libre en cada ficha y pueden cambiar en cualquier momento: el que vale es
-        el que ves al comprar. Solo mostramos vendedores con reputación verde.
+        Los precios son los que mostraba Mercado Libre en cada ficha cuando los revisamos y pueden haber cambiado: el que
+        vale es el que ves al comprar.
       </p>
     </div>
   );
