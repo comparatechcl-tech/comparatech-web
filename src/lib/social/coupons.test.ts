@@ -343,6 +343,71 @@ describe('el resumen de cupones del canal (11-11-2026)', () => {
     expect(parseCouponText('Cupón ORBITA45: $45.000 OFF en compras sobre $500.000, hasta agotar stock')).toEqual([coupon()]);
   });
 
+  /*
+   * El resumen que el dueño pegó el 24-11-2026: los dos cupones de tecnología
+   * (computadores y consolas) salían sin "a qué aplica". Uno dice "en
+   * computadores seleccionados" y el otro trae la vigencia pegada después de
+   * la categoría ("en Consolas - Disponible hasta el 27/11 o agotar stock").
+   */
+  describe('el resumen del 24-11-2026: a qué aplica y hasta cuándo', () => {
+    const aviso = [
+      '*🔥 ¡CUPONES AUN DISPONIBLES!! 🔥*',
+      '',
+      '🎟️ *MALETAVIAJERA30* : $30.000 off en compras desde $350.000',
+      '🎟️ *PASAPORTE20* : $20.000 off en compras desde $200.000',
+      '🎟️ *BOLETO8* : $8.000 off en compras desde $80.000',
+      '🎟️ *PLAYER1* : $5.000 off en compras desde $49.990 - Disponible hasta el 26/11/2026 o agotar stock',
+      '',
+      'Por categoría:',
+      '👗 *ATUENDOTOP10* : 10% off en compras desde $39.990, tope $10.000 en Moda',
+      '💄 *PIELFRESCA10* : 10% off en compras desde $39.990, tope $10.000 en Belleza y Cuidado Personal',
+      '🧸 *PINTAJUEGA5* : $5.000 off en compras desde $29.990 en Bebés y juguetes',
+      '🐾 *BIGOTESFELICES5* : $5.000 off en compras desde $34.990 en Mascotas',
+      '🏠 *TEXTILSUAVE5* : $5.000 off en compras desde $29.990 en Hogar y Muebles',
+      '💻 *COMPUTADORES80* : $80.000 off en compras desde $500.000 en computadores seleccionados',
+      '🔗https://listado.mercadolibre.cl/_Container_intel-wildcat-1p',
+      '🎮 *GAMING25* : 25% off en compras desde $500.000, tope $25.000 en Consolas - Disponible hasta el 27/11 o agotar stock',
+      '🔗https://tinyurl.com/4et4c7yj',
+    ].join('\n');
+
+    it('lee los once, con a qué aplica cada uno y hasta cuándo', () => {
+      const read = readCouponNotice(aviso);
+      expect(read.productCodes).toEqual([]);
+      expect(read.exhausted).toEqual([]);
+      expect(read.coupons.map((c) => [c.code, c.note])).toEqual([
+        ['MALETAVIAJERA30', ''],
+        ['PASAPORTE20', ''],
+        ['BOLETO8', ''],
+        ['PLAYER1', 'hasta el 26/11'],
+        // Los de tecnología, antes que los de las otras categorías.
+        ['COMPUTADORES80', 'en computadores seleccionados'],
+        ['GAMING25', 'en Consolas, hasta el 27/11'],
+        ['ATUENDOTOP10', 'en Moda'],
+        ['PIELFRESCA10', 'en Belleza y Cuidado Personal'],
+        ['PINTAJUEGA5', 'en Bebés y juguetes'],
+        ['BIGOTESFELICES5', 'en Mascotas'],
+        ['TEXTILSUAVE5', 'en Hogar y Muebles'],
+      ]);
+    });
+
+    it('los montos de los dos de tecnología, y todos pasan la revisión', () => {
+      const read = readCouponNotice(aviso).coupons;
+      expect(read.find((c) => c.code === 'COMPUTADORES80')).toEqual(
+        coupon({ code: 'COMPUTADORES80', value: 80_000, min: 500_000, minWord: 'desde', note: 'en computadores seleccionados' })
+      );
+      expect(read.find((c) => c.code === 'GAMING25')).toEqual(
+        coupon({ code: 'GAMING25', kind: 'porcentaje', value: 25, cap: 25_000, min: 500_000, minWord: 'desde', note: 'en Consolas, hasta el 27/11' })
+      );
+      for (const c of read) expect(couponProblem(c), c.code).toBeNull();
+    });
+
+    it('una fecha que no existe no se anota, y "hasta agotar stock" tampoco', () => {
+      expect(parseCouponText('Cupón ORBITA45: $45.000 OFF en compras sobre $500.000 - Disponible hasta el 45/13')[0].note).toBe('');
+      expect(parseCouponText('Cupón ORBITA45: $45.000 OFF en compras sobre $500.000 en Consolas, hasta agotar stock')[0].note).toBe('en Consolas');
+      expect(parseCouponText('Cupón ORBITA45: $45.000 OFF en compras sobre $500.000 (válido hasta el 5-12)')[0].note).toBe('hasta el 05/12');
+    });
+  });
+
   it('lo que sigue a "en" y no es una categoría no se anota', () => {
     for (const tail of ['en productos seleccionados', 'en Mercado Libre', 'en tu primera compra']) {
       expect(parseCouponText(`Cupón ORBITA45: $45.000 OFF en compras sobre $500.000 ${tail}`)[0].note, tail).toBe('');

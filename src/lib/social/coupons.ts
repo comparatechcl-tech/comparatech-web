@@ -217,7 +217,24 @@ const AMOUNT_RE = /\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(\s?(?:mil|k)\b)?|(\d{1,3})\s?(
 /** Una categoría al final de lo que da el cupón: "…tope $15.000 en Moda", "…desde $29.990 en Bebés y juguetes". */
 const CATEGORY_RE = /^\s*[,.]?\s*en\s+([A-Za-z]+(?: [A-Za-z]+){0,4})\s*[,.]?\s*$/;
 /** Lo que sigue a "en" y no es una categoría. */
-const NOT_CATEGORY_RE = /seleccionad|compra|mercado|libre|meli|pagar|cuota|\bapp\b|tienda|checkout/i;
+const NOT_CATEGORY_RE = /compra|mercado|libre|meli|pagar|cuota|\bapp\b|tienda|checkout/i;
+/**
+ * "en productos seleccionados" no dice a qué aplica: es lo que ya dice el pie
+ * de la imagen. "en computadores seleccionados" sí (resumen del 24-11-2026).
+ */
+const GENERIC_WHERE_RE =
+  /^(?:(?:miles|cientos) de |todos los |los )?(?:productos?|articulos?|items?|publicaciones?|categorias?)(?: seleccionad[oa]s?)?$/i;
+/**
+ * Desde acá el aviso ya no dice a qué aplica sino hasta cuándo: "- Disponible
+ * hasta el 27/11 o agotar stock" (resumen del canal del 24-11-2026). Con eso
+ * pegado al final, "en Consolas" no se reconocía.
+ */
+const VALIDITY_PART_RE = /(?:^|\s)[-–—|(]?\s*(?:disponibles?|valid[oa]s?|vigentes?|vence|hasta)\b[\s\S]*$/i;
+/** "hasta el 27/11", "hasta el 26/11/2026". */
+const UNTIL_RE = /\bhasta\s+el\s+(\d{1,2})\s?[/-]\s?(\d{1,2})(?:\s?[/-]\s?\d{2,4})?(?!\d)/i;
+/** Las categorías de tecnología, que son las que la marca publica: van antes que moda, belleza o juguetes. */
+const TECH_WHERE_RE =
+  /comput|notebook|laptop|consola|gaming|gamer|videojuego|celular|smartphone|telefon|tablet|tecnolog|electronic|audio|audifono|parlante|televis|\btv\b|smart|camara|impresora|monitor/i;
 
 /** El pedazo de `original` que, sin tildes, es `plain` ("Bebes y juguetes" → "Bebés y juguetes"). */
 function withAccents(original: string, plain: string): string {
@@ -228,21 +245,35 @@ function withAccents(original: string, plain: string): string {
   return at < 0 ? plain : original.slice(at, at + plain.length);
 }
 
-/** "en Moda" si lo que da el cupón termina en una categoría; '' si no. */
-function categoryOf(terms: string, original: string): string {
+/**
+ * Lo que el aviso dice después de los montos de un cupón: a qué aplica ("en
+ * Moda", si termina en una categoría) y hasta cuándo ("hasta el 27/11"). Cada
+ * uno vacío si no lo dice.
+ */
+function scopeOf(terms: string, original: string): { where: string; until: string } {
   const amounts = new RegExp(AMOUNT_RE.source, AMOUNT_RE.flags);
   let last = -1;
   let a: RegExpExecArray | null;
   while ((a = amounts.exec(terms)) !== null) last = a.index + a[0].length;
-  if (last < 0) return '';
-  const tail = terms
-    .slice(last)
+  if (last < 0) return { where: '', until: '' };
+  const rest = terms.slice(last);
+
+  const date = UNTIL_RE.exec(rest);
+  const day = date ? Number(date[1]) : 0;
+  const month = date ? Number(date[2]) : 0;
+  const until =
+    day >= 1 && day <= 31 && month >= 1 && month <= 12
+      ? `hasta el ${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}`
+      : '';
+
+  const tail = rest
+    .replace(VALIDITY_PART_RE, ' ')
     .replace(/[^A-Za-z\s,.]+/g, ' ')
     .replace(/\s+/g, ' ');
   const m = CATEGORY_RE.exec(tail);
-  if (!m || NOT_CATEGORY_RE.test(m[1])) return '';
-  const note = `en ${withAccents(original, m[1])}`;
-  return note.length <= COUPON_NOTE_MAX ? note : '';
+  if (!m || NOT_CATEGORY_RE.test(m[1]) || GENERIC_WHERE_RE.test(m[1])) return { where: '', until };
+  const where = `en ${withAccents(original, m[1])}`;
+  return { where: where.length <= COUPON_NOTE_MAX ? where : '', until };
 }
 
 /** La línea del texto donde está la posición `at`. */
@@ -253,7 +284,7 @@ function lineAt(src: string, at: number): string {
 
 /** Lo que se lee de un aviso de cupones pegado (readCouponNotice). */
 export interface CouponNotice {
-  /** Los cupones, primero los generales y al final los de una categoría. Puede haber más de COUPON_MAX. */
+  /** Los cupones: primero los generales, después los de una categoría de tecnología y al final los de otras categorías. Puede haber más de COUPON_MAX. */
   coupons: Coupon[];
   /** Códigos que solo salen en el precio de un producto ("Con el cupón X queda en $Y"), sin decir cuánto descuentan. */
   productCodes: string[];
@@ -290,6 +321,7 @@ export function readCouponNotice(text: string): CouponNotice {
   }
 
   const general: Coupon[] = [];
+  const techCategory: Coupon[] = [];
   const byCategory: Coupon[] = [];
   const done = new Set<string>();
   const product = new Set<string>();
@@ -327,15 +359,15 @@ export function readCouponNotice(text: string): CouponNotice {
       exhausted.push(f.code);
       continue;
     }
-    const category = coupon.note ? '' : categoryOf(terms, original);
-    if (category) {
-      coupon.note = category;
-      byCategory.push(coupon);
-    } else {
-      general.push(coupon);
-    }
+    // A qué aplica y hasta cuándo, si el aviso lo dice: va en la aclaración.
+    const { where, until } = coupon.note ? { where: '', until: '' } : scopeOf(terms, original);
+    const note = [where, until].filter(Boolean).join(', ');
+    if (note) coupon.note = note.length <= COUPON_NOTE_MAX ? note : where || until;
+    if (!where) general.push(coupon);
+    else if (TECH_WHERE_RE.test(strip(where))) techCategory.push(coupon);
+    else byCategory.push(coupon);
   }
-  const coupons = [...general, ...byCategory];
+  const coupons = [...general, ...techCategory, ...byCategory];
   const productCodes = [...product].filter((code) => !done.has(code));
   if (coupons.length === 0 && productCodes.length === 0 && exhausted.length === 0) {
     const noCode = readNoCodeCoupon(src);
