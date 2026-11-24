@@ -17,6 +17,7 @@ import {
   prospectFromRuns,
   readActionNeededCount,
   readAdminSummary,
+  refreshStatusFromRuns,
   usesStoredLink,
   type CronRunRow,
   type ProductStatRow,
@@ -268,6 +269,50 @@ describe('bitácora de crons', () => {
       ])
     ).toEqual({ at: '2026-10-03T12:01:00Z', nuevos: 4, source: 'cron_runs' });
     expect(prospectFromRuns([run({ ok: null })])).toBeNull();
+  });
+
+  describe('refresco de precios', () => {
+    // NOW es 17:00 UTC.
+    const omitida = (at: string) =>
+      run({ started_at: at, ok: true, summary: { omitida: 'la última revisión completa fue hace 30 min' } });
+
+    it('Mercado Libre rechaza casi todo: lo dice, aunque la última pasada se haya saltado', () => {
+      const status = refreshStatusFromRuns(
+        [
+          omitida('2026-10-04T16:33:00Z'),
+          run({
+            started_at: '2026-10-04T16:03:00Z',
+            ok: false,
+            summary: { revisados: 1274, errores_ml: { '/products/:id/items': 1274 }, errores_transitorios: 1274 },
+            error: '1274 de 1274 con error transitorio',
+          }),
+        ],
+        NOW
+      );
+      expect(status).toEqual({ state: 'ml_rechaza', lastAt: '2026-10-04T16:33:00Z', rejected: 1274, checked: 1274 });
+    });
+
+    it('falla por otra razón: muestra el error anotado', () => {
+      const status = refreshStatusFromRuns(
+        [run({ started_at: '2026-10-04T16:33:00Z', ok: false, summary: { revisados: 100, errores_ml: { x: 3 } }, error: 'timeout' })],
+        NOW
+      );
+      expect(status).toEqual({ state: 'falla', lastAt: '2026-10-04T16:33:00Z', error: 'timeout' });
+    });
+
+    it('sin pasadas hace más de hora y media: detenido', () => {
+      expect(refreshStatusFromRuns([run({ started_at: '2026-10-04T15:00:00Z', ok: true })], NOW)).toEqual({
+        state: 'detenido',
+        lastAt: '2026-10-04T15:00:00Z',
+      });
+    });
+
+    it('corre bien, o no hay bitácora', () => {
+      expect(
+        refreshStatusFromRuns([omitida('2026-10-04T16:33:00Z'), run({ started_at: '2026-10-04T16:03:00Z' })], NOW).state
+      ).toBe('corre');
+      expect(refreshStatusFromRuns([], NOW)).toEqual({ state: 'sin_datos', lastAt: null });
+    });
   });
 });
 

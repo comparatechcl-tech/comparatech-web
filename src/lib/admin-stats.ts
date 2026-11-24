@@ -443,27 +443,100 @@ export interface CronRunRow {
   finished_at: string | null;
   ok: boolean | null;
   summary: unknown;
+  /** Solo en las lecturas que lo piden (el refresco de precios). */
+  error?: string | null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-/** Últimas corridas de la prospección. `missing` si la tabla no existe. */
-export async function readProspectRuns(admin: SupabaseClient | null, limit = 10): Promise<Stat<CronRunRow[]>> {
+async function readCronRuns(
+  admin: SupabaseClient | null,
+  job: string,
+  limit: number,
+  columns = 'started_at, finished_at, ok, summary'
+): Promise<Stat<CronRunRow[]>> {
   if (!admin) return fail(NO_ADMIN);
   try {
     const { data, error } = await admin
       .from('cron_runs')
-      .select('started_at, finished_at, ok, summary')
-      .eq('job', 'prospect')
+      .select(columns)
+      .eq('job', job)
       .order('started_at', { ascending: false })
       .limit(limit);
     if (error) return isMissingSchemaError(error) ? missing() : fail(error);
-    return ok((data ?? []) as CronRunRow[]);
+    return ok((data ?? []) as unknown as CronRunRow[]);
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err));
   }
+}
+
+/** Últimas corridas de la prospección. `missing` si la tabla no existe. */
+export function readProspectRuns(admin: SupabaseClient | null, limit = 10): Promise<Stat<CronRunRow[]>> {
+  return readCronRuns(admin, 'prospect', limit);
+}
+
+/** Últimas pasadas del refresco de precios (cada 30 min: 6 son 3 horas). */
+export function readRefreshRuns(admin: SupabaseClient | null, limit = 6): Promise<Stat<CronRunRow[]>> {
+  return readCronRuns(admin, 'refresh-prices', limit, 'started_at, finished_at, ok, summary, error');
+}
+
+/**
+ * Sin ninguna pasada en este tiempo, el programador de Supabase dejó de
+ * llamar al refresco (lo llama cada 30 minutos).
+ */
+const REFRESH_STOPPED_MIN = 90;
+
+export type RefreshState =
+  /** Sin bitácora o sin pasadas anotadas. */
+  | 'sin_datos'
+  /** Nadie lo llama hace rato. */
+  | 'detenido'
+  /** Corre, pero Mercado Libre rechaza la consulta de precios en la mayoría. */
+  | 'ml_rechaza'
+  /** Corre y falla por otra razón. */
+  | 'falla'
+  /** Corre y la última revisión terminó bien. */
+  | 'corre';
+
+export interface RefreshStatus {
+  state: RefreshState;
+  /** La pasada más reciente, aunque se haya saltado la revisión. */
+  lastAt: string | null;
+  /** En 'ml_rechaza': cuántos productos rechazó Mercado Libre y de cuántos. */
+  rejected?: number;
+  checked?: number;
+  /** En 'falla': el error anotado, corto. */
+  error?: string;
+}
+
+/**
+ * Por qué los precios no se actualizan, según la bitácora del refresco. El
+ * aviso del resumen decía "aplica la migración 0011" para todo, y correr esa
+ * migración hoy apuntaría el refresco al sitio viejo de Vercel.
+ */
+export function refreshStatusFromRuns(runs: CronRunRow[], now: Date): RefreshStatus {
+  const last = runs[0];
+  if (!last) return { state: 'sin_datos', lastAt: null };
+  const lastAt = last.started_at;
+  const age = minutesSince(lastAt, now);
+  if (age === null || age > REFRESH_STOPPED_MIN) return { state: 'detenido', lastAt };
+
+  // Las pasadas de cada media hora se saltan la revisión si la última
+  // completa es reciente: cuenta la última que revisó de verdad.
+  const real = runs.find((r) => !asRecord(r.summary)?.omitida);
+  if (!real || real.ok !== false) return { state: 'corre', lastAt };
+
+  const summary = asRecord(real.summary);
+  const checked = typeof summary?.revisados === 'number' ? summary.revisados : 0;
+  const rejected = Object.values(asRecord(summary?.errores_ml) ?? {}).reduce<number>(
+    (n, v) => n + (typeof v === 'number' ? v : 0),
+    0
+  );
+  if (checked > 0 && rejected * 2 >= checked) return { state: 'ml_rechaza', lastAt, rejected, checked };
+  const error = typeof real.error === 'string' && real.error.trim() ? real.error.trim().slice(0, 160) : 'sin detalle';
+  return { state: 'falla', lastAt, error };
 }
 
 export type DigestStatus = 'enviado' | 'fallo' | 'sin_datos';
@@ -601,6 +674,8 @@ export interface AdminSummary {
   /** El precio más viejo entre lo que está a la venta (ver oldestVisiblePriceMinutes). */
   precioMasViejoMin: Stat<number | null>;
   ultimaProspeccion: Stat<ProspectInfo | null>;
+  /** Si el refresco de precios corre y por qué falla (ver refreshStatusFromRuns). */
+  refresco: Stat<RefreshStatus>;
   correoAyer: Stat<DigestInfo>;
   clics: Stat<ClickCounts>;
   linksRepetidos: Stat<DuplicateLinkGroup<ProductStatRow>[]>;
@@ -619,12 +694,13 @@ export async function readAdminSummary(
   /** `directLinks`: el botón de compra se arma desde la ficha (directLinksInUse). */
   { directLinks = false }: { directLinks?: boolean } = {}
 ): Promise<AdminSummary> {
-  const [products, candidates, lastApproval, runs, clics] = await Promise.all([
+  const [products, candidates, lastApproval, runs, clics, refreshRuns] = await Promise.all([
     readProductStatRows(admin),
     readCandidateStats(admin, now),
     readDaysSinceLastApproval(admin, now),
     readProspectRuns(admin),
     readClickCounts(admin, now),
+    readRefreshRuns(admin),
   ]);
   const ultimaProspeccion = await readLastProspect(admin, runs);
 
@@ -648,6 +724,7 @@ export async function readAdminSummary(
     ultimoPrecioMin: derive(products, (rows) => minutesSince(latestIso(rows.map((r) => r.price_checked_at)), now)),
     precioMasViejoMin: derive(products, (rows) => oldestVisiblePriceMinutes(rows, now)),
     ultimaProspeccion,
+    refresco: derive(refreshRuns, (rows) => refreshStatusFromRuns(rows, now)),
     correoAyer,
     clics,
     linksRepetidos: derive(products, findDuplicateLinkGroups),
@@ -655,7 +732,7 @@ export async function readAdminSummary(
 
   const errors = [
     ...new Set(
-      [products, candidates, lastApproval, runs, clics, ultimaProspeccion]
+      [products, candidates, lastApproval, runs, clics, ultimaProspeccion, refreshRuns]
         .map((s) => s.error)
         .filter((e): e is string => Boolean(e))
     ),

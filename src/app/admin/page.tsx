@@ -4,7 +4,13 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { readAffiliateSettings } from '@/lib/settings';
 import { directLinksInUse, readAttributionStatus } from '@/lib/admin-settings';
 import { getCategoryInfo } from '@/lib/categories';
-import { readAdminSummary, type CategoryCoverage, type DigestStatus, type Stat } from '@/lib/admin-stats';
+import {
+  readAdminSummary,
+  type CategoryCoverage,
+  type DigestStatus,
+  type RefreshStatus,
+  type Stat,
+} from '@/lib/admin-stats';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,8 +29,11 @@ export const dynamic = 'force-dynamic';
 
 /** Sin publicar por más de esto, el número se pone rojo. */
 const STALE_PUBLISH_DAYS = 3;
-/** El refresco corre cada 30 min: sobre 1 hora algo se atrasó. */
-const PRICE_WARN_MIN = 60;
+/**
+ * El refresco revisa todo cada hora (las pasadas de cada media hora se saltan
+ * si la última revisión es reciente): sobre hora y media algo se atrasó.
+ */
+const PRICE_WARN_MIN = 90;
 /** Sobre 6 horas el refresco no está corriendo (el respaldo de GitHub corre cada 3 a 6 h). */
 const PRICE_BAD_MIN = 360;
 /**
@@ -149,7 +158,7 @@ export default async function ResumenPage() {
       <section className="mt-8">
         <h2 className="font-heading text-lg font-semibold text-fg">Salud</h2>
         <ul className="mt-3 divide-y divide-border rounded-xl border border-border bg-surface">
-          <PriceHealth stat={summary.ultimoPrecioMin} oldest={summary.precioMasViejoMin} />
+          <PriceHealth stat={summary.ultimoPrecioMin} oldest={summary.precioMasViejoMin} refresh={summary.refresco} />
           <HealthRow
             tone={prospectTone(summary.ultimaProspeccion.data?.at ?? null, now, summary.ultimaProspeccion.error)}
             label="Última prospección"
@@ -310,7 +319,37 @@ function HealthRow({
   );
 }
 
-function PriceHealth({ stat, oldest }: { stat: Stat<number | null>; oldest: Stat<number | null> }) {
+/**
+ * Por qué los precios no se actualizan. Nunca manda a correr migraciones: la
+ * 0011 apuntaría hoy el refresco al sitio viejo de Vercel.
+ */
+function refreshHint(refresh: RefreshStatus | null, tone: Tone): string {
+  const at = refresh?.lastAt ? ` (último intento: ${formatWhen(refresh.lastAt)})` : '';
+  switch (refresh?.state) {
+    case 'ml_rechaza':
+      return `El refresco sí corre${at}, pero Mercado Libre está rechazando la consulta de precios en ${num(
+        refresh.rejected
+      )} de ${num(refresh.checked)} productos. No es algo de Supabase: no corras migraciones.`;
+    case 'falla':
+      return `El refresco sí corre${at}, pero falló: ${refresh.error}`;
+    case 'detenido':
+      return `El refresco programado no está corriendo${at}. No corras migraciones viejas: avisa para revisarlo.`;
+    default:
+      return tone === 'bad'
+        ? 'Los precios no se están actualizando. No corras migraciones viejas: avisa para revisarlo.'
+        : 'El refresco va atrasado: debería revisar los precios cada hora.';
+  }
+}
+
+function PriceHealth({
+  stat,
+  oldest,
+  refresh,
+}: {
+  stat: Stat<number | null>;
+  oldest: Stat<number | null>;
+  refresh: Stat<RefreshStatus>;
+}) {
   if (stat.error) return <HealthRow tone="neutral" label="Precios verificados" value="—" />;
   const min = stat.data;
   if (min === null) return <HealthRow tone="warn" label="Precios verificados" value="sin datos" />;
@@ -326,11 +365,9 @@ function PriceHealth({ stat, oldest }: { stat: Stat<number | null>; oldest: Stat
       label="Precios verificados"
       value={`hace ${formatMinutes(min)}`}
       hint={
-        tone === 'bad'
-          ? 'El refresco cada 30 min no está corriendo: aplica la migración 0011 en Supabase'
-          : tone === 'warn'
-            ? 'El refresco va atrasado: debería correr cada 30 minutos.'
-            : old !== null && oldTone !== 'ok'
+        tone !== 'ok'
+          ? refreshHint(refresh.data, tone)
+          : old !== null && oldTone !== 'ok'
               ? `Hay productos a la venta con el precio de hace ${formatMinutes(old)}: la revisión no alcanza a todo el catálogo o un producto falla siempre.`
               : old !== null
                 ? `El más viejo de lo que está a la venta: hace ${formatMinutes(old)}.`
