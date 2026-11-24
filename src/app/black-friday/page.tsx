@@ -23,6 +23,9 @@ import { ProductGrid } from '@/components/product/ProductGrid';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
 import { DropChip } from '@/components/product/DealBadge';
 import { RealDiscountTips } from '@/components/product/RealDiscountTips';
+import { AffiliateButton } from '@/components/product/AffiliateButton';
+import { getAffiliateSettings } from '@/lib/settings';
+import { mlOffersUrl } from '@/lib/outbound';
 
 const { year } = BLACK_FRIDAY;
 
@@ -52,10 +55,11 @@ export const revalidate = 3600;
  */
 export default async function BlackFridayPage() {
   const now = Date.now();
-  const [{ deals, stats }, catalog, siteCategories] = await Promise.all([
+  const [{ deals, stats }, catalog, siteCategories, affiliate] = await Promise.all([
     getDealsWithStats(),
     getCatalogProducts(),
     getSiteCategories(),
+    getAffiliateSettings(),
   ]);
   // ¿Hay precios revisados hoy? Si no (desde el 23-11-2026 Mercado Libre no
   // los entrega, ver lib/price-freshness), la página no promete ver qué bajó:
@@ -105,6 +109,16 @@ export default async function BlackFridayPage() {
       </span>
       <h1 className="mt-3 font-heading text-2xl font-bold sm:text-3xl">Black Friday {year} en Mercado Libre</h1>
       <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">{lead}</p>
+      {/* Sin precios de hoy, las ofertas del día están en Mercado Libre: el botón lleva allá. */}
+      {!today && (
+        <div className="mt-5">
+          <AffiliateButton
+            href={mlOffersUrl(affiliate)}
+            label="Ver las ofertas de hoy en Mercado Libre"
+            className="w-full sm:w-auto"
+          />
+        </div>
+      )}
       {/* El termómetro mide con precios revisados hoy: sin ellos está en pausa y no se enlaza. */}
       {today && (
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted">

@@ -6,6 +6,9 @@ import { getRankedDeals } from '@/lib/queries/deals';
 import { getSiteCategories } from '@/lib/queries/site-categories';
 import { ALL_DEALS, countHotDeals, dealsBatch } from '@/lib/deals-listing';
 import { DealsBrowser } from '@/components/product/DealsBrowser';
+import { AffiliateButton } from '@/components/product/AffiliateButton';
+import { getAffiliateSettings } from '@/lib/settings';
+import { mlOffersUrl } from '@/lib/outbound';
 
 export const metadata: Metadata = {
   title: 'Ofertas del día',
@@ -37,9 +40,10 @@ export const revalidate = 3600;
  * crezca con el catálogo. Las demás las pide DealsBrowser a /ofertas/lote.
  */
 export default async function OfertasPage() {
-  const [{ ranked: deals, drops, best }, siteCategories] = await Promise.all([
+  const [{ ranked: deals, drops, best }, siteCategories, affiliate] = await Promise.all([
     getRankedDeals(),
     getSiteCategories(),
+    getAffiliateSettings(),
   ]);
   const confirmed = Object.keys(drops).length;
 
@@ -71,6 +75,15 @@ export default async function OfertasPage() {
             </>
           )}
         </p>
+        {deals.length === 0 && (
+          <div className="mt-5">
+            <AffiliateButton
+              href={mlOffersUrl(affiliate)}
+              label="Ver las ofertas de hoy en Mercado Libre"
+              className="w-full sm:w-auto"
+            />
+          </div>
+        )}
         {deals.length === 0 && (
           <p className="mt-4 flex flex-wrap gap-3 text-sm">
             <Link href="/historial-de-precios" className="font-medium text-accent hover:underline">

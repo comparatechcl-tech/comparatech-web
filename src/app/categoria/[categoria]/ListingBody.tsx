@@ -16,6 +16,7 @@ export function ListingBody({
   typeHref,
   sortHref,
   orden,
+  hasDeals = true,
   shown,
   total,
   moreHref,
@@ -28,12 +29,20 @@ export function ListingBody({
   typeHref: (slug: string) => string;
   sortHref: (order: SortOrder) => string;
   orden: SortOrder;
+  /**
+   * ¿Algún producto de la lista tiene descuento? Sin ninguno (pasa cuando los
+   * precios no se revisaron hoy, ver lib/price-freshness) no se ofrece ordenar
+   * por descuento: no ordenaría nada.
+   */
+  hasDeals?: boolean;
   shown: Product[];
   total: number;
   /** La siguiente tanda, o null si ya se ve todo. */
   moreHref: string | null;
 }) {
   const remaining = total - shown.length;
+  // El orden que ya está elegido se sigue mostrando, para poder salir de él.
+  const sortOptions = SORT_OPTIONS.filter((o) => o.value !== 'descuento' || hasDeals || orden === 'descuento');
   return (
     <>
       <div className="mt-6 flex flex-col gap-3">
@@ -64,7 +73,7 @@ export function ListingBody({
         <nav aria-label="Ordenar productos" className="-mx-4 overflow-x-auto px-4">
           <ul className="flex items-center gap-2">
             <li className="shrink-0 text-xs text-muted">Ordenar por:</li>
-            {SORT_OPTIONS.map((o) => (
+            {sortOptions.map((o) => (
               <li key={o.value}>
                 <Link
                   href={sortHref(o.value)}

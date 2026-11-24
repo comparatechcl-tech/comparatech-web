@@ -83,6 +83,25 @@ export function directAffiliateUrl(
 }
 
 /**
+ * La página de ofertas de Mercado Libre, para el botón "Ver las ofertas de
+ * hoy en Mercado Libre". Desde el 23-11-2026 el sitio no tiene precios de hoy
+ * (lib/price-freshness): las ofertas del día están allá, no acá.
+ *
+ * Con los links directos encendidos lleva los parámetros de la cuenta
+ * afiliada, igual que el link a una ficha. Que Mercado Libre atribuya así una
+ * página que no es de producto no está comprobado: se mira en los clics de la
+ * Central de Afiliados. Con los links directos apagados va sin parámetros.
+ */
+export function mlOffersUrl(params: AffiliateParams): string {
+  const url = new URL(`${SITE_ROOT}/ofertas`);
+  if (params.directLinks && params.word && params.tool) {
+    url.searchParams.set('matt_word', params.word);
+    url.searchParams.set('matt_tool', params.tool);
+  }
+  return url.toString();
+}
+
+/**
  * Red de seguridad para un link guardado que no pasa la lista: mejor un
  * link directo (o la ficha sin parámetros) que publicar algo desconocido.
  * Sin ficha asociada, la portada de ML; nunca '#' ni 'javascript:'.

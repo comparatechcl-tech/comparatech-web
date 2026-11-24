@@ -11,6 +11,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
  */
 
 // Las tarjetas y el botón de compra leen la ruta; el comparador, ?a= y ?b=.
+// La cuenta afiliada, fija: de ahí sale el link del botón a las ofertas de Mercado Libre (lib/outbound, mlOffersUrl).
+vi.mock('@/lib/settings', () => ({
+  getAffiliateSettings: vi.fn(async () => ({ word: 'comparatech', tool: '12345678', directLinks: true })),
+}));
 vi.mock('next/navigation', () => ({ usePathname: () => '/', useSearchParams: () => null }));
 // lib/queries/products usa cache() de React 19 y lee Supabase: la página de ofertas solo necesita esto.
 vi.mock('@/lib/queries/products', async () => {
@@ -188,6 +192,8 @@ describe('/ofertas', () => {
       'Las ofertas de hoy están en Mercado Libre. Acá puedes ver cuánto costaba cada producto en nuestra última revisión y cómo se movió su precio, para saber si una oferta es real.'
     );
     expect(html).toContain('href="/historial-de-precios"');
+    expect(read).toContain('Ver las ofertas de hoy en Mercado Libre');
+    expect(html).toContain('href="https://www.mercadolibre.cl/ofertas?matt_word=comparatech&amp;matt_tool=12345678"');
     expect(read).not.toContain('varias veces al día');
     // Sin ofertas no hay cifras tachadas que explicar.
     expect(read).not.toContain('El descuento y la cifra tachada');

@@ -1,9 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { CalendarDays, Search, Check, Tags, ChartNoAxesColumn, Link2, Flame, Sparkles } from 'lucide-react';
+import { CalendarDays, Search, Check, Tags, ChartNoAxesColumn, Link2, Flame, Sparkles, TrendingUp } from 'lucide-react';
 import { getCatalogProducts } from '@/lib/queries/products';
 import { getDealsWithStats } from '@/lib/queries/deals';
+import { getPopularProducts } from '@/lib/queries/popular';
+import { getAffiliateSettings } from '@/lib/settings';
+import { mlOffersUrl } from '@/lib/outbound';
+import { AffiliateButton } from '@/components/product/AffiliateButton';
+import { POPULAR_MIN } from '@/lib/popular';
 import { dropsById } from '@/lib/deal-rank';
 import { blackFridayPhase } from '@/lib/black-friday';
 import { selectHomeDeals } from '@/lib/home-deals';
@@ -91,6 +96,9 @@ const DEALS_MOBILE = 8;
 const DEALS_DESKTOP = 8;
 const PICKS_LIMIT = 4;
 const NEW_LIMIT = 8;
+/** "Los más populares": ocho en pantallas grandes, los primeros cuatro en el celular. */
+const POPULAR_LIMIT = 8;
+const POPULAR_MOBILE = 4;
 /** Productos de cada categoría que ofrece el comparador rápido de la portada. */
 const COMPARE_PER_CATEGORY = 15;
 
@@ -122,13 +130,21 @@ export default async function HomePage() {
   // desde la segunda. Sin destacada, la grilla parte desde la primera.
   const desktopDeals = spotlight ? block.slice(1, 1 + DEALS_DESKTOP) : block.slice(0, DEALS_DESKTOP);
 
+  // Sin ofertas (no hay precios revisados hoy, ver lib/price-freshness) el
+  // lugar de las ofertas lo toman los productos que más se abren en Mercado
+  // Libre desde el sitio (lib/popular). Con menos de POPULAR_MIN, nada.
+  const popularFound = block.length === 0 ? await getPopularProducts(POPULAR_LIMIT) : [];
+  const popular = popularFound.length >= POPULAR_MIN ? popularFound : [];
+  // Las ofertas del día están en Mercado Libre: el botón lleva allá (lib/outbound, mlOffersUrl).
+  const offersUrl = popular.length > 0 ? mlOffersUrl(await getAffiliateSettings()) : null;
+
   // Los productos marcados como destacados en el admin. Si no hay ninguno,
   // el bloque no aparece: mejor nada que una sección vacía.
   const picks = catalog.filter((p) => p.is_featured).slice(0, PICKS_LIMIT);
 
   // "Recién agregados" no repite lo que ya está más arriba: con un catálogo
   // chico, las mismas tarjetas dos veces en la portada parecían un relleno.
-  const shownAbove = new Set([...mobileDeals, ...desktopDeals, ...picks].map((p) => p.id));
+  const shownAbove = new Set([...mobileDeals, ...desktopDeals, ...popular, ...picks].map((p) => p.id));
   const fresh = catalog.filter((p) => !shownAbove.has(p.id)).slice(0, NEW_LIMIT);
 
   // El comparador rápido recibe solo lo que usa para elegir, y solo lo más
@@ -307,6 +323,37 @@ export default async function HomePage() {
           <div className="hidden lg:block">
             <ProductGrid products={desktopDeals} placement="home-ofertas" drops={drops} />
           </div>
+        </section>
+      )}
+
+      {/* Los más populares: solo cuando no hay ofertas que mostrar. El texto
+          dice lo que es (lo que más se abre), sin llamarlos mejores ni baratos. */}
+      {popular.length > 0 && (
+        <section className="mb-12 sm:mb-16">
+          <div className="mb-3 sm:mb-5">
+            <h2 className="flex items-center gap-2 font-heading text-xl font-bold sm:text-2xl">
+              <TrendingUp size={22} className="text-accent" />
+              Los más populares
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              Los productos que más personas fueron a ver a Mercado Libre desde ComparaTech en los últimos 30 días.
+            </p>
+          </div>
+          <div className="sm:hidden">
+            <ProductGrid products={popular.slice(0, POPULAR_MOBILE)} placement="home-populares" eagerImages={2} />
+          </div>
+          <div className="hidden sm:block">
+            <ProductGrid products={popular} placement="home-populares" eagerImages={4} />
+          </div>
+          {offersUrl && (
+            <div className="mt-6 flex justify-center">
+              <AffiliateButton
+                href={offersUrl}
+                label="Ver las ofertas de hoy en Mercado Libre"
+                className="w-full text-sm sm:w-auto"
+              />
+            </div>
+          )}
         </section>
       )}
 

@@ -13,6 +13,7 @@
 export const PLACEMENTS = [
   'home-ofertas',
   'home-nuevos',
+  'home-populares',
   'home',
   'categoria',
   'ofertas',

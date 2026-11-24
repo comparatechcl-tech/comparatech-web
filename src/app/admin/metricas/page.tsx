@@ -29,6 +29,7 @@ export const dynamic = 'force-dynamic';
 const PLACEMENT_LABELS: Record<Placement, string> = {
   'home-ofertas': 'Portada · ofertas',
   'home-nuevos': 'Portada · recién agregados',
+  'home-populares': 'Portada · los más populares',
   home: 'Portada',
   categoria: 'Categoría',
   ofertas: 'Ofertas',

@@ -144,6 +144,7 @@ export default async function TipoPage({ params, searchParams }: { params: Param
         typeHref={(slug) => typePath(categoria, slug)}
         sortHref={(order) => listingHref(path, order)}
         orden={orden}
+        hasDeals={summarizeCategory(ofType).dealCount > 0}
         shown={shown}
         total={listed.length}
         moreHref={listingHref(path, orden, pagina + 1)}

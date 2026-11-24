@@ -17,6 +17,10 @@ vi.mock('@/lib/queries/products', () => ({
   ),
 }));
 vi.mock('@/lib/queries/site-categories', () => ({ getSiteCategories: vi.fn(async () => []) }));
+// La cuenta afiliada, fija: de ahí sale el link del botón a las ofertas de Mercado Libre (lib/outbound, mlOffersUrl).
+vi.mock('@/lib/settings', () => ({
+  getAffiliateSettings: vi.fn(async () => ({ word: 'comparatech', tool: '12345678', directLinks: true })),
+}));
 vi.mock('@/lib/queries/black-friday-thermometer', () => ({ getWatchList: vi.fn(async () => []) }));
 
 import BlackFridayPage from '@/app/black-friday/page';
@@ -82,6 +86,8 @@ describe('/black-friday', () => {
   it('antes del 23 de noviembre: sin lista, con el enlace al termómetro', async () => {
     const html = await render(cl('2026-11-20 10:00'), []);
     const t = text(html);
+    // Con precios de hoy las ofertas están acá: no hace falta mandar a verlas a Mercado Libre.
+    expect(t).not.toContain('Ver las ofertas de hoy en Mercado Libre');
     expect(t).not.toContain('Lo que vamos a vigilar');
     expect(t).toContain('Termómetro del Black Friday 2026');
     expect(t).toContain('cómo vamos a medir qué bajó de verdad.');
@@ -138,6 +144,9 @@ describe('/black-friday con precios que no son de hoy', () => {
     );
     expect(t).not.toContain('Termómetro del Black Friday');
     expect(html).not.toContain('href="/datos/black-friday-2026"');
+    // Las ofertas del día están en Mercado Libre: el botón lleva allá, con la cuenta afiliada.
+    expect(t).toContain('Ver las ofertas de hoy en Mercado Libre');
+    expect(html).toContain('href="https://www.mercadolibre.cl/ofertas?matt_word=comparatech&amp;matt_tool=12345678"');
     expect(t).not.toContain('vas a poder ver si el precio de verdad bajó');
     // El historial se mira hasta la última revisión, no hasta ahora.
     expect(vi.mocked(getWatchList)).toHaveBeenLastCalledWith(now, Date.parse(LAST_CHECK));

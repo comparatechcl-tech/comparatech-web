@@ -125,6 +125,7 @@ export default async function CategoriaPage({
         typeHref={(slug) => typePath(categoria, slug)}
         sortHref={(order) => listingHref(path, order)}
         orden={orden}
+        hasDeals={summarizeCategory(products).dealCount > 0}
         shown={shown}
         total={listed.length}
         moreHref={listingHref(path, orden, pagina + 1)}

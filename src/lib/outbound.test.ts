@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buyUrl, isAllowedAffiliateUrl, isMeliLaUrl, resolveOutboundUrl } from '@/lib/outbound';
+import { buyUrl, isAllowedAffiliateUrl, isMeliLaUrl, mlOffersUrl, resolveOutboundUrl } from '@/lib/outbound';
 import { checkAffiliateOwnership, clearInspectCache, inspectAffiliateLink } from '@/lib/affiliate-link';
 
 const PARAMS = { word: 'comparatech', tool: '12345678', directLinks: false };
@@ -68,6 +68,20 @@ describe('resolveOutboundUrl y buyUrl', () => {
     expect(
       buyUrl({ affiliate_url: 'https://meli.la/abc', outbound_url: 'https://www.mercadolibre.cl/p/MLC1?matt_word=a' })
     ).toBe('https://www.mercadolibre.cl/p/MLC1?matt_word=a');
+  });
+});
+
+describe('mlOffersUrl', () => {
+  it('con links directos lleva los parámetros de la cuenta, y es un destino permitido', () => {
+    const url = mlOffersUrl({ ...PARAMS, directLinks: true });
+    expect(url).toBe('https://www.mercadolibre.cl/ofertas?matt_word=comparatech&matt_tool=12345678');
+    expect(isAllowedAffiliateUrl(url)).toBe(true);
+  });
+
+  it('con links directos apagados, o sin los datos de la cuenta, va sin parámetros', () => {
+    expect(mlOffersUrl(PARAMS)).toBe('https://www.mercadolibre.cl/ofertas');
+    expect(mlOffersUrl({ word: null, tool: '12345678', directLinks: true })).toBe('https://www.mercadolibre.cl/ofertas');
+    expect(mlOffersUrl({ word: 'comparatech', tool: null, directLinks: true })).toBe('https://www.mercadolibre.cl/ofertas');
   });
 });
 
