@@ -11,33 +11,31 @@ const CONTACT_EMAIL = 'comparatech.cl@gmail.com';
 /**
  * Escrita en lenguaje simple a propósito: tiene que poder leerla cualquier
  * persona, no solo un abogado. Si cambia lo que mide el sitio (/api/e,
- * Vercel Analytics, UtmCapture), esta página se actualiza junto con el código.
+ * UtmCapture) o dónde está alojado, esta página se actualiza junto con el
+ * código. Desde el 22-11-2026 el sitio está en Railway y ya no cuenta
+ * visitas: el contador de Vercel solo se carga en Vercel (ver app/layout).
  */
 export default function PrivacidadPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
       <h1 className="font-heading text-2xl font-bold">Política de privacidad</h1>
-      <p className="mt-2 text-xs text-muted">Última actualización: octubre de 2026</p>
+      <p className="mt-2 text-xs text-muted">Última actualización: noviembre de 2026</p>
 
       <div className="mt-6 space-y-4 text-sm leading-relaxed text-muted">
         <p className="rounded-xl border border-border bg-surface p-4 text-fg">
           En corto: no te pedimos cuenta, no guardamos tu IP y no usamos cookies propias. Solo contamos, de forma
-          anónima, cuántas visitas tiene el sitio y cuántas veces se abre un producto en Mercado Libre.
+          anónima, cuántas veces se abre un producto en Mercado Libre.
         </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Qué registramos</h2>
         <ul className="list-disc space-y-2 pl-5">
           <li>
-            <strong className="text-fg">Clics hacia Mercado Libre.</strong> Cuando tocas &quot;Ver en Mercado
-            Libre&quot; guardamos qué producto fue, desde qué parte del sitio (portada, ofertas, la ficha, etc.), el
+            <strong className="text-fg">Clics hacia Mercado Libre.</strong> Cuando tocas un botón que lleva a
+            Mercado Libre guardamos qué producto fue, desde qué parte del sitio (portada, ofertas, la ficha, etc.), el
             tipo de link, si llegaste desde alguna red social o campaña (por ejemplo, Telegram) y si la pantalla era
             de celular. No guardamos tu IP ni tu navegador. Para frenar a quien infle los clics con un programa,
             guardamos además un código que se calcula a partir de esos datos, cambia cada día y no permite volver a
             ellos. Los clics se borran a los 180 días.
-          </li>
-          <li>
-            <strong className="text-fg">Visitas agregadas.</strong> Usamos Vercel Analytics, que cuenta páginas
-            vistas, países y tipos de dispositivo en totales, sin cookies y sin seguirte entre sitios.
           </li>
           <li>
             <strong className="text-fg">En tu propio navegador.</strong> Mientras tengas la pestaña abierta,
@@ -52,15 +50,16 @@ export default function PrivacidadPage() {
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Para qué</h2>
         <p>
-          Para saber qué productos y secciones se usan más y comprobar que los links a Mercado Libre funcionen. No
-          vendemos ni arrendamos datos a nadie, y no los usamos para mostrarte publicidad.
+          Para saber qué productos y secciones se usan más, mostrar en la portada cuáles se abren más (solo el
+          total de cada producto) y comprobar que los links a Mercado Libre funcionen. No vendemos ni arrendamos datos a
+          nadie, y no los usamos para mostrarte publicidad.
         </p>
 
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Terceros</h2>
         <ul className="list-disc space-y-2 pl-5">
           <li>
-            <strong className="text-fg">Vercel</strong> aloja el sitio y entrega las estadísticas de visitas. Como
-            cualquier servidor web, recibe tu IP para poder mostrarte la página.
+            <strong className="text-fg">Railway</strong> aloja el sitio. Como cualquier servidor web, recibe tu IP
+            para poder mostrarte la página.
           </li>
           <li>
             <strong className="text-fg">Supabase</strong> es la base de datos donde quedan los productos y los clics
@@ -93,7 +92,7 @@ export default function PrivacidadPage() {
         <p>
           Tratamos los datos según la legislación chilena de protección de datos personales, incluida la Ley 21.719,
           que moderniza la Ley 19.628. Puedes pedirnos acceso, rectificación, supresión u oposición, y cualquier
-          consulta sobre esta política. Como los clics y las visitas que registramos son anónimos, en general no hay
+          consulta sobre esta política. Como los clics que registramos son anónimos, en general no hay
           forma de asociarlos a ti; si nos escribes, te contamos exactamente qué hay.
         </p>
 

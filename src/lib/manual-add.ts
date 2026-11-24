@@ -4,6 +4,7 @@ import { commissionRate, estimateCommission } from '@/lib/commission';
 import { formatCLP } from '@/lib/format';
 import { enrichFromMlProduct } from '@/lib/ml-enrichment';
 import {
+  WINNERS_CLOSED_DETAIL,
   discoverDomains,
   firstPictureUrl,
   getRootCategory,
@@ -117,6 +118,15 @@ const FIND_CATALOG_HELP =
 
 const ML_DOWN = 'Mercado Libre no respondió. Intenta de nuevo en un rato.';
 
+/**
+ * Desde el 23-11-2026 Mercado Libre no entrega precios a la aplicación (ver
+ * winnersGate en lib/ml-catalog): sin precio ni vendedor no se puede revisar
+ * el producto, y "intenta más tarde" haría esperar algo que no va a pasar.
+ */
+const ML_PRICES_CLOSED =
+  'Mercado Libre cerró la consulta de precios para el sitio (desde el 23-11-2026), así que por ahora no se pueden ' +
+  'agregar productos desde acá.';
+
 function discountOf(price: number, original: number | null): number {
   if (!original || original <= price || price <= 0) return 0;
   return Math.round(((original - price) / original) * 100);
@@ -229,7 +239,9 @@ export async function inspectCatalogProduct(
       'Ahora nadie vende este producto en la ficha de Mercado Libre (sin ganador). Puede volver más adelante.'
     );
   }
-  if (winners.status === 'error') return blocked(preview, ML_DOWN);
+  if (winners.status === 'error') {
+    return blocked(preview, winners.detail === WINNERS_CLOSED_DETAIL ? ML_PRICES_CLOSED : ML_DOWN);
+  }
 
   const winner = winners.offers[0];
   const originalPrice =
