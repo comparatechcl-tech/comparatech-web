@@ -8,7 +8,6 @@ import { getWatchList } from '@/lib/queries/black-friday-thermometer';
 import { BLACK_FRIDAY, blackFridayPhase, blackFridayPicks, daysUntilBlackFriday, dealsByCategory } from '@/lib/black-friday';
 import {
   EVENT_WINDOWS,
-  NO_DATA_NOTICE,
   THERMOMETER_PATH,
   rangeLabel,
   thermometerPhase,
@@ -246,7 +245,7 @@ function WatchSection({ items, inEvent }: { items: WatchItem[]; inEvent: boolean
       </h2>
       <p className="mb-4 mt-1 max-w-3xl text-sm text-muted">
         Productos muy buscados, con su precio de hoy y el precio habitual que tuvieron {reference}.
-        {!inEvent && ' En el Black Friday vas a ver acá si bajan de verdad.'} {NO_DATA_NOTICE}
+        {!inEvent && ' En el Black Friday vas a ver acá si bajan de verdad.'}
       </p>
       <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => (

@@ -97,9 +97,6 @@ export const NO_DATA_GAP = {
   to: Date.parse('2026-11-22T16:37:00Z'),
 };
 
-/** El aviso que acompaña a la medición (mismo texto en el termómetro y en /black-friday). */
-export const NO_DATA_NOTICE = 'Entre el 19 y el 22 de noviembre no pudimos revisar precios. Esos días no cuentan en esta medición.';
-
 /**
  * Cuánto antes del evento empieza a contar "subió antes". Es lo que quedó con
  * datos antes del Black Friday, y el fin de semana de comparación usa lo

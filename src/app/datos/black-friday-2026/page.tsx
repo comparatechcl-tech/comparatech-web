@@ -10,7 +10,6 @@ import {
   EVENT_WINDOWS,
   MIN_CATEGORY_MEASURED,
   MIN_REF_DAYS,
-  NO_DATA_NOTICE,
   THERMOMETER_PATH,
   asOfLabel,
   averageChange,
@@ -104,10 +103,6 @@ export default async function TermometroBlackFridayPage() {
           Estamos actualizando el dato. Vuelve a mirar en unos minutos.
         </p>
       )}
-
-      <p className="mt-3 max-w-3xl rounded-lg border border-border bg-surface px-3 py-2 text-sm leading-relaxed text-fg">
-        {NO_DATA_NOTICE}
-      </p>
 
       {event && <EventResults event={event} baseline={baseline} phase={phase} />}
 

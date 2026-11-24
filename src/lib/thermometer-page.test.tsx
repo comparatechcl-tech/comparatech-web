@@ -166,7 +166,7 @@ describe('antes del evento', () => {
     });
     const t = text(html);
     expect(t).toContain('La semana antes');
-    expect(t).toContain('Entre el 19 y el 22 de noviembre no pudimos revisar precios. Esos días no cuentan en esta medición.');
+    expect(t).not.toContain('no pudimos revisar precios');
     expect(t).toContain('Desde el domingo 22 de noviembre, 10% de los productos (90 de 900) ya estuvo al menos un día 5% o más sobre su precio habitual');
     expect(t).toContain('En la semana antes del fin de semana sin evento fue 5%');
     expect(t).toContain('precio habitual $400.000 → estuvo en $460.000 (15% más)');
