@@ -31,6 +31,22 @@ export interface NoticeDeal {
   coupon: string | null;
   /** La ficha, solo si el link del aviso es uno limpio a /p/MLC…. */
   mlId: string | null;
+  /**
+   * El link del producto tal como viene en el aviso (tinyurl, meli.la o la
+   * ficha). No se abre nunca; lib/short-links puede preguntarle al acortador
+   * adónde apunta, sin llegar a Mercado Libre.
+   */
+  link?: string | null;
+  /**
+   * Todos los montos que el aviso da para este producto, en orden y sin las
+   * compras mínimas: "$629.990 a $369.474" son dos. Con ellos lib/channel-price
+   * decide si el aviso da un precio sin condiciones.
+   */
+  amounts?: number[];
+  /** El descuento que el aviso dice ("48% OFF"), o null. */
+  discountPct?: number | null;
+  /** El aviso condiciona el precio de este producto (cupón, tarjeta, cuotas, suscripción). */
+  conditional?: boolean;
 }
 
 export interface ParsedNotice {
@@ -81,14 +97,43 @@ function couponsIn(text: string): string[] {
   return codes;
 }
 
+/** Una línea que habla de una compra mínima ("sobre $34.990"): su monto no es un precio. */
+const MINIMUM_RE = /\b(?:sobre|desde|compras?|m[ií]nim[oa])\b/i;
+/** "48% OFF", "8% de descuento", "50% dcto". */
+const PERCENT_RE = /(\d{1,2})\s?%\s*(?:off|de\s+descuento|dcto|descuento)/i;
+/**
+ * Lo que condiciona un precio: no es el que paga cualquiera. Se busca en todo
+ * el bloque, así que las frases son las de una condición y no las de un
+ * producto ("con tarjeta", no "Tarjeta de video").
+ */
+const CONDITION_RE =
+  /\b(?:cup[oó]n(?:es)?|c[oó]digo|con\s+tarjeta|tarjeta\s+de\s+cr[eé]dito|cuotas?|pagando\s+con|mercado\s*pago|suscripci[oó]n|meli\s*\+)/i;
+
+/** Los montos del bloque, en orden, sin las compras mínimas. */
+function amountsIn(lines: string[]): number[] {
+  const amounts: number[] = [];
+  for (const line of lines) {
+    if (MINIMUM_RE.test(line)) continue;
+    for (const m of line.matchAll(MONEY_RE)) {
+      const value = toPesos(m[1]);
+      if (value !== null) amounts.push(value);
+    }
+  }
+  return amounts;
+}
+
 /** El último monto del bloque que no es una compra mínima ("sobre $34.990"): el precio final del producto. */
 function priceIn(lines: string[]): number | null {
-  let price: number | null = null;
+  const amounts = amountsIn(lines);
+  return amounts.length > 0 ? amounts[amounts.length - 1] : null;
+}
+
+function percentIn(lines: string[]): number | null {
   for (const line of lines) {
-    if (/\b(?:sobre|desde|compras?|m[ií]nim[oa])\b/i.test(line)) continue;
-    for (const m of line.matchAll(MONEY_RE)) price = toPesos(m[1]) ?? price;
+    const m = PERCENT_RE.exec(line);
+    if (m) return Number(m[1]);
   }
-  return price;
+  return null;
 }
 
 /** El nombre: la última línea del bloque que no es precio, descuento, cupón ni encabezado. */
@@ -124,11 +169,16 @@ export function parseDealNotice(text: string): ParsedNotice {
     const name = nameIn(lines);
     if (!name) return;
     if (deals.some((d) => d.name.toLowerCase() === name.toLowerCase())) return;
+    const coupon = couponsIn(lines.join('\n'))[0] ?? null;
     deals.push({
       name,
       price: priceIn(lines),
-      coupon: couponsIn(lines.join('\n'))[0] ?? null,
+      coupon,
       mlId: CATALOG_RE.exec(link)?.[1]?.toUpperCase() ?? null,
+      link,
+      amounts: amountsIn(lines),
+      discountPct: percentIn(lines),
+      conditional: coupon !== null || lines.some((raw) => CONDITION_RE.test(raw)),
     });
   };
 

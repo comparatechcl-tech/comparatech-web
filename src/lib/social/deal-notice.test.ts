@@ -57,10 +57,18 @@ Con el cupón 🎟️ LOCURASDD queda en $84.990
 
 💡 Tip para afiliados: Destaquen el impresionante 78% de descuento en la Berberina Qin Supplements y el 60% de descuento en la Bicicleta de Spinning SB Pink. Promocionar los descuentos más altos del 11.11 es la táctica perfecta para capturar la atención inmediata de los usuarios y disparar las conversiones.`;
 
+/** Lo que la página del aviso usa de cada producto (lo demás es para lib/channel-price). */
+const basic = ({ name, price, coupon, mlId }: { name: string; price: number | null; coupon: string | null; mlId: string | null }) => ({
+  name,
+  price,
+  coupon,
+  mlId,
+});
+
 describe('parseDealNotice', () => {
   it('lee los productos de un aviso con "Precio: $A a $B" y links tinyurl', () => {
     const parsed = parseDealNotice(AVISO_10_11);
-    expect(parsed.deals).toEqual([
+    expect(parsed.deals.map(basic)).toEqual([
       {
         name: 'Notebook Gamer OMEN HyperX HP 15-ga0017la Intel Core i7 16GB RAM RTX 5070 1TB SSD 15.3" 2K Windows 11 Home',
         price: 2_479_990,
@@ -82,7 +90,7 @@ describe('parseDealNotice', () => {
 
   it('lee varios mensajes juntos: cupones por producto, cupones sueltos y links limpios', () => {
     const parsed = parseDealNotice(AVISO_11_11);
-    expect(parsed.deals).toEqual([
+    expect(parsed.deals.map(basic)).toEqual([
       { name: 'Silla De Auto Convertible Poplar Stone Onyx Britax', price: 279_990, coupon: 'PICK11', mlId: null },
       {
         name: 'Ventilador Tower Fan Mouvair Freeze Silencioso 6 Velocidades Con Ionizador De Aire y Wifi',
@@ -114,6 +122,70 @@ describe('parseDealNotice', () => {
 
   it('una línea "CUPÓN PARA TODOS" no es un código', () => {
     expect(parseDealNotice('CUPÓN PARA TODOS los compradores').coupons).toEqual([]);
+  });
+
+  it('guarda el link, todos los montos y el descuento que dice el aviso', () => {
+    const [omen, , , gooloo] = parseDealNotice(AVISO_10_11).deals;
+    expect(omen).toMatchObject({
+      link: 'https://tinyurl.com/4pbjkf7s',
+      amounts: [2_699_990, 2_479_990],
+      discountPct: 8,
+      conditional: false,
+    });
+    // "$219 a $84.875": el aviso trae el primer monto cortado. Queda tal cual; quien lo use decide.
+    expect(gooloo).toMatchObject({ amounts: [219, 84_875], discountPct: 61, conditional: false });
+
+    const [silla, ventilador, tv] = parseDealNotice(AVISO_11_11).deals;
+    expect(silla).toMatchObject({ coupon: 'PICK11', conditional: true, amounts: [279_990] });
+    expect(ventilador).toMatchObject({ link: 'https://www.mercadolibre.cl/p/MLC63071662', conditional: true });
+    expect(tv).toMatchObject({ amounts: [629_990, 369_474], discountPct: 48, conditional: false });
+  });
+
+  it('lee un aviso de Telegram con "Precio: $X" y un solo monto por producto', () => {
+    const text = [
+      'Ojo con esta selección de tecnología y gaming que la gente busca todo el año 🎮📱 👇',
+      '',
+      '🎧 Auriculares inalámbricos Pulse Elite Sony',
+      '💰 Precio: $109.990',
+      '👉 https://tinyurl.com/3vvdnnpn',
+      '',
+      '🎮 Consola PlayStation 5 Digital Slim',
+      '💰 Precio: $709.990',
+      '👉 https://tinyurl.com/yc8hrkdp',
+      '',
+      '💡 TIP DE AFILIADO: destaca la seguridad de comprar en distribuidores autorizados.',
+    ].join('\n');
+    const parsed = parseDealNotice(text);
+    expect(parsed.deals).toEqual([
+      {
+        name: 'Auriculares inalámbricos Pulse Elite Sony',
+        price: 109_990,
+        coupon: null,
+        mlId: null,
+        link: 'https://tinyurl.com/3vvdnnpn',
+        amounts: [109_990],
+        discountPct: null,
+        conditional: false,
+      },
+      {
+        name: 'Consola PlayStation 5 Digital Slim',
+        price: 709_990,
+        coupon: null,
+        mlId: null,
+        link: 'https://tinyurl.com/yc8hrkdp',
+        amounts: [709_990],
+        discountPct: null,
+        conditional: false,
+      },
+    ]);
+    expect(parsed.coupons).toEqual([]);
+  });
+
+  it('un precio con tarjeta o en cuotas queda marcado; "Tarjeta de video" en el nombre no', () => {
+    const one = (name: string, extra: string) => `${name}\nPrecio: $99.990\n${extra}\nhttps://tinyurl.com/abc123\n`;
+    expect(parseDealNotice(one('Audífonos Sony WH-1000XM5 Negro', 'Pagando con tarjeta de crédito')).deals[0].conditional).toBe(true);
+    expect(parseDealNotice(one('Audífonos Sony WH-1000XM5 Negro', 'Hasta 12 cuotas sin interés')).deals[0].conditional).toBe(true);
+    expect(parseDealNotice(one('Tarjeta de video Asus RTX 5070 12GB', 'Envío gratis')).deals[0].conditional).toBe(false);
   });
 });
 

@@ -1,0 +1,59 @@
+name: Canal de afiliados
+
+# Respaldo de la pasada que lee el canal oficial de afiliados de Mercado
+# Libre en Telegram y lleva sus precios al sitio (/api/cron/canal). La que
+# corre cada media hora es la de Supabase (pg_cron, migración 0021); GitHub
+# atrasa o salta las ejecuciones programadas, así que esto queda como red de
+# seguridad y para lanzarla a mano (Actions → Canal de afiliados → Run).
+#
+# Una pasada de más no cambia nada: cada aviso se anota una sola vez.
+#
+# Requiere el secreto CRON_SECRET (Settings → Secrets and variables →
+# Actions), el mismo de "Refrescar precios". La respuesta no trae secretos:
+# es el resumen de la pasada (cuántos avisos, cuántos precios).
+
+on:
+  schedule:
+    # Cada 2 horas, al minuto 47: lejos de la hora en punto y del minuto 23
+    # de "Refrescar precios".
+    - cron: '47 */2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: canal-afiliados
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  canal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Llamar al endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://www.comparatech.cl' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::Falta el secreto CRON_SECRET en Settings → Secrets and variables → Actions"
+            exit 0
+          fi
+          # Se reintenta solo ante caídas de red o de pasarela. Un 502 propio
+          # (Telegram no respondió) o un 500 no se reintentan: la pasada
+          # siguiente vuelve a mirar los mismos avisos.
+          for attempt in 1 2; do
+            code=$(curl -sS -o out.json -w '%{http_code}' --max-time 70 \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$SITE_URL/api/cron/canal") || code=000
+            case "$code" in
+              000|503|504) [ "$attempt" -lt 2 ] && sleep 20 && continue ;;
+            esac
+            break
+          done
+          cat out.json 2>/dev/null || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::La pasada del canal respondió HTTP $code"
+            exit 1
+          fi

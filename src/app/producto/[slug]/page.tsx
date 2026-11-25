@@ -32,7 +32,7 @@ import { domainLabel, indexableTypes, typePath, typeSlug } from '@/lib/category-
 import { modelOf, modelPath, versionColor, versionLabel } from '@/lib/models';
 import { getModelVersions } from '@/lib/queries/models';
 import { viewerItems } from '@/lib/photo-viewer';
-import { buyLabel, isManualPrice, priceDateLabel, priceState } from '@/lib/price-freshness';
+import { buyLabel, priceDateLabel, priceOnlyKnown, priceState } from '@/lib/price-freshness';
 import { PhotoViewer } from '@/components/product/PhotoViewer';
 import type { Product } from '@/lib/types';
 
@@ -320,9 +320,10 @@ export default async function ProductoPage({
   const priceIs = priceState(product.price_checked_at);
   const today = priceIs === 'hoy';
   const cta = buyLabel(priceIs);
-  // Un precio de hoy revisado a mano (admin: Precios de hoy) no dice nada de
-  // la oferta: ni quién vende, ni envío, ni garantía. Eso no se muestra.
-  const offerKnown = today && !isManualPrice(product);
+  // Un precio de hoy revisado a mano (admin: Precios de hoy) o informado por
+  // el canal de afiliados no dice nada de la oferta: ni quién vende, ni envío,
+  // ni garantía. Eso no se muestra.
+  const offerKnown = today && !priceOnlyKnown(product);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">

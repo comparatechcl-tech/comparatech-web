@@ -8,7 +8,7 @@ import { getAllCategories } from '@/lib/categories';
 import { changeSince, lowestPriceNote, type PriceChange, type PriceStats } from '@/lib/deals';
 import { reputationLabel, salesLabel, warrantyValue } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
-import { isManualPrice, priceDateLabel, priceState } from '@/lib/price-freshness';
+import { priceDateLabel, priceOnlyKnown, priceState } from '@/lib/price-freshness';
 import { domainLabel, OTHER_TYPE_LABEL } from '@/lib/product-types';
 import type { OfferInfo, Product } from '@/lib/types';
 
@@ -105,9 +105,10 @@ function toCompareOffer(product: Product, stats: PriceStats | null, now: number)
     };
   }
 
-  // Precio de hoy revisado a mano (lib/manual-price): el precio y el tachado
-  // valen; del vendedor, el envío y la garantía no se sabe nada.
-  const manual = isManualPrice(product);
+  // Precio de hoy revisado a mano (lib/manual-price) o informado por el canal
+  // de afiliados (lib/channel-price): el precio y el tachado valen; del
+  // vendedor, el envío y la garantía no se sabe nada.
+  const manual = priceOnlyKnown(product);
 
   return {
     list_price: typeof list === 'number' && list > product.price ? list : null,

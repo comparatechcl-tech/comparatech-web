@@ -53,10 +53,32 @@ export function priceState(checkedAt: string | null | undefined, now: number = D
  */
 export const MANUAL_PRICE_SOURCE = 'manual';
 
+/**
+ * La marca de un precio que viene de un aviso del canal oficial de afiliados
+ * de Mercado Libre (lib/channel-price): Mercado Libre publicó ahí el producto
+ * con su precio. Igual que con el precio revisado a mano, de la oferta no se
+ * sabe nada más.
+ */
+export const CHANNEL_PRICE_SOURCE = 'canal';
+
+function sourceOf(product: { offer_info?: unknown }): unknown {
+  const info = product.offer_info;
+  return !!info && typeof info === 'object' ? (info as { source?: unknown }).source : undefined;
+}
+
 /** ¿El precio de este producto lo revisó una persona, y no la revisión automática? */
 export function isManualPrice(product: { offer_info?: unknown }): boolean {
-  const info = product.offer_info;
-  return !!info && typeof info === 'object' && (info as { source?: unknown }).source === MANUAL_PRICE_SOURCE;
+  return sourceOf(product) === MANUAL_PRICE_SOURCE;
+}
+
+/**
+ * ¿De la oferta de este producto se sabe solo el precio? Pasa cuando lo
+ * revisó una persona o cuando lo informó el canal de afiliados: no hay
+ * vendedor, envío ni garantía que mostrar.
+ */
+export function priceOnlyKnown(product: { offer_info?: unknown }): boolean {
+  const source = sourceOf(product);
+  return source === MANUAL_PRICE_SOURCE || source === CHANNEL_PRICE_SOURCE;
 }
 
 /**

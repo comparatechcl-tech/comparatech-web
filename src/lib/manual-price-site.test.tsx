@@ -15,9 +15,10 @@ vi.mock('@/lib/queries/products', async () => {
 
 import { TrustChips } from '@/components/product/TrustChips';
 import { categoryIntro, summarizeCategory } from '@/lib/category-listing';
+import { CHANNEL_OFFER_INFO } from '@/lib/channel-price';
 import { toCompareDetail } from '@/lib/compare';
 import { MANUAL_OFFER_INFO } from '@/lib/manual-price';
-import { commonPriceCheck, hasPricesToday, isManualPrice } from '@/lib/price-freshness';
+import { commonPriceCheck, hasPricesToday, isManualPrice, priceOnlyKnown } from '@/lib/price-freshness';
 import type { Product } from '@/lib/types';
 
 const NOW = Date.parse('2026-11-24T21:30:00Z');
@@ -148,6 +149,27 @@ describe('la oferta de un precio revisado a mano', () => {
     const offer = toCompareDetail(manual(), null).offer;
     expect(offer).toMatchObject({
       list_price: 59_990,
+      free_shipping: false,
+      is_full: false,
+      seller: '',
+      warranty: null,
+      price_date: null,
+      no_price: false,
+    });
+  });
+});
+
+describe('la oferta de un precio informado por el canal de afiliados', () => {
+  const channel = () =>
+    product({ price: 709_990, original_price: null, price_checked_at: new Date().toISOString(), offer_info: CHANNEL_OFFER_INFO });
+
+  it('se trata igual que el revisado a mano: precio de hoy, sin señales de la oferta ni vendedor', () => {
+    expect(priceOnlyKnown({ offer_info: CHANNEL_OFFER_INFO })).toBe(true);
+    expect(priceOnlyKnown({ offer_info: MANUAL_OFFER_INFO })).toBe(true);
+    expect(priceOnlyKnown({ offer_info: { free_shipping: true } })).toBe(false);
+    expect(renderToStaticMarkup(<TrustChips product={channel()} />)).toBe('');
+    expect(toCompareDetail(channel(), null).offer).toMatchObject({
+      list_price: null,
       free_shipping: false,
       is_full: false,
       seller: '',

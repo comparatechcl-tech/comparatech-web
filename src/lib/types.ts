@@ -25,8 +25,11 @@ export interface OfferInfo {
    * (lib/manual-price). De la oferta no se sabe nada más: lo demás va en
    * false o null, y el sitio no muestra vendedor, envío ni garantía. Sin
    * valor, lo trajo la revisión automática.
+   *
+   * 'canal': el precio lo informó Mercado Libre en su canal de afiliados
+   * (lib/channel-price). Tampoco se sabe nada más de la oferta.
    */
-  source?: 'manual';
+  source?: 'manual' | 'canal';
 }
 
 export interface Product {

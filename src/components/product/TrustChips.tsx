@@ -1,6 +1,6 @@
 import { BadgeCheck, ShieldCheck, Store, Tag, Truck, Zap, type LucideIcon } from 'lucide-react';
 import { salesLabel, warrantyLabel } from '@/lib/format';
-import { isManualPrice } from '@/lib/price-freshness';
+import { priceOnlyKnown } from '@/lib/price-freshness';
 import type { OfferInfo, Product } from '@/lib/types';
 
 /**
@@ -30,9 +30,10 @@ function readOfferInfo(value: unknown): Partial<OfferInfo> | null {
 }
 
 function buildChips(product: Product): Chip[] {
-  // Con el precio revisado a mano no se sabe nada de la oferta (ni del
-  // vendedor, que se guarda aparte): no hay señales que mostrar.
-  if (isManualPrice(product)) return [];
+  // Con el precio revisado a mano o informado por el canal de afiliados no
+  // se sabe nada de la oferta (ni del vendedor, que se guarda aparte): no hay
+  // señales que mostrar.
+  if (priceOnlyKnown(product)) return [];
   const info = readOfferInfo(product.offer_info);
   const chips: Chip[] = [];
 
