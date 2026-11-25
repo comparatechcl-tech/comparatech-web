@@ -4,6 +4,7 @@ import {
   buildDigestHtml,
   buildDigestSubject,
   buildDigestText,
+  candidatePriceDate,
   errorsLine,
   healthLine,
   linkModeLine,
@@ -329,6 +330,44 @@ describe('pickTopToApprove', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Precios de la cola que no son de hoy: el correo dice de cuándo son
+// ---------------------------------------------------------------------------
+
+describe('precios con fecha en el correo', () => {
+  const generatedAt = '2026-11-25T12:07:00Z'; // 09:07 de Chile
+  const old = candidate({ name: 'Galaxy S25 Ultra', price: 932_510, price_seen_at: '2026-11-23T17:30:00Z' });
+  const fresh = candidate({ name: 'Xbox Series S', price: 644_185, price_seen_at: '2026-11-25T11:00:00Z' });
+
+  it('dice la fecha solo cuando el precio no se vio hoy', () => {
+    expect(candidatePriceDate(old, generatedAt)).toBe('Precio del 23/11');
+    expect(candidatePriceDate(fresh, generatedAt)).toBe('');
+    expect(candidatePriceDate(candidate(), generatedAt)).toBe('');
+    expect(candidatePriceDate(candidate({ price_seen_at: 'no es una fecha' }), generatedAt)).toBe('');
+    // Sin la hora del correo no se sabe si es de hoy: va la fecha.
+    expect(candidatePriceDate(fresh)).toBe('Precio del 25/11');
+  });
+
+  it('el correo marca cada precio viejo y lo avisa arriba de la lista', () => {
+    const html = buildDigestHtml(input({ topToApprove: [old, fresh], pendingTotal: 2, generatedAt }));
+    expect(html).toContain('Precio del 23/11');
+    expect(html).not.toContain('Precio del 25/11');
+    expect(html).toContain('Estos precios no son de hoy');
+
+    const text = buildDigestText(input({ topToApprove: [old, fresh], pendingTotal: 2, generatedAt }));
+    expect(text).toContain('Galaxy S25 Ultra — $932.510 (precio del 23/11) · Comisión est.');
+    expect(text).toContain('Xbox Series S — $644.185 · Comisión est.');
+    expect(text).toContain('Estos precios no son de hoy');
+  });
+
+  it('con todos los precios de hoy el correo queda como siempre', () => {
+    const html = buildDigestHtml(input({ topToApprove: [fresh], pendingTotal: 1, generatedAt }));
+    expect(html).not.toContain('Precio del');
+    expect(html).not.toContain('no son de hoy');
+    expect(buildDigestText(input({ topToApprove: [fresh], pendingTotal: 1, generatedAt }))).not.toContain('no son de hoy');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Datos del correo: nunca lanza, junta los errores
 // ---------------------------------------------------------------------------
 
@@ -375,7 +414,11 @@ describe('gatherDigestInput', () => {
       if (q.table === 'product_candidates' && q.columns.includes('ml_root_category')) {
         return {
           data: [
-            { ...candidate({ name: 'viejo barato', price: 15_000 }), prospected_at: '2026-09-01T00:00:00Z' },
+            {
+              ...candidate({ name: 'viejo barato', price: 15_000 }),
+              prospected_at: '2026-09-01T00:00:00Z',
+              checked_at: '2026-10-03T09:00:00Z',
+            },
             {
               ...candidate({ name: 'nuevo hogar', price: 90_000, ml_root_category: 'MLC1574' }),
               prospected_at: '2026-10-04T12:00:00Z',
@@ -406,6 +449,9 @@ describe('gatherDigestInput', () => {
     expect(result.errors).toEqual([]);
     expect(result.topToApprove.map((c) => c.name)).toEqual(['nuevo hogar', 'viejo barato']);
     expect(result.newCandidates.map((c) => c.name)).toEqual(['nuevo hogar']);
+    // El precio lleva la fecha de su última revisión o, sin ella, la del día en que entró.
+    expect(result.topToApprove.map((c) => c.price_seen_at)).toEqual(['2026-10-04T12:00:00Z', '2026-10-03T09:00:00Z']);
+    expect(result.generatedAt).toBe(now.toISOString());
     expect(result.pendingTotal).toBe(2);
     expect(result.publishedTotal).toBe(80);
     expect(result.needsLink).toEqual([{ name: 'Link roto' }]);

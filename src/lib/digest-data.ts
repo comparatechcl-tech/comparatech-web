@@ -24,11 +24,16 @@ type DbError = { code?: string; message: string } | null;
 /** Columnas de candidato que existen desde siempre. */
 const CANDIDATE_COLUMNS =
   'name, price, original_price, category, image_url, seller_nickname, prospected_at, ml_family_id';
-/** La raíz llega con la migración 0018; sin ella se estima con la tasa más baja. */
-const CANDIDATE_COLUMNS_0018 = `${CANDIDATE_COLUMNS}, ml_root_category`;
+/**
+ * La raíz y la última revisión llegan con la migración 0018. Sin ella la
+ * comisión se estima con la tasa más baja y el precio lleva la fecha en que
+ * el candidato entró a la cola.
+ */
+const CANDIDATE_COLUMNS_0018 = `${CANDIDATE_COLUMNS}, ml_root_category, checked_at`;
 
 interface PendingRow extends DigestCandidate {
   prospected_at: string | null;
+  checked_at?: string | null;
 }
 
 /**
@@ -166,7 +171,11 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
   // Cola de revisión
   let pending: PendingRow[] = [];
   if (!failed('candidatos por revisar', pendingRes.thrown ?? pendingRes.value?.error)) {
-    pending = pendingRes.value?.rows ?? [];
+    // Cuándo se vio el precio de cada uno: el correo lo dice cuando no es de hoy.
+    pending = (pendingRes.value?.rows ?? []).map((row) => ({
+      ...row,
+      price_seen_at: row.checked_at ?? row.prospected_at ?? null,
+    }));
   }
   const ranked = rankForApproval(pending);
   const newCandidates = ranked.filter((c) => c.prospected_at && new Date(c.prospected_at).getTime() >= since);
@@ -232,6 +241,7 @@ export async function gatherDigestInput(admin: SupabaseClient, now: Date = new D
     lastPriceCheckMinutes,
     oldestPriceMinutes,
     pricesClosed,
+    generatedAt: now.toISOString(),
     clicsAyer,
     errors,
   };

@@ -17,9 +17,10 @@
  * no soportan flexbox ni hojas de estilo externas.
  */
 
-import { formatCLP, formatDiscountPct } from '@/lib/format';
+import { formatCLP, formatDayMonth, formatDiscountPct } from '@/lib/format';
 import { getCategoryInfo } from '@/lib/categories';
 import { estimateCommission } from '@/lib/commission';
+import { priceState } from '@/lib/price-freshness';
 import { sourceProblemLine, type SourceProblem } from '@/lib/prospect-source';
 
 export interface DigestCandidate {
@@ -33,6 +34,11 @@ export interface DigestCandidate {
   ml_root_category?: string | null;
   /** Familia de ML: los colores de un mismo modelo la comparten. */
   ml_family_id?: string | null;
+  /**
+   * Cuándo se vio ese precio en Mercado Libre: la última revisión del
+   * candidato o, sin ella, el día en que entró a la cola.
+   */
+  price_seen_at?: string | null;
 }
 
 export type DigestAttribution = 'pendiente' | 'confirmada' | 'fallida';
@@ -71,6 +77,11 @@ export interface DigestInput {
    * precios viejos ni por los días sin publicar: no se arreglan desde acá.
    */
   pricesClosed?: boolean;
+  /**
+   * Cuándo se armó el correo (ISO). Con esto se sabe si el precio de un
+   * candidato es de hoy; sin esto, todo precio con fecha la muestra.
+   */
+  generatedAt?: string;
   /** Clics hacia Mercado Libre ayer (hora de Chile); null si no se miden todavía. */
   clicsAyer: number | null;
   /** Consultas que fallaron al armar el correo. */
@@ -123,6 +134,23 @@ export function candidateCommission(c: Pick<DigestCandidate, 'price' | 'ml_root_
 function discountOf(c: Pick<DigestCandidate, 'price' | 'original_price'>): number {
   return formatDiscountPct(c.price, c.original_price ?? null) ?? 0;
 }
+
+/**
+ * "Precio del 23/11" cuando el precio del candidato no se vio hoy; vacío si
+ * es de hoy o si no se sabe cuándo se vio. Desde que Mercado Libre no entrega
+ * precios, la cola guarda el de la última revisión: sin la fecha, el correo
+ * lo mostraba como si fuera el de hoy.
+ */
+export function candidatePriceDate(c: Pick<DigestCandidate, 'price_seen_at'>, generatedAt?: string): string {
+  const seenAt = c.price_seen_at;
+  if (!seenAt || !Number.isFinite(Date.parse(seenAt))) return '';
+  const now = generatedAt ? Date.parse(generatedAt) : NaN;
+  if (Number.isFinite(now) && priceState(seenAt, now) === 'hoy') return '';
+  return `Precio del ${formatDayMonth(seenAt)}`;
+}
+
+/** Lo que el correo aclara cuando hay precios de la cola que no son de hoy. */
+const DATED_PRICES_NOTE = 'Estos precios no son de hoy: cada uno lleva la fecha en que se vio en Mercado Libre.';
 
 /**
  * De la que más comisión deja a la que menos; a igual comisión, el de mayor
@@ -278,8 +306,13 @@ export function buildDigestSubject(input: DigestInput): string {
   return parts.length > 0 ? `ComparaTech · ${parts.join(' · ')}` : 'ComparaTech · sin novedades hoy';
 }
 
-function candidateRow(c: DigestCandidate): string {
+function candidateRow(c: DigestCandidate, generatedAt?: string): string {
   const discount = formatDiscountPct(c.price, c.original_price ?? null);
+  const dated = candidatePriceDate(c, generatedAt);
+  const datedLine = dated
+    ? `
+      <div style="font-size:12px;color:${WARN_TEXT};font-weight:600;margin-top:3px;">${escapeHtml(dated)}</div>`
+    : '';
   return `
   <tr>
     <td style="padding:12px 0;border-bottom:1px solid ${BORDER};" valign="top" width="64">
@@ -293,7 +326,7 @@ function candidateRow(c: DigestCandidate): string {
       </div>
     </td>
     <td style="padding:12px 0;border-bottom:1px solid ${BORDER};text-align:right;white-space:nowrap;" valign="top">
-      <div style="font-size:15px;color:${TEXT};font-weight:700;">${escapeHtml(formatCLP(c.price))}</div>
+      <div style="font-size:15px;color:${TEXT};font-weight:700;">${escapeHtml(formatCLP(c.price))}</div>${datedLine}
       <div style="font-size:12px;color:${ACCENT};font-weight:600;margin-top:3px;">
         Comisión est. ${escapeHtml(formatCLP(candidateCommission(c)))}${discount ? ` · -${discount}%` : ''}
       </div>
@@ -317,6 +350,12 @@ export function buildDigestHtml(input: DigestInput): string {
   } = input;
 
   const top = topToApprove.slice(0, TOP_TO_APPROVE);
+  const datedNote = top.some((c) => candidatePriceDate(c, input.generatedAt) !== '')
+    ? `
+      <p style="font-size:13px;color:${WARN_TEXT};margin:0 0 4px;line-height:1.5;font-weight:600;">
+        ${escapeHtml(DATED_PRICES_NOTE)}
+      </p>`
+    : '';
   const sourceBlock = sourceProblem
     ? `
       <div style="margin-top:20px;padding:14px 16px;background:${WARN_BG};border:1px solid ${WARN_BORDER};border-radius:10px;font-size:14px;color:${WARN_TEXT};font-weight:600;line-height:1.5;">
@@ -360,9 +399,9 @@ export function buildDigestHtml(input: DigestInput): string {
       <h2 style="font-size:15px;color:${TEXT};margin:28px 0 4px;">Top ${TOP_TO_APPROVE} para aprobar hoy</h2>
       <p style="font-size:13px;color:${MUTED};margin:0 0 4px;line-height:1.5;">
         Los que más comisión dejan por venta de toda la cola.
-      </p>
+      </p>${datedNote}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-        ${top.map(candidateRow).join('')}
+        ${top.map((c) => candidateRow(c, input.generatedAt)).join('')}
       </table>
       <p style="font-size:13px;margin:12px 0 0;">
         <a href="${escapeHtml(approveUrl(adminUrl))}" style="color:${ACCENT};font-weight:600;">Aprobar la tanda de hoy →</a>
@@ -500,10 +539,13 @@ export function buildDigestText(input: DigestInput): string {
   const top = topToApprove.slice(0, TOP_TO_APPROVE);
   if (top.length > 0) {
     lines.push(`Top ${TOP_TO_APPROVE} para aprobar hoy:`);
+    if (top.some((c) => candidatePriceDate(c, input.generatedAt) !== '')) lines.push(DATED_PRICES_NOTE);
     for (const c of top) {
       const discount = formatDiscountPct(c.price, c.original_price ?? null);
+      const dated = candidatePriceDate(c, input.generatedAt);
       lines.push(
-        `  - ${c.name} — ${formatCLP(c.price)} · Comisión est. ${formatCLP(candidateCommission(c))}` +
+        `  - ${c.name} — ${formatCLP(c.price)}${dated ? ` (${dated.charAt(0).toLowerCase()}${dated.slice(1)})` : ''}` +
+          ` · Comisión est. ${formatCLP(candidateCommission(c))}` +
           `${discount ? ` · -${discount}%` : ''} (${categoryName(c.category)})`
       );
     }
