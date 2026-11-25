@@ -7,7 +7,7 @@
  */
 import type { Product } from '@/lib/types';
 import { formatCLP, formatFullDate } from '@/lib/format';
-import { latestPriceCheck, priceState } from '@/lib/price-freshness';
+import { commonPriceCheck, priceState } from '@/lib/price-freshness';
 import { discountPercent, MIN_DEAL_DISCOUNT } from '@/lib/queries/products';
 import { domainLabel, isTypeSlug, OTHER_TYPE_LABEL, typeSlug } from '@/lib/product-types';
 import { normalizeName } from '@/lib/text';
@@ -210,7 +210,9 @@ export function summarizeCategory(products: Product[], now: number = Date.now())
     .filter((p) => priceState(p.price_checked_at, now) !== 'sin_precio')
     .map((p) => p.price)
     .filter((n) => Number.isFinite(n) && n > 0);
-  const lastCheck = latestPriceCheck(products);
+  // La fecha que comparte casi todo el listado, no la más reciente: con unos
+  // pocos precios revisados a mano, el listado entero no es "de hoy".
+  const lastCheck = commonPriceCheck(products);
   return {
     count: products.length,
     minPrice: prices.length ? Math.min(...prices) : 0,

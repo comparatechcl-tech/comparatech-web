@@ -130,10 +130,16 @@ export default async function HomePage() {
   // desde la segunda. Sin destacada, la grilla parte desde la primera.
   const desktopDeals = spotlight ? block.slice(1, 1 + DEALS_DESKTOP) : block.slice(0, DEALS_DESKTOP);
 
-  // Sin ofertas (no hay precios revisados hoy, ver lib/price-freshness) el
-  // lugar de las ofertas lo toman los productos que más se abren en Mercado
-  // Libre desde el sitio (lib/popular). Con menos de POPULAR_MIN, nada.
-  const popularFound = block.length === 0 ? await getPopularProducts(POPULAR_LIMIT) : [];
+  // Sin ofertas (no hay precios revisados hoy, ver lib/price-freshness), o
+  // con unas pocas (las de los precios revisados a mano, lib/manual-price),
+  // van también los productos que más se abren en Mercado Libre desde el
+  // sitio (lib/popular), sin repetir los que ya están en las ofertas. Con
+  // menos de POPULAR_MIN, nada.
+  const inDeals = new Set(block.map((p) => p.id));
+  const popularFound =
+    block.length < POPULAR_MIN
+      ? (await getPopularProducts(POPULAR_LIMIT + block.length)).filter((p) => !inDeals.has(p.id)).slice(0, POPULAR_LIMIT)
+      : [];
   const popular = popularFound.length >= POPULAR_MIN ? popularFound : [];
   // Las ofertas del día están en Mercado Libre: el botón lleva allá (lib/outbound, mlOffersUrl).
   const offersUrl = popular.length > 0 ? mlOffersUrl(await getAffiliateSettings()) : null;
@@ -302,14 +308,15 @@ export default async function HomePage() {
               </h2>
               <p className="mt-1 hidden text-sm text-muted sm:block">
                 {allDeals.length} {allDeals.length === 1 ? 'producto' : 'productos'} con 20% o más de descuento.
-                Esta selección va cambiando durante el día.
+                {/* Con unas pocas (precios revisados a mano, lib/manual-price) nada va cambiando solo. */}
+                {allDeals.length >= POPULAR_MIN && ' Esta selección va cambiando durante el día.'}
               </p>
             </div>
             <Link
               href="/ofertas"
               className="shrink-0 rounded-full border border-accent/40 px-3.5 py-1.5 text-sm font-medium text-accent transition hover:bg-accent/10"
             >
-              Ver las {allDeals.length} →
+              {allDeals.length === 1 ? 'Ver la oferta →' : `Ver las ${allDeals.length} →`}
             </Link>
           </div>
           {/* Franja deslizable en el celular, grilla en pantallas grandes. */}
@@ -326,7 +333,7 @@ export default async function HomePage() {
         </section>
       )}
 
-      {/* Los más populares: solo cuando no hay ofertas que mostrar. El texto
+      {/* Los más populares: cuando no hay ofertas que mostrar, o hay muy pocas. El texto
           dice lo que es (lo que más se abre), sin llamarlos mejores ni baratos. */}
       {popular.length > 0 && (
         <section className="mb-12 sm:mb-16">

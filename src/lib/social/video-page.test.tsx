@@ -725,7 +725,18 @@ describe('la pestaña Videos', () => {
   it('va después de Historias y antes de Problemas, y se marca como la página actual', () => {
     const html = renderToStaticMarkup(<AdminTabs pending={0} problems={0} />);
     const labels = (html.match(/<a[^>]*>[^<]+/g) ?? []).map((a) => a.replace(/<a[^>]*>/, ''));
-    expect(labels).toEqual(['Resumen', 'Candidatos', 'Productos', 'Historias', 'Videos', 'Problemas', 'Métricas', 'Actividad', 'Configuración']);
+    expect(labels).toEqual([
+      'Resumen',
+      'Candidatos',
+      'Productos',
+      'Precios',
+      'Historias',
+      'Videos',
+      'Problemas',
+      'Métricas',
+      'Actividad',
+      'Configuración',
+    ]);
     expect(html).toMatch(/<a[^>]*aria-current="page"[^>]*href="\/admin\/videos"[^>]*>Videos|<a[^>]*href="\/admin\/videos"[^>]*aria-current="page"[^>]*>Videos/);
     expect(html.split('aria-current="page"')).toHaveLength(2);
   });

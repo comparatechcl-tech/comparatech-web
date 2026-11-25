@@ -18,7 +18,7 @@ import {
 import { domainLabel, indexableTypes, typePath, typeSlug } from '@/lib/category-listing';
 import { dropsById } from '@/lib/deal-rank';
 import { formatCLP, formatFullDate } from '@/lib/format';
-import { latestPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
+import { commonPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { SITE_URL } from '@/lib/site';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
 import { ProductGrid } from '@/components/product/ProductGrid';
@@ -89,7 +89,9 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
  * sabe, y la página dice "el 23/11" donde decía "hoy".
  */
 function priceDates(versions: { price_checked_at?: string | null }[], now: number) {
-  const lastCheck = latestPriceCheck(versions);
+  // La fecha que comparten las versiones (la más antigua si son pocas): una
+  // sola revisada hoy a mano no hace "de hoy" el precio de las demás.
+  const lastCheck = commonPriceCheck(versions);
   if (!lastCheck || priceState(lastCheck, now) === 'hoy') return { fullDate: null, shortDate: null, asOf: now };
   return { fullDate: formatFullDate(lastCheck), shortDate: priceDateLabel(lastCheck), asOf: Date.parse(lastCheck) };
 }

@@ -21,6 +21,7 @@ export function AdminTabs({ pending, problems }: { pending: number; problems: nu
     { href: '/admin', label: 'Resumen', count: 0, tone: 'accent', exact: true },
     { href: '/admin/candidatos', label: 'Candidatos', count: pending, tone: 'accent' },
     { href: '/admin/productos', label: 'Productos', count: 0, tone: 'accent' },
+    { href: '/admin/precios', label: 'Precios', count: 0, tone: 'accent' },
     { href: '/admin/historias', label: 'Historias', count: 0, tone: 'accent' },
     { href: '/admin/videos', label: 'Videos', count: 0, tone: 'accent' },
     { href: '/admin/problemas', label: 'Problemas', count: problems, tone: 'warn' },
@@ -30,7 +31,7 @@ export function AdminTabs({ pending, problems }: { pending: number; problems: nu
   ];
 
   return (
-    // Nueve pestañas no caben en 375 px: se desplazan de lado en vez de
+    // Diez pestañas no caben en 375 px: se desplazan de lado en vez de
     // partirse en dos líneas.
     <nav
       aria-label="Secciones del admin"

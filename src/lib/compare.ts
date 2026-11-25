@@ -8,7 +8,7 @@ import { getAllCategories } from '@/lib/categories';
 import { changeSince, lowestPriceNote, type PriceChange, type PriceStats } from '@/lib/deals';
 import { reputationLabel, salesLabel, warrantyValue } from '@/lib/format';
 import { buyUrl } from '@/lib/outbound';
-import { priceDateLabel, priceState } from '@/lib/price-freshness';
+import { isManualPrice, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { domainLabel, OTHER_TYPE_LABEL } from '@/lib/product-types';
 import type { OfferInfo, Product } from '@/lib/types';
 
@@ -105,14 +105,19 @@ function toCompareOffer(product: Product, stats: PriceStats | null, now: number)
     };
   }
 
+  // Precio de hoy revisado a mano (lib/manual-price): el precio y el tachado
+  // valen; del vendedor, el envío y la garantía no se sabe nada.
+  const manual = isManualPrice(product);
+
   return {
     list_price: typeof list === 'number' && list > product.price ? list : null,
     checked_at: product.price_checked_at ?? null,
     free_shipping: info.free_shipping === true,
     is_full: info.is_full === true,
     // Las ventas son del vendedor, igual que en la ficha. Mercado Libre no las necesita.
-    seller:
-      info.sold_by_ml === true
+    seller: manual
+      ? ''
+      : info.sold_by_ml === true
         ? 'Mercado Libre'
         : `${info.official_store === true ? 'Tienda oficial' : reputationLabel(product.seller_reputation)}${sales}`,
     warranty: typeof info.warranty === 'string' && info.warranty.trim() ? warrantyValue(info.warranty) : null,

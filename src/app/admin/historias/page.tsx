@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { pieceKey } from '@/lib/social/piece-url';
-import { PRICE_REFRESH_MINUTES } from '@/lib/social/content-timing';
 import {
   STORY_LIFETIME_MS,
   STORY_REPOST_DROP,
@@ -14,7 +13,6 @@ import {
 } from '@/lib/social/stories';
 import { HISTORY_UNREAD_WARNING } from '@/lib/social/interest';
 import { readStoryAutoStatus, type StoryAutoStatus } from '@/lib/social/meta-story';
-import { NextRefresh } from './NextRefresh';
 import { StoryAutoControl } from './StoryAutoControl';
 import { StoryList } from './StoryList';
 import { waitingText } from './rules';
@@ -89,6 +87,17 @@ export default async function HistoriasPage() {
         </a>
       </div>
 
+      {/* Desde el 23-11-2026 Mercado Libre no entrega precios: las ofertas de esta lista salen de los que se revisan a mano. */}
+      <Link
+        href="/admin/precios"
+        className="mt-5 flex min-h-11 items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/5 px-4 py-3 text-sm text-fg transition hover:border-accent"
+      >
+        <span>
+          <strong>Precios de hoy:</strong> revisa a mano el precio de los productos más abiertos. Los que queden con
+          descuento o hayan bajado aparecen acá.
+        </span>
+        <ChevronRight size={18} className="shrink-0 text-accent" aria-hidden />
+      </Link>
       {/* El carrusel semanal vive dentro de Historias: también se sube a mano desde el teléfono. */}
       <Link
         href="/admin/historias/carrusel"
@@ -151,9 +160,13 @@ export default async function HistoriasPage() {
 
       {!error && (
         <p className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-fg">
-          <strong>Cuándo hay historias nuevas:</strong> la lista se calcula cada vez que tocas Actualizar. Los precios
-          se revisan cada {PRICE_REFRESH_MINUTES} minutos (la próxima revisión, cerca de las{' '}
-          <NextRefresh renderedAt={now.getTime()} />). {waitingText(waiting, days)}
+          <strong>Cuándo hay historias nuevas:</strong> la lista se calcula cada vez que tocas Actualizar, con los
+          productos cuyo precio se revisó en las últimas {Math.round(STORY_RULES.maxPriceAgeMs / 3_600_000)} horas.
+          Mientras Mercado Libre no le entregue precios al sitio, esos son los que revises a mano en{' '}
+          <Link href="/admin/precios" className="font-medium text-accent hover:underline">
+            Precios de hoy
+          </Link>
+          . {waitingText(waiting, days)}
         </p>
       )}
 
@@ -177,7 +190,11 @@ export default async function HistoriasPage() {
           una baja confirmada por el historial), con el precio revisado en las últimas{' '}
           {Math.round(STORY_RULES.maxPriceAgeMs / 3_600_000)} horas, y no haberse subido como historia en los últimos{' '}
           {days} días. Tampoco muestro las que le interesarían a poca gente ni las que hace poco costaban bastante menos.
-          Vuelve a mirar más tarde.
+          Para tener ofertas acá, revisa precios en{' '}
+          <Link href="/admin/precios" className="font-medium text-accent hover:underline">
+            Precios de hoy
+          </Link>
+          .
         </p>
       )}
 

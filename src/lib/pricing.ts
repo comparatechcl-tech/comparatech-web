@@ -80,8 +80,9 @@ export interface PriceObservation {
   ml_product_id: string;
   price: number;
   original_price: number | null;
-  seller_id: number;
-  winner_item_id: string;
+  /** null cuando el precio lo revisó una persona (lib/manual-price): no se sabe quién vende. */
+  seller_id: number | null;
+  winner_item_id: string | null;
   observed_at: string;
 }
 

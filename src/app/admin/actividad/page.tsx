@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { readAdminEvents, type AdminEventRow } from '@/lib/admin-audit';
+import { formatCLP } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,7 @@ const ACTIONS: { value: string; label: string }[] = [
   { value: 'config_afiliado', label: 'Configuración de afiliado' },
   { value: 'guardar_link', label: 'Links guardados' },
   { value: 'reverificar', label: 'Revisiones' },
+  { value: 'precio_manual', label: 'Precios revisados a mano' },
   { value: 'prueba_atribucion', label: 'Prueba de atribución' },
   { value: 'agregar_desde_ml', label: 'Agregados desde ML' },
   { value: 'aprobar', label: 'Aprobaciones' },
@@ -88,6 +90,13 @@ function describe(row: AdminEventRow): string {
     case 'reverificar': {
       const n = typeof after?.revisados === 'number' ? after.revisados : null;
       return n === null ? 'revisó productos en Mercado Libre' : `revisó ${plural(n, 'producto', 'productos')} en Mercado Libre`;
+    }
+    // Precios de hoy (/admin/precios): el precio que el dueño vio en la ficha, o que ya no se vende.
+    case 'precio_manual': {
+      const name = typeof after?.nombre === 'string' ? after.nombre : 'un producto';
+      if (after?.a_la_venta === false) return `anotó que ya no se vende ${name}`;
+      const price = typeof after?.precio === 'number' ? ` en ${formatCLP(after.precio)}` : '';
+      return `revisó a mano el precio de ${name}${price}`;
     }
     case 'guardar_link': {
       if (typeof after?.name === 'string') return `guardó el link de ${after.name}`;

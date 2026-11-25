@@ -337,7 +337,7 @@ function refreshHint(refresh: RefreshStatus | null, tone: Tone): string {
   const at = refresh?.lastAt ? ` (último intento: ${formatWhen(refresh.lastAt)})` : '';
   switch (refresh?.state) {
     case 'ml_cerro':
-      return `Mercado Libre cerró la consulta automática de precios el 23-11-2026 y su soporte confirmó que es a propósito. El sitio prueba una vez por hora por si la reabre${at}. No es una falla: no hay migraciones que correr.`;
+      return `Mercado Libre cerró la consulta automática de precios el 23-11-2026 y su soporte confirmó que es a propósito. El sitio prueba una vez por hora por si la reabre${at}. No es una falla: no hay migraciones que correr. Si tienes un rato, en la pestaña Precios puedes revisar a mano los productos más abiertos.`;
     case 'ml_rechaza':
       return `El refresco sí corre${at}, pero Mercado Libre está rechazando la consulta de precios en ${num(
         refresh.rejected

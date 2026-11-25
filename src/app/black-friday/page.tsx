@@ -17,7 +17,7 @@ import { itemListJsonLd } from '@/lib/category-listing';
 import { GUIDES, guidePath } from '@/lib/guides';
 import { MIN_DEAL_DISCOUNT } from '@/lib/deal-rank';
 import { formatCLP, formatFullDate } from '@/lib/format';
-import { latestPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
+import { commonPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { SITE_URL } from '@/lib/site';
 import { ProductGrid } from '@/components/product/ProductGrid';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
@@ -64,7 +64,9 @@ export default async function BlackFridayPage() {
   // ¿Hay precios revisados hoy? Si no (desde el 23-11-2026 Mercado Libre no
   // los entrega, ver lib/price-freshness), la página no promete ver qué bajó:
   // muestra cuánto costaba cada cosa en la última revisión, que es lo que hay.
-  const lastCheck = latestPriceCheck(catalog);
+  // La revisión que comparte casi todo el catálogo: unos pocos precios
+  // revisados hoy a mano no hacen "de hoy" los demás (commonPriceCheck).
+  const lastCheck = commonPriceCheck(catalog);
   const today = priceState(lastCheck, now) === 'hoy';
   const lastCheckDate = lastCheck ? formatFullDate(lastCheck) : '';
   // Del lunes 23 al lunes 30 de noviembre; fuera de esas fechas no lee nada.

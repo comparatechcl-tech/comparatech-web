@@ -231,15 +231,35 @@ describe('/ofertas', () => {
     for (const attr of attributes(html)) expect(attr).not.toMatch(AVOIDED);
   });
 
-  it('con menos de 4 populares no arma una sección a medias, y con ofertas ni los pide', async () => {
+  it('con menos de 4 populares no arma una sección a medias, y con varias ofertas ni los pide', async () => {
     vi.mocked(getRankedDeals).mockResolvedValue({ ranked: [], drops: {}, best: null });
     vi.mocked(getPopularProducts).mockResolvedValue([product(), product(), product()]);
     expect(text(renderToStaticMarkup(await OfertasPage()))).not.toContain('Los más populares');
 
     vi.mocked(getPopularProducts).mockClear();
+    const deals = Array.from({ length: 4 }, () => product({ price: 55_000, original_price: 100_000 }));
+    vi.mocked(getRankedDeals).mockResolvedValue({ ranked: deals, drops: {}, best: deals[0] });
+    const read = text(renderToStaticMarkup(await OfertasPage()));
+    expect(read).not.toContain('Los más populares');
+    expect(read).not.toContain('Ver las ofertas de hoy en Mercado Libre');
+    expect(vi.mocked(getPopularProducts)).not.toHaveBeenCalled();
+  });
+
+  it('con unas pocas ofertas (las de precios revisados a mano) van las ofertas, el botón y los populares sin repetir', async () => {
     const deal = product({ price: 55_000, original_price: 100_000 });
     vi.mocked(getRankedDeals).mockResolvedValue({ ranked: [deal], drops: {}, best: deal });
-    expect(text(renderToStaticMarkup(await OfertasPage()))).not.toContain('Los más populares');
-    expect(vi.mocked(getPopularProducts)).not.toHaveBeenCalled();
+    const others = Array.from({ length: 5 }, () => product({ original_price: null, price_checked_at: '2026-11-23T16:33:00Z' }));
+    // La oferta también es de las más abiertas: no sale dos veces.
+    vi.mocked(getPopularProducts).mockResolvedValue([deal, ...others]);
+    const html = renderToStaticMarkup(await OfertasPage());
+    const read = text(html);
+    expect(read).toContain('1 producto con 20% o más de descuento — llega a 45%.');
+    expect(read).toContain('Las demás ofertas de hoy están en Mercado Libre.');
+    expect(read).toContain('Ver las ofertas de hoy en Mercado Libre');
+    expect(read).toContain('Los más populares');
+    for (const p of others) expect(read).toContain(p.name);
+    expect(read.split(deal.name)).toHaveLength(2);
+    expect(vi.mocked(getPopularProducts)).toHaveBeenCalledWith(13);
+    expect(html).not.toMatch(AVOIDED);
   });
 });

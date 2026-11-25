@@ -57,7 +57,13 @@ export default async function OfertasPage() {
   // la página no queda en un texto y un botón: muestra los productos que más
   // se abren en Mercado Libre desde el sitio (lib/popular), como la portada.
   // Con menos de POPULAR_MIN, nada.
-  const popularFound = deals.length === 0 ? await getPopularProducts(POPULAR_LIMIT) : [];
+  // Lo mismo con unas pocas ofertas (las de los precios revisados a mano,
+  // lib/manual-price): la página no queda en dos tarjetas.
+  const fewDeals = deals.length < POPULAR_MIN;
+  const inDeals = new Set(deals.map((p) => p.id));
+  const popularFound = fewDeals
+    ? (await getPopularProducts(POPULAR_LIMIT + deals.length)).filter((p) => !inDeals.has(p.id)).slice(0, POPULAR_LIMIT)
+    : [];
   const popular = popularFound.length >= POPULAR_MIN ? popularFound : [];
 
   // Solo las categorías que hoy tienen ofertas, en el orden del menú.
@@ -127,6 +133,30 @@ export default async function OfertasPage() {
         )}
       </div>
 
+      {deals.length > 0 && (
+        <DealsBrowser
+          initial={dealsBatch(deals, drops, ALL_DEALS, 0)}
+          categories={categories}
+          hotCount={countHotDeals(deals)}
+          placement="ofertas"
+        />
+      )}
+
+      {/* Con unas pocas ofertas (las de precios revisados a mano), el resto está en Mercado Libre. */}
+      {deals.length > 0 && fewDeals && (
+        <div className="mt-8">
+          <p className="text-sm text-muted">Las demás ofertas de hoy están en Mercado Libre.</p>
+          <div className="mt-3">
+            <AffiliateButton
+              href={mlOffersUrl(affiliate)}
+              placement="ofertas-ml"
+              label="Ver las ofertas de hoy en Mercado Libre"
+              className="w-full sm:w-auto"
+            />
+          </div>
+        </div>
+      )}
+
       {popular.length > 0 && (
         <section className="mt-8">
           <h2 className="flex items-center gap-2 font-heading text-xl font-bold sm:text-2xl">
@@ -136,17 +166,8 @@ export default async function OfertasPage() {
           <p className="mb-4 mt-1 max-w-2xl text-sm text-muted">
             Los productos que más personas fueron a ver a Mercado Libre desde ComparaTech en los últimos 30 días.
           </p>
-          <ProductGrid products={popular} eagerImages={4} />
+          <ProductGrid products={popular} eagerImages={deals.length > 0 ? 0 : 4} />
         </section>
-      )}
-
-      {deals.length > 0 && (
-        <DealsBrowser
-          initial={dealsBatch(deals, drops, ALL_DEALS, 0)}
-          categories={categories}
-          hotCount={countHotDeals(deals)}
-          placement="ofertas"
-        />
       )}
     </div>
   );

@@ -32,7 +32,7 @@ import { domainLabel, indexableTypes, typePath, typeSlug } from '@/lib/category-
 import { modelOf, modelPath, versionColor, versionLabel } from '@/lib/models';
 import { getModelVersions } from '@/lib/queries/models';
 import { viewerItems } from '@/lib/photo-viewer';
-import { buyLabel, priceDateLabel, priceState } from '@/lib/price-freshness';
+import { buyLabel, isManualPrice, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { PhotoViewer } from '@/components/product/PhotoViewer';
 import type { Product } from '@/lib/types';
 
@@ -320,6 +320,9 @@ export default async function ProductoPage({
   const priceIs = priceState(product.price_checked_at);
   const today = priceIs === 'hoy';
   const cta = buyLabel(priceIs);
+  // Un precio de hoy revisado a mano (admin: Precios de hoy) no dice nada de
+  // la oferta: ni quién vende, ni envío, ni garantía. Eso no se muestra.
+  const offerKnown = today && !isManualPrice(product);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">
@@ -345,7 +348,7 @@ export default async function ProductoPage({
               </>
             )}
           </div>
-          {today && <TrustChips product={product} />}
+          {offerKnown && <TrustChips product={product} />}
           {today && (
             <PriceHistoryNote productId={product.id} price={product.price} listPrice={product.original_price} createdAt={product.created_at} />
           )}
@@ -374,8 +377,8 @@ export default async function ProductoPage({
 
       <div className="mt-10">
         <h2 className="mb-3 font-heading text-lg font-semibold">Especificaciones</h2>
-        {/* El vendedor es el de la última revisión: si no fue hoy, no se muestra. */}
-        <ProductSpecsTable product={product} hideSeller={!today} />
+        {/* El vendedor es el de la última revisión automática: si no fue hoy, no se muestra. */}
+        <ProductSpecsTable product={product} hideSeller={!offerKnown} />
         {/* Quien lee la tabla hasta el final está decidiendo: el botón
             tiene que estar ahí, no arriba. */}
         <div id={SPECS_CTA_ID} className="mt-5 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">

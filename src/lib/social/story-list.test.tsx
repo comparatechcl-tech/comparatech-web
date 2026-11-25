@@ -640,22 +640,38 @@ describe('/admin/historias: cuándo hay historias nuevas y cómo se marca', () =
     }
   }
 
-  it('dice la hora de la próxima revisión de precios, calculada y en hora de Chile', async () => {
+  /*
+   * Desde el 23-11-2026 Mercado Libre no entrega precios al sitio: la página
+   * ya no promete una "próxima revisión" a una hora. Dice de dónde salen las
+   * ofertas (los precios revisados en las últimas 6 horas, hoy los que el
+   * dueño revisa a mano) y lleva a Precios de hoy.
+   */
+  it('dice de dónde salen las historias, sin prometer una próxima revisión automática', async () => {
     vi.mocked(readStoryPicks).mockResolvedValueOnce(picks([story()], 3));
-    // 10:10 de Chile (verano): la próxima revisión es la de las 10:30.
     const page = await pageAt('2026-10-17T13:10:00Z');
+    // La cuenta de la próxima pasada sigue bien hecha (la usa Videos), aunque esta página ya no la muestre.
     expect(chileTime(nextPriceRefresh(new Date('2026-10-17T13:10:00Z')))).toBe('10:30');
     expect(page).toContain(
-      'Cuándo hay historias nuevas: la lista se calcula cada vez que tocas Actualizar. Los precios se revisan cada 30 minutos (la próxima revisión, cerca de las 10:30).'
+      'Cuándo hay historias nuevas: la lista se calcula cada vez que tocas Actualizar, con los productos cuyo precio se revisó en las últimas 6 horas.'
     );
+    expect(page).toContain('Mientras Mercado Libre no le entregue precios al sitio, esos son los que revises a mano en');
+    expect(page).toContain('Precios de hoy');
+    expect(page).not.toContain('Los precios se revisan cada');
+    expect(page).not.toContain('la próxima revisión');
     expect(page).toContain('Hay 3 ofertas más esperando: marca las que ya subiste y toca Actualizar para verlas.');
   });
 
-  it('en invierno la hora también sale bien (Chile a UTC-4)', async () => {
+  it('con una sola oferta esperando lo dice en singular', async () => {
     vi.mocked(readStoryPicks).mockResolvedValueOnce(picks([story()], 1));
     const page = await pageAt('2026-06-17T15:45:00Z');
-    expect(page).toContain('la próxima revisión, cerca de las 12:00).');
     expect(page).toContain('Hay 1 oferta más esperando: marca las que ya subiste y toca Actualizar para verla.');
+  });
+
+  it('sin ofertas manda a revisar precios a mano', async () => {
+    vi.mocked(readStoryPicks).mockResolvedValueOnce(picks([], 0));
+    const page = await pageAt('2026-11-24T21:30:00Z');
+    expect(page).toContain('Ahora no hay ofertas para mostrar');
+    expect(page).toContain('Para tener ofertas acá, revisa precios en');
   });
 
   it('sin más ofertas esperando lo dice de otra forma', async () => {

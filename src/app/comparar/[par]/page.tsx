@@ -17,7 +17,7 @@ import { modelPath, versionCapacity, type ModelDef } from '@/lib/models';
 import { lowestSeries } from '@/lib/model-history';
 import { summarizeHistory, type PriceHistorySummary } from '@/lib/price-chart';
 import { formatCLP, formatDayMonth, formatFullDate } from '@/lib/format';
-import { latestPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
+import { commonPriceCheck, priceDateLabel, priceState } from '@/lib/price-freshness';
 import { truncateAtWord } from '@/lib/text';
 import { dropsById } from '@/lib/deal-rank';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
@@ -70,7 +70,9 @@ const fromPrice = (onSale: Product[]) => (onSale.length > 0 ? Math.min(...onSale
  * sabe, y la página dice "el 23/11" donde decía "hoy".
  */
 function priceDates(versions: { price_checked_at?: string | null }[], now: number) {
-  const lastCheck = latestPriceCheck(versions);
+  // La fecha que comparten las versiones (la más antigua si son pocas): una
+  // sola revisada hoy a mano no hace "de hoy" el precio de las demás.
+  const lastCheck = commonPriceCheck(versions);
   if (!lastCheck || priceState(lastCheck, now) === 'hoy') return { fullDate: null, shortDate: null, asOf: now };
   return { fullDate: formatFullDate(lastCheck), shortDate: priceDateLabel(lastCheck), asOf: Date.parse(lastCheck) };
 }

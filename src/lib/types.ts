@@ -20,6 +20,13 @@ export interface OfferInfo {
   offers_count: number | null;
   /** ¿El ganador es además el precio más bajo? null si no se pudo saber. */
   is_lowest: boolean | null;
+  /**
+   * 'manual': el precio lo revisó una persona en el admin mirando la ficha
+   * (lib/manual-price). De la oferta no se sabe nada más: lo demás va en
+   * false o null, y el sitio no muestra vendedor, envío ni garantía. Sin
+   * valor, lo trajo la revisión automática.
+   */
+  source?: 'manual';
 }
 
 export interface Product {

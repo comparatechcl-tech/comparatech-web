@@ -45,6 +45,21 @@ export function priceState(checkedAt: string | null | undefined, now: number = D
 }
 
 /**
+ * La marca que deja en `offer_info` un precio revisado a mano en el admin
+ * (app/admin/precios, lib/manual-price): el dueño miró la ficha en Mercado
+ * Libre y confirmó o escribió el precio. De la oferta no se sabe nada más
+ * (quién vende, el envío, la garantía), así que nada de eso se muestra. Si
+ * la revisión automática vuelve, pisa offer_info y la marca desaparece sola.
+ */
+export const MANUAL_PRICE_SOURCE = 'manual';
+
+/** ¿El precio de este producto lo revisó una persona, y no la revisión automática? */
+export function isManualPrice(product: { offer_info?: unknown }): boolean {
+  const info = product.offer_info;
+  return !!info && typeof info === 'object' && (info as { source?: unknown }).source === MANUAL_PRICE_SOURCE;
+}
+
+/**
  * ¿El precio se revisó hace `maxAgeMs` o menos? Para las reglas que exigen
  * algo más reciente que "hoy": una historia o un video se suben con el precio
  * escrito, y ahí el plazo es de horas (lib/social: maxPriceAgeMs).
@@ -92,11 +107,40 @@ export function latestPriceCheck(products: { price_checked_at?: string | null }[
 }
 
 /**
- * ¿Hay precios revisados hoy en esta lista? Sin ninguno, una página no puede
- * hablar de "hoy": ni ofertas del día, ni bajas, ni mediciones.
+ * Qué parte de un conjunto puede estar más atrasada sin cambiar la fecha del
+ * conjunto: un producto que falla siempre en Mercado Libre no puede hacer que
+ * una categoría entera diga "revisado el mes pasado".
+ */
+const STALE_TOLERANCE = 0.1;
+
+/**
+ * De cuándo son los precios de un conjunto (una categoría, las versiones de
+ * un modelo, el catálogo): la revisión que comparte al menos el 90% de los
+ * productos con fecha. null si ninguno tiene una fecha válida.
+ *
+ * La revisión automática los mira todos juntos, y ahí da lo mismo cuál se
+ * tome. Pero con unos pocos precios revisados a mano (lib/manual-price) el
+ * más reciente ya no dice de cuándo es el conjunto: una categoría con 3 de
+ * 200 precios de hoy no puede decir "hoy" de las 200. Por eso se toma una de
+ * las más antiguas (el decil más viejo; con menos de 11 productos, la más
+ * antigua): el conjunto es "de hoy" solo si casi todos lo son.
+ */
+export function commonPriceCheck(products: { price_checked_at?: string | null }[]): string | null {
+  const checks = products
+    .map((p) => ({ at: p.price_checked_at ?? null, ms: p.price_checked_at ? Date.parse(p.price_checked_at) : NaN }))
+    .filter((c): c is { at: string; ms: number } => c.at !== null && Number.isFinite(c.ms))
+    .sort((a, b) => a.ms - b.ms);
+  if (checks.length === 0) return null;
+  return checks[Math.floor((checks.length - 1) * STALE_TOLERANCE)].at;
+}
+
+/**
+ * ¿Los precios de esta lista son de hoy? Solo si casi todos se revisaron
+ * hoy (commonPriceCheck): sin eso una página no puede hablar de "hoy" para
+ * la lista entera, ni de ofertas del día, ni de bajas, ni de mediciones.
  */
 export function hasPricesToday(products: { price_checked_at?: string | null }[], now: number = Date.now()): boolean {
-  return priceState(latestPriceCheck(products), now) === 'hoy';
+  return priceState(commonPriceCheck(products), now) === 'hoy';
 }
 
 /** "23/11": el día de la última revisión, para acompañar un precio de referencia. */
