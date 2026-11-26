@@ -80,19 +80,26 @@ export async function dispatchVideoBuild(
   }
   if (res.ok) return { ok: true };
 
-  // GitHub responde 404 (y no 403) cuando la llave no alcanza a ver el repositorio o el workflow.
-  if (res.status === 401 || res.status === 403 || res.status === 404) {
-    return {
-      ok: false,
-      reason: 'rechazada',
-      detail: `GitHub no aceptó la llave (respondió ${res.status}): venció, se borró o le falta el permiso "Actions" sobre este repositorio.`,
-    };
-  }
+  // Lo que dice GitHub ("Bad credentials", "Resource not accessible by personal
+  // access token"…). Es un texto fijo suyo: no trae la llave.
   let message = '';
   try {
     message = String(((await res.json()) as { message?: unknown }).message ?? '').slice(0, 200);
   } catch {
     // Sin cuerpo legible: basta con el código.
   }
-  return { ok: false, reason: 'error', detail: `GitHub respondió ${res.status}${message ? `: ${message}` : ''}` };
+  const said = `GitHub respondió ${res.status}${message ? `: ${message}` : ''}`;
+
+  if (res.status === 401 || res.status === 403 || res.status === 404) {
+    return { ok: false, reason: 'rechazada', detail: `GitHub no aceptó la llave. ${KEY_HINTS[res.status]} (${said}.)` };
+  }
+  return { ok: false, reason: 'error', detail: said };
 }
+
+/** Qué revisar en la llave según lo que respondió GitHub. */
+const KEY_HINTS: Record<number, string> = {
+  401: 'La llave no es válida: quedó mal copiada, venció o se borró.',
+  403: 'Le falta el permiso: en la llave, "Repository permissions → Actions" tiene que decir "Read and write".',
+  // GitHub responde 404, y no 403, cuando la llave no alcanza a ver el repositorio.
+  404: 'No alcanza a ver este repositorio: en la llave, "Repository access" tiene que tener elegido comparatech-web.',
+};

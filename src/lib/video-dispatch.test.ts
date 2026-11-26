@@ -56,14 +56,24 @@ describe('dispatchVideoBuild', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('una llave vencida, borrada o sin permiso se explica y no se reintenta', async () => {
-    for (const status of [401, 403, 404]) {
-      const fetchImpl = vi.fn(async () => new Response('{"message":"Bad credentials"}', { status }));
+  it('una llave vencida, sin permiso o sin acceso al repositorio se explica, con lo que dijo GitHub, y no se reintenta', async () => {
+    const cases: Array<[number, string, string]> = [
+      [401, 'Bad credentials', 'no es válida'],
+      [403, 'Resource not accessible by personal access token', 'Read and write'],
+      [404, 'Not Found', 'Repository access'],
+    ];
+    for (const [status, message, hint] of cases) {
+      const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ message }), { status }));
       const result = await dispatchVideoBuild({ env: ENV, fetchImpl });
       expect(result).toMatchObject({ ok: false, reason: 'rechazada' });
-      expect(!result.ok && result.detail).toContain(String(status));
+      const detail = result.ok ? '' : result.detail;
+      expect(detail).toContain(hint);
+      expect(detail).toContain(`GitHub respondió ${status}: ${message}`);
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     }
+    // Sin un cuerpo legible igual se explica.
+    const bare = vi.fn(async () => new Response('', { status: 403 }));
+    await expect(dispatchVideoBuild({ env: ENV, fetchImpl: bare })).resolves.toMatchObject({ ok: false, reason: 'rechazada' });
   });
 
   it('otro error de GitHub trae su mensaje; una caída de red, el motivo', async () => {
