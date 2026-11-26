@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { Breadcrumbs } from '@/components/product/Breadcrumbs';
+import { getStoreSettings } from '@/lib/store-settings';
 
 export const metadata: Metadata = {
   title: 'Cómo funciona',
@@ -19,7 +20,9 @@ export const metadata: Metadata = {
  * cuándo se dice "Bajó"); si eso cambia, se cambia acá también. Nada acá
  * puede prometer que alguien revise o pruebe los productos.
  */
-export default function ComoFuncionaPage() {
+export default async function ComoFuncionaPage() {
+  // "Otras tiendas" se explica solo si las fichas las muestran (el dueño lo enciende en /admin/tiendas).
+  const { show: otherStores } = await getStoreSettings();
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
       <Breadcrumbs items={[{ name: 'Inicio', href: '/' }, { name: 'Cómo funciona' }]} />
@@ -52,6 +55,23 @@ export default function ComoFuncionaPage() {
           y el precio más bajo y más alto que registramos.
         </p>
       </Section>
+
+      {otherStores && (
+        <Section id="otras-tiendas" title="Otras tiendas">
+          <p>
+            En algunas fichas mostramos también el precio que otras tiendas publican en su sitio para el mismo producto,
+            con el día en que lo revisamos. No incluye descuentos por medio de pago ni el envío.
+          </p>
+          <p>
+            Lo lee nuestro programa (ComparaTechBot), a lo más dos veces al día y solo en tiendas que lo permiten. ¿Tienes
+            una tienda y prefieres que no la leamos?{' '}
+            <Link href="/contacto" className="text-accent hover:underline">
+              Escríbenos
+            </Link>{' '}
+            y dejamos de hacerlo.
+          </p>
+        </Section>
+      )}
 
       <Section id="etiquetas" title="Qué significa cada etiqueta">
         <dl className="space-y-3">

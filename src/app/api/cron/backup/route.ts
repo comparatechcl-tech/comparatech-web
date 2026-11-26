@@ -76,7 +76,10 @@ async function pruneOldClicks(admin: NonNullable<ReturnType<typeof getSupabaseAd
     .delete({ count: 'exact' })
     .lt('created_at', cutoff);
   if (error) return isMissingSchemaError(error) ? 'falta la migración 0015' : error.message;
-  return count ?? 0;
+  // Los clics hacia otras tiendas (store_clicks, migración 0022) siguen la
+  // misma regla. Sin la tabla no hay nada que borrar.
+  const stores = await admin.from('store_clicks').delete({ count: 'exact' }).lt('created_at', cutoff);
+  return (count ?? 0) + (stores.error ? 0 : (stores.count ?? 0));
 }
 
 export async function GET(req: NextRequest) {

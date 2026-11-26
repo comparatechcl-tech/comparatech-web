@@ -9,6 +9,8 @@ import {
   startOfChileDay,
 } from '@/lib/clicks';
 import { MAX_CLICKS_PER_CLIENT_PER_DAY, clickClientKey } from '@/lib/click-client-key';
+import { MAX_STORE_CLICKS_PER_DAY, parseStoreClickBody, type StoreClickBody } from '@/lib/store-clicks';
+import { getStore } from '@/lib/stores';
 
 /**
  * Registro de un clic hacia Mercado Libre (lo manda AffiliateButton con
@@ -66,6 +68,50 @@ async function readLimited(req: NextRequest, maxBytes: number): Promise<string |
   return new TextDecoder().decode(bytes);
 }
 
+/**
+ * Anota un clic hacia otra tienda (store_clicks, migración 0022), con los
+ * mismos frenos que los de Mercado Libre: un tope por cliente y uno por día.
+ * Sin la tabla, o si la tienda no es de la lista, no hace nada.
+ */
+async function recordStoreClick(req: NextRequest, click: StoreClickBody): Promise<void> {
+  if (!getStore(click.store)) return;
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+
+  const now = new Date();
+  const dayStart = startOfChileDay(now).toISOString();
+  const clientKey = clickClientKey(req.headers, now);
+
+  if (clientKey) {
+    const { count: mine, error: mineError } = await admin
+      .from('store_clicks')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_key', clientKey)
+      .gte('created_at', dayStart);
+    if (!mineError && (mine ?? 0) >= MAX_CLICKS_PER_CLIENT_PER_DAY) return;
+  }
+
+  const { count, error: countError } = await admin
+    .from('store_clicks')
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', dayStart);
+  // Un conteo head:true no trae código de error: sin la tabla (o con la base
+  // caída) no se inserta nada.
+  if (countError || (count ?? 0) >= MAX_STORE_CLICKS_PER_DAY) return;
+
+  const { error } = await admin.from('store_clicks').insert({
+    product_id: click.productId,
+    store: click.store,
+    src: click.src,
+    is_mobile: click.mobile,
+    client_key: clientKey,
+  });
+  // 23503: el producto ya no existe.
+  if (error && !isMissingSchemaError(error) && error.code !== '23503') {
+    console.error('[api/e] clic a tienda:', error.message);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (isBotUserAgent(req.headers.get('user-agent') ?? '')) return noContent();
@@ -78,6 +124,14 @@ export async function POST(req: NextRequest) {
 
     const text = await readLimited(req, MAX_CLICK_BODY_BYTES);
     if (text === null) return noContent();
+
+    // Un clic hacia otra tienda (trae `t`) va a su propia tabla: no se mezcla
+    // con los clics hacia Mercado Libre.
+    const storeClick = parseStoreClickBody(text);
+    if (storeClick) {
+      await recordStoreClick(req, storeClick);
+      return noContent();
+    }
 
     const click = parseClickBody(text);
     if (!click) return noContent();

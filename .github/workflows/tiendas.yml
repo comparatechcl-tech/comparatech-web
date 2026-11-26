@@ -1,0 +1,53 @@
+name: Precios de otras tiendas
+
+# Vuelve a leer el precio de las fichas de otras tiendas (Paris, MacOnline)
+# enlazadas a productos del sitio: llama a /api/cron/tiendas. No le pide nada
+# a Mercado Libre.
+#
+# Corre cada 2 horas, pero cada ficha se lee solo cuando le toca (dos veces
+# al día): una pasada de más no le pide nada a ninguna tienda. GitHub atrasa
+# o salta las ejecuciones programadas; por eso son varias al día.
+#
+# Requiere el secreto CRON_SECRET (Settings → Secrets and variables →
+# Actions), el mismo de "Refrescar precios". La respuesta no trae secretos:
+# es el resumen de la pasada (cuántas fichas leyó y cuántas cambiaron).
+
+on:
+  schedule:
+    # Al minuto 11: lejos de la hora en punto, del 23 de "Refrescar precios"
+    # y del 47 del canal.
+    - cron: '11 */2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: precios-otras-tiendas
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  tiendas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Llamar al endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://www.comparatech.cl' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::Falta el secreto CRON_SECRET en Settings → Secrets and variables → Actions"
+            exit 0
+          fi
+          # Un solo intento: si la pasada falla o se corta, la siguiente (en 2
+          # horas) retoma lo que quedó. Repetirla acá le pediría de nuevo a
+          # las tiendas.
+          code=$(curl -sS -o out.json -w '%{http_code}' --max-time 200 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$SITE_URL/api/cron/tiendas") || code=000
+          cat out.json 2>/dev/null || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::La pasada de las tiendas respondió HTTP $code"
+            exit 1
+          fi

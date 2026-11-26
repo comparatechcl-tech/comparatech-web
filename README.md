@@ -39,6 +39,7 @@ Cada push a `main` se publica solo en producción.
 | Vercel Cron (`vercel.json`) | `/api/cron/prospect`, `/api/cron/refresh-prices`, `/api/cron/social-telegram` y `/api/cron/backup` | Una vez al día cada uno (el respaldo, los lunes). Hobby no permite más. |
 | GitHub Actions (`.github/workflows/refresh-prices.yml`) | `/api/cron/refresh-prices` | Respaldo, y para lanzarlo a mano desde Actions. |
 | GitHub Actions (`.github/workflows/reels.yml`) | `/api/social/videos/plan` | Arma los videos del día con ffmpeg (`scripts/reels/generar.mjs`) y los sube a Supabase Storage. |
+| GitHub Actions (`.github/workflows/tiendas.yml`) | `/api/cron/tiendas` | Cada 2 horas. Vuelve a leer el precio de las fichas de otras tiendas enlazadas en el admin; cada ficha se lee dos veces al día (`src/lib/store-sync.ts`). No le pide nada a Mercado Libre. |
 
 Todos se identifican con `Authorization: Bearer <CRON_SECRET>`. El secreto
 tiene que ser el mismo en los tres lugares: variable de Vercel, secreto
@@ -132,6 +133,11 @@ verificarla en el servidor. Secciones:
   que sobran (en pausa hace días, poca comisión, colores repetidos o lo
   recién aprobado en bloque): dejan de revisarse cada 30 minutos y se
   reponen desde Productos → Eliminados.
+- **Tiendas**: enlazar un producto con su ficha en otra tienda (Paris,
+  MacOnline) para mostrar ese precio en la ficha del sitio, junto al de
+  Mercado Libre y con su fecha. Solo tiendas que dejan leer sus páginas
+  (`src/lib/stores.ts`); el precio se vuelve a leer solo. El bloque público
+  se enciende y se apaga ahí mismo.
 - **Historias** y **Videos**: lo que hay para subir hoy a las redes.
 - **Problemas**: productos que salieron del sitio y por qué.
 - **Métricas**: clics hacia Mercado Libre y los datos de la Central de
@@ -189,6 +195,9 @@ después publicar, o publicar y aplicarla apenas se pueda.
   6. `0017_contenido.sql` — contenido para redes y Telegram.
   7. `0018_operacion.sql` — historial de los crons (`cron_runs`) y datos
      extra de la prospección.
+- `0022_otras_tiendas.sql` (del 26-11-2026): precios de otras tiendas (`store_offers`)
+  y sus clics (`store_clicks`). Sin ella, `/admin/tiendas` avisa que
+  falta y el sitio sigue igual.
 
 ## Desarrollo local
 

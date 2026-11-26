@@ -34,6 +34,8 @@ import { getModelVersions } from '@/lib/queries/models';
 import { viewerItems } from '@/lib/photo-viewer';
 import { buyLabel, priceDateLabel, priceOnlyKnown, priceState } from '@/lib/price-freshness';
 import { PhotoViewer } from '@/components/product/PhotoViewer';
+import { StoreOffers } from '@/components/product/StoreOffers';
+import { getStoreOffers } from '@/lib/queries/store-offers';
 import type { Product } from '@/lib/types';
 
 /**
@@ -201,10 +203,12 @@ export default async function ProductoPage({
   const product = await loadProduct(slug);
   if (!product) notFound();
 
-  const [variants, alternatives, catalog] = await Promise.all([
+  const [variants, alternatives, catalog, storeOffers] = await Promise.all([
     getSiblingVariants(product),
     getAlternatives(product, 6),
     getCatalogProducts(),
+    // El precio del mismo producto en otras tiendas. Vacío mientras el dueño no lo encienda en /admin/tiendas.
+    getStoreOffers(product.id),
   ]);
 
   const categoryName = categoryNameOf(product);
@@ -293,6 +297,8 @@ export default async function ProductoPage({
           </div>
         </div>
 
+        <StoreOffers offers={storeOffers} productId={product.id} />
+
         <ProductAlternatives alternatives={alternatives} title="Alternativas disponibles" highlight />
 
         <VariantLinks variants={variantLinks} />
@@ -374,6 +380,8 @@ export default async function ProductoPage({
 
       {/* Lo que el sitio aporta sobre lo que muestra Mercado Libre: cómo se
           movió el precio. Va antes de las specs, que son las de ML. */}
+      <StoreOffers offers={storeOffers} productId={product.id} />
+
       <PriceHistory productId={product.id} name={short} price={product.price} checkedAt={product.price_checked_at} />
 
       <div className="mt-10">

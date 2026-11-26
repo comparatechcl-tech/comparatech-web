@@ -17,6 +17,10 @@ const ACTIONS: { value: string; label: string }[] = [
   { value: 'precio_manual', label: 'Precios revisados a mano' },
   { value: 'precio_deshacer', label: 'Precios deshechos' },
   { value: 'precio_canal', label: 'Precios del canal de afiliados' },
+  { value: 'tienda_enlazar', label: 'Otras tiendas enlazadas' },
+  { value: 'tienda_quitar', label: 'Otras tiendas quitadas' },
+  { value: 'tienda_pausar', label: 'Otras tiendas en pausa' },
+  { value: 'tiendas_mostrar', label: 'Otras tiendas: mostrar en el sitio' },
   { value: 'prueba_atribucion', label: 'Prueba de atribución' },
   { value: 'agregar_desde_ml', label: 'Agregados desde ML' },
   { value: 'aprobar', label: 'Aprobaciones' },
@@ -112,6 +116,26 @@ function describe(row: AdminEventRow): string {
       const price = typeof after?.precio === 'number' ? ` en ${formatCLP(after.precio)}` : '';
       return `anotó el precio que Mercado Libre publicó de ${name}${price}`;
     }
+    // Otras tiendas (/admin/tiendas): la ficha de un producto en Paris, MacOnline…
+    case 'tienda_enlazar': {
+      const name = typeof after?.nombre === 'string' ? after.nombre : 'un producto';
+      const store = typeof after?.tienda === 'string' ? after.tienda : 'otra tienda';
+      const price = typeof after?.precio === 'number' ? ` (${formatCLP(after.precio)})` : '';
+      return `enlazó ${name} con su ficha en ${store}${price}`;
+    }
+    case 'tienda_quitar': {
+      const before = asRecord(row.before);
+      const name = typeof before?.nombre === 'string' ? before.nombre : 'un producto';
+      const store = typeof before?.tienda === 'string' ? before.tienda : 'otra tienda';
+      return `quitó de ${name} la ficha de ${store}`;
+    }
+    case 'tienda_pausar': {
+      const name = typeof after?.nombre === 'string' ? after.nombre : 'un producto';
+      const store = typeof after?.tienda === 'string' ? after.tienda : 'otra tienda';
+      return after?.pausada === false ? `reanudó la ficha de ${store} de ${name}` : `pausó la ficha de ${store} de ${name}`;
+    }
+    case 'tiendas_mostrar':
+      return after?.mostrar === true ? 'encendió los precios de otras tiendas en el sitio' : 'apagó los precios de otras tiendas en el sitio';
     case 'guardar_link': {
       if (typeof after?.name === 'string') return `guardó el link de ${after.name}`;
       const n = after ? Object.keys(after).length : 0;

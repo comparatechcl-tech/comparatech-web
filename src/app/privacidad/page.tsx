@@ -30,8 +30,8 @@ export default function PrivacidadPage() {
         <h2 className="pt-2 font-heading text-lg font-semibold text-fg">Qué registramos</h2>
         <ul className="list-disc space-y-2 pl-5">
           <li>
-            <strong className="text-fg">Clics hacia Mercado Libre.</strong> Cuando tocas un botón que lleva a
-            Mercado Libre guardamos qué producto fue, desde qué parte del sitio (portada, ofertas, la ficha, etc.), el
+            <strong className="text-fg">Clics hacia Mercado Libre y otras tiendas.</strong> Cuando tocas un botón que lleva a
+            Mercado Libre o a otra tienda guardamos qué producto fue, desde qué parte del sitio (portada, ofertas, la ficha, etc.), el
             tipo de link, si llegaste desde alguna red social o campaña (por ejemplo, Telegram) y si la pantalla era
             de celular. No guardamos tu IP ni tu navegador. Para frenar a quien infle los clics con un programa,
             guardamos además un código que se calcula a partir de esos datos, cambia cada día y no permite volver a

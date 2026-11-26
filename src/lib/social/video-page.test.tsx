@@ -730,6 +730,7 @@ describe('la pestaña Videos', () => {
       'Candidatos',
       'Productos',
       'Precios',
+      'Tiendas',
       'Historias',
       'Videos',
       'Problemas',
