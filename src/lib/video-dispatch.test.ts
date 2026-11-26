@@ -38,6 +38,13 @@ describe('dispatchVideoBuild', () => {
     expect(headers['user-agent']).toBeTruthy();
   });
 
+  it('en seco pide la pasada que no arma ni sube nada', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    await expect(dispatchVideoBuild({ env: ENV, fetchImpl, dry: true })).resolves.toEqual({ ok: true });
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ ref: 'main', inputs: { seco: 'true' } });
+  });
+
   it('cualquier respuesta 2xx es un pedido aceptado', async () => {
     const fetchImpl = vi.fn(async () => new Response('{"workflow_run_id":1}', { status: 200 }));
     await expect(dispatchVideoBuild({ env: ENV, fetchImpl })).resolves.toEqual({ ok: true });

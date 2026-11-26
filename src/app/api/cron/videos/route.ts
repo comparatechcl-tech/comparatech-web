@@ -4,7 +4,7 @@ import { isCronAuthorized } from '@/lib/cron-auth';
 import { startCronRun } from '@/lib/cron-runs';
 import { isProductionRuntime } from '@/lib/runtime-env';
 import { MAX_REQUESTS, VIDEOS_JOB, recentBuildRequests, requestVideoBuild } from '@/lib/video-build';
-import { videoDispatchToken } from '@/lib/video-dispatch';
+import { dispatchVideoBuild, videoDispatchToken } from '@/lib/video-dispatch';
 
 /**
  * Mira si hay videos por armar y, si los hay, le pide a GitHub que corra la
@@ -37,6 +37,17 @@ export async function GET(req: NextRequest) {
   // Sin la llave no hay a quién pedirle: no se anota una pasada vacía cada media hora.
   if (!videoDispatchToken()) {
     return NextResponse.json({ ok: true, omitida: 'Falta la llave de GitHub (GITHUB_VIDEOS_TOKEN): los videos siguen con el horario de GitHub.' });
+  }
+
+  // ?probar=1: le pide a GitHub una pasada en seco (no arma ni sube nada), para
+  // saber si la llave funciona sin esperar a que haya un video por armar. No
+  // se anota en la bitácora: no es una pasada de verdad.
+  if (req.nextUrl.searchParams.get('probar') === '1') {
+    const result = await dispatchVideoBuild({ dry: true });
+    return NextResponse.json(
+      result.ok ? { ok: true, prueba_de_llave: 'GitHub aceptó el pedido de una pasada en seco.' } : { ok: false, motivo: result.reason, detalle: result.detail },
+      { status: result.ok ? 200 : 502 }
+    );
   }
 
   // Cada pasada queda anotada: así /admin/videos sabe que la revisión automática está corriendo.

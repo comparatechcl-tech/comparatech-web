@@ -46,7 +46,15 @@ export function videoDispatchToken(env: Record<string, string | undefined> = pro
 
 /** Le pide a GitHub que corra ahora la pasada de los videos. Nunca lanza y nunca reintenta. */
 export async function dispatchVideoBuild(
-  options: { env?: Record<string, string | undefined>; fetchImpl?: Fetch } = {}
+  options: {
+    env?: Record<string, string | undefined>;
+    fetchImpl?: Fetch;
+    /**
+     * Pasada en seco (la opción `seco` del workflow): GitHub corre la pasada,
+     * pero no arma ni sube nada. Sirve para probar que la llave funciona.
+     */
+    dry?: boolean;
+  } = {}
 ): Promise<DispatchResult> {
   const token = videoDispatchToken(options.env);
   if (!token) return { ok: false, reason: 'sin_llave', detail: 'Falta la llave de GitHub (variable GITHUB_VIDEOS_TOKEN en Railway).' };
@@ -62,7 +70,8 @@ export async function dispatchVideoBuild(
         'user-agent': 'comparatech-web',
         'x-github-api-version': '2022-11-28',
       },
-      body: JSON.stringify({ ref: BRANCH }),
+      // Los valores de `inputs` van como texto: así los recibe la API de GitHub.
+      body: JSON.stringify(options.dry ? { ref: BRANCH, inputs: { seco: 'true' } } : { ref: BRANCH }),
       cache: 'no-store',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
