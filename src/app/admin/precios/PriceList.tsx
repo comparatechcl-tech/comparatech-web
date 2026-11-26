@@ -63,7 +63,8 @@ function amount(text: string): number {
 
 function PriceCard({ item, locked, onDone }: { item: PriceItem; locked: boolean; onDone: () => void }) {
   const router = useRouter();
-  const [price, setPrice] = useState(String(item.price));
+  // Parte vacío a propósito: con el precio guardado ya escrito, el de hoy terminaba en el cuadro del tachado.
+  const [price, setPrice] = useState('');
   const [list, setList] = useState('');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
@@ -119,7 +120,7 @@ function PriceCard({ item, locked, onDone }: { item: PriceItem; locked: boolean;
       try {
         const res = await undoManualPrice(item.id);
         if (res.ok) {
-          setPrice(String(res.price));
+          setPrice('');
           setList('');
           setUndoable(false);
           setStatus({
@@ -168,8 +169,9 @@ function PriceCard({ item, locked, onDone }: { item: PriceItem; locked: boolean;
 
       {!done && (
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs text-muted">
-            Precio de hoy (el número grande de la ficha)
+          <div>
+            <label className="block text-xs text-muted">
+              Precio de hoy (el número grande de la ficha)
             <input
               type="text"
               inputMode="numeric"
@@ -177,9 +179,19 @@ function PriceCard({ item, locked, onDone }: { item: PriceItem; locked: boolean;
               value={price}
               onChange={(e) => setPrice(e.target.value)}
               className={`${INPUT} mt-1`}
+              placeholder="Escríbelo aquí"
               aria-label={`Precio de hoy de ${item.name}`}
             />
-          </label>
+            </label>
+            {/* Fuera de la etiqueta: tocarlo no debe abrir el teclado. */}
+            <button
+              type="button"
+              onClick={() => setPrice(String(item.price))}
+              className="mt-1.5 inline-flex min-h-9 items-center rounded-md border border-border px-3 text-xs font-medium text-fg hover:border-accent"
+            >
+              Sigue igual: {formatCLP(item.price)}
+            </button>
+          </div>
           <label className="block text-xs text-muted">
             Precio tachado (el gris sobre el precio; vacío si no hay)
             <input
@@ -260,7 +272,7 @@ function PriceCard({ item, locked, onDone }: { item: PriceItem; locked: boolean;
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={busy || swapped}
+            disabled={busy || swapped || amount(price) === 0}
             onClick={() => save(false)}
             className={`${BUTTON} flex-1 bg-accent text-ink hover:bg-accent/90 sm:flex-none`}
           >

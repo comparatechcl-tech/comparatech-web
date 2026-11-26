@@ -136,7 +136,8 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
           clic.
         </li>
         <li>
-          Si el precio es el mismo, toca <strong>Guardar precio de hoy</strong>. Si cambió, corrígelo antes de guardar.
+          Escribe en el primer cuadro el precio que muestra la ficha (el número grande). Si es el mismo que está
+          guardado, toca <strong>Sigue igual</strong>. Después, <strong>Guardar precio de hoy</strong>.
         </li>
         <li>
           Si la ficha muestra un precio tachado, escríbelo en <strong>Precio tachado</strong>: con eso el sitio muestra
