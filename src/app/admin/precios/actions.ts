@@ -19,10 +19,14 @@ import { notifyIndexNow } from '@/lib/indexnow';
 import { PRICED_COLUMNS, applyPricing, type PricedProduct, type PricingOutcome } from '@/lib/pricing';
 import { SITE_URL } from '@/lib/site';
 import {
+  canUndoManual,
   canValidateByHand,
   checkManualPrice,
+  manualPriceBefore,
   manualPriceOutcome,
   manualUnavailableOutcome,
+  manualUndoPatch,
+  parseManualBefore,
 } from '@/lib/manual-price';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,11 +56,12 @@ type Row = PricedProduct & {
   category: string;
   is_hidden: boolean;
   price_checked_at: string | null;
+  offer_info?: unknown;
   deleted_at?: string | null;
 };
 
 /** Con deleted_at (migración 0017) si existe; sin ella, sin él. */
-const BASE_COLUMNS = `${PRICED_COLUMNS}, slug, name, category, is_hidden, price_checked_at`;
+const BASE_COLUMNS = `${PRICED_COLUMNS}, slug, name, category, is_hidden, price_checked_at, offer_info`;
 const FULL_COLUMNS = `${BASE_COLUMNS}, deleted_at`;
 
 type Admin = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
@@ -141,12 +146,8 @@ export async function saveManualPrice(
     actor,
     action: 'precio_manual',
     target: product.id,
-    before: {
-      precio: product.price,
-      tachado: product.original_price ?? null,
-      revisado: product.price_checked_at,
-      a_la_venta: product.is_active,
-    },
+    // Todo lo que hace falta para dejarlo como estaba (undoManualPrice).
+    before: manualPriceBefore(product),
     after: { nombre: product.name, precio: check.input.price, tachado: check.input.listPrice, a_la_venta: true },
   });
   // Bing (de donde lee ChatGPT) vuelve a leer la ficha con el precio de hoy. Nunca lanza.
@@ -185,10 +186,100 @@ export async function markUnavailable(productId: string): Promise<UnavailableRes
     actor,
     action: 'precio_manual',
     target: product.id,
-    before: { precio: product.price, a_la_venta: product.is_active },
+    before: manualPriceBefore(product),
     after: { nombre: product.name, a_la_venta: false, motivo: 'ya no se vende en Mercado Libre' },
   });
   await notifyIndexNow([`${SITE_URL}/producto/${product.slug}`]);
 
   return { ok: true, wasOnSale: product.is_active };
+}
+
+export type UndoResult =
+  | {
+      ok: true;
+      /** Lo que el producto tenía antes, y vuelve a tener. */
+      price: number;
+      listPrice: number | null;
+      checkedAt: string | null;
+      active: boolean;
+    }
+  | Fail;
+
+const NOTHING_TO_UNDO =
+  'No hay nada que deshacer: lo último que cambió el precio de este producto no fue un guardado a mano de hoy.';
+
+/**
+ * Deshace el último precio guardado a mano (o el "Ya no se vende") de un
+ * producto: lo deja como estaba y borra del historial la fila que ese
+ * guardado anotó. En el teléfono un toque de más guarda un monto que nadie
+ * revisó; sin esto, corregirlo dejaba en el historial una subida y una baja
+ * que nunca existieron, y la ficha podía decir "Bajó $X".
+ *
+ * Solo deshace si lo último que dejó al producto como está fue ese guardado
+ * (canUndoManual): lo anotado en Actividad dice cómo estaba antes.
+ */
+export async function undoManualPrice(productId: string): Promise<UndoResult> {
+  const actor = await requireAdmin();
+  if (typeof productId !== 'string' || !UUID_RE.test(productId)) return { ok: false, error: 'Producto no válido.' };
+
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
+
+  const read = await readProduct(admin, productId);
+  if (read.error) return { ok: false, error: read.error };
+  const product = read.row;
+  if (!product) return { ok: false, error: 'Ese producto ya no existe.' };
+
+  const log = await admin
+    .from('admin_audit_log')
+    .select('at, before')
+    .eq('action', 'precio_manual')
+    .eq('target', productId)
+    .order('at', { ascending: false })
+    .limit(1);
+  if (log.error) return { ok: false, error: 'No se pudo leer lo que había antes. Intenta de nuevo.' };
+  const event = ((log.data ?? []) as { at: string; before: unknown }[])[0] ?? null;
+  const before = event ? parseManualBefore(event.before) : null;
+  const now = new Date();
+  if (!event || !before || !canUndoManual(product, event, now.getTime())) return { ok: false, error: NOTHING_TO_UNDO };
+
+  const savedAt = product.price_checked_at as string;
+  const { error: updateError } = await admin
+    .from('products')
+    .update(manualUndoPatch(before, now.toISOString()))
+    .eq('id', productId);
+  if (updateError) {
+    console.error('[precios] no se pudo deshacer:', updateError.message);
+    return { ok: false, error: 'No se pudo deshacer. Intenta de nuevo.' };
+  }
+
+  // La fila que ese guardado dejó en el historial: misma hora y sin vendedor.
+  // Sin la tabla (migración 0016) no hay nada que borrar.
+  const { error: historyError } = await admin
+    .from('price_history')
+    .delete()
+    .eq('product_id', productId)
+    .eq('observed_at', savedAt)
+    .is('seller_id', null);
+  if (historyError && !isMissingSchemaError(historyError)) {
+    console.warn('[precios] deshecho, pero no se pudo borrar la fila del historial:', historyError.message);
+  }
+
+  refreshSite();
+  await logAdminEvent(admin, {
+    actor,
+    action: 'precio_deshacer',
+    target: product.id,
+    before: { precio: product.price, tachado: product.original_price ?? null, revisado: savedAt, a_la_venta: product.is_active },
+    after: {
+      nombre: product.name,
+      precio: before.precio,
+      tachado: before.tachado,
+      revisado: before.revisado,
+      a_la_venta: before.a_la_venta,
+    },
+  });
+  await notifyIndexNow([`${SITE_URL}/producto/${product.slug}`]);
+
+  return { ok: true, price: before.precio, listPrice: before.tachado, checkedAt: before.revisado, active: before.a_la_venta };
 }

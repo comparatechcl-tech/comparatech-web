@@ -6,7 +6,7 @@ import { fetchAllRows } from '@/lib/admin-stats';
 import { startOfChileDay } from '@/lib/clicks';
 import { canValidateByHand, rankForValidation, type ValidationRow } from '@/lib/manual-price';
 import { mlProductUrl } from '@/lib/ml-urls';
-import { MANUAL_PRICE_SOURCE, priceState } from '@/lib/price-freshness';
+import { MANUAL_PRICE_SOURCE, isManualPrice, priceState } from '@/lib/price-freshness';
 import { PriceList, type PriceItem } from './PriceList';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +22,7 @@ const ID_CHUNK = 100;
 type DbError = { code?: string; message: string } | null;
 
 const BASE_COLUMNS =
-  'id, slug, name, brand, image_url, price, original_price, price_checked_at, ml_product_id, is_active, is_hidden, inactive_reason';
+  'id, slug, name, brand, image_url, price, original_price, price_checked_at, ml_product_id, is_active, is_hidden, inactive_reason, offer_info';
 /** deleted_at es de la migración 0017: sin ella se lee sin él. */
 const FULL_COLUMNS = `${BASE_COLUMNS}, deleted_at`;
 
@@ -101,7 +101,9 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
   const visible = ranked.slice(0, shown);
   const coveredClicks = visible.reduce((sum, r) => sum + r.clicks, 0);
 
-  const items: PriceItem[] = visible.map(({ row, clicks: n }) => ({
+  const items: PriceItem[] = visible.map(({ row, clicks: n }) => {
+    const today = priceState(row.price_checked_at, now.getTime()) === 'hoy';
+    return {
     id: row.id,
     name: row.name,
     brand: row.brand?.trim() || null,
@@ -109,11 +111,14 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
     price: row.price,
     listPrice: typeof row.original_price === 'number' && row.original_price > row.price ? row.original_price : null,
     checkedAt: row.price_checked_at,
-    today: priceState(row.price_checked_at, now.getTime()) === 'hoy',
+    today,
+    // Guardado a mano hoy: la tarjeta ofrece deshacerlo.
+    manualToday: today && isManualPrice(row),
     active: row.is_active,
     clicks: n,
     mlUrl: mlProductUrl(row.ml_product_id as string),
-  }));
+    };
+  });
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:py-10">
@@ -139,6 +144,10 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
         </li>
         <li>
           Si el producto ya no se vende, toca <strong>Ya no se vende</strong>.
+        </li>
+        <li>
+          Si guardaste algo mal, toca <strong>Me equivoqué: deshacer y corregir</strong> en la misma tarjeta. El sitio
+          vuelve al precio de antes y el monto equivocado no queda en el historial.
         </li>
       </ol>
 

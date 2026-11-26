@@ -15,6 +15,7 @@ const ACTIONS: { value: string; label: string }[] = [
   { value: 'guardar_link', label: 'Links guardados' },
   { value: 'reverificar', label: 'Revisiones' },
   { value: 'precio_manual', label: 'Precios revisados a mano' },
+  { value: 'precio_deshacer', label: 'Precios deshechos' },
   { value: 'precio_canal', label: 'Precios del canal de afiliados' },
   { value: 'prueba_atribucion', label: 'Prueba de atribución' },
   { value: 'agregar_desde_ml', label: 'Agregados desde ML' },
@@ -98,6 +99,12 @@ function describe(row: AdminEventRow): string {
       if (after?.a_la_venta === false) return `anotó que ya no se vende ${name}`;
       const price = typeof after?.precio === 'number' ? ` en ${formatCLP(after.precio)}` : '';
       return `revisó a mano el precio de ${name}${price}`;
+    }
+    // Un precio guardado a mano por error (un toque de más en el teléfono): el producto volvió a como estaba.
+    case 'precio_deshacer': {
+      const name = typeof after?.nombre === 'string' ? after.nombre : 'un producto';
+      const price = typeof after?.precio === 'number' ? `: volvió a ${formatCLP(after.precio)}` : '';
+      return `deshizo el precio que había guardado de ${name}${price}`;
     }
     // Precios que Mercado Libre publicó en su canal de afiliados (lib/channel-sync).
     case 'precio_canal': {

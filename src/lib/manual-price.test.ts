@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── La base y lo demás que tocan las acciones ────────────────────────────
 
-type Op = { table: string; method: 'select' | 'update' | 'insert'; patch?: unknown; filters: [string, string, unknown][] };
+type Op = { table: string; method: 'select' | 'update' | 'insert' | 'delete'; patch?: unknown; filters: [string, string, unknown][] };
 
 const db = vi.hoisted(() => ({
   product: null as Record<string, unknown> | null,
@@ -18,6 +18,8 @@ const db = vi.hoisted(() => ({
   history: [] as unknown[],
   ops: [] as Op[],
   failUpdate: false,
+  /** Lo anotado en Actividad (admin_audit_log) para el producto, del más nuevo al más viejo. */
+  audit: [] as unknown[],
 }));
 
 vi.mock('@/lib/supabase/server', () => {
@@ -33,6 +35,7 @@ vi.mock('@/lib/supabase/server', () => {
         return db.failUpdate ? { data: null, error: { message: 'caída' } } : { data: null, error: null };
       }
       if (table === 'price_history' && op.method === 'select') return { data: db.history, error: null };
+      if (table === 'admin_audit_log' && op.method === 'select') return { data: db.audit, error: null };
       return { data: null, error: null };
     };
     const b: Record<string, unknown> = {
@@ -49,9 +52,14 @@ vi.mock('@/lib/supabase/server', () => {
       },
       maybeSingle: () => Promise.resolve(run()),
       limit: () => b,
+      order: () => b,
+      delete: () => {
+        op.method = 'delete';
+        return b;
+      },
       then: (ok: (r: unknown) => unknown, fail: (e: unknown) => unknown) => Promise.resolve(run()).then(ok, fail),
     };
-    for (const f of ['eq', 'in']) {
+    for (const f of ['eq', 'in', 'is']) {
       b[f] = (col: string, value: unknown) => {
         op.filters.push([f, col, value]);
         return b;
@@ -72,13 +80,17 @@ import { revalidatePath, revalidateTag } from 'next/cache';
 import { requireAdmin } from '@/lib/admin-auth';
 import { logAdminEvent } from '@/lib/admin-audit';
 import { notifyIndexNow } from '@/lib/indexnow';
-import { markUnavailable, saveManualPrice } from '@/app/admin/precios/actions';
+import { markUnavailable, saveManualPrice, undoManualPrice } from '@/app/admin/precios/actions';
 import {
   MANUAL_OFFER_INFO,
+  canUndoManual,
   canValidateByHand,
   checkManualPrice,
+  manualPriceBefore,
   manualPriceOutcome,
   manualUnavailableOutcome,
+  manualUndoPatch,
+  parseManualBefore,
   parsePesos,
   rankForValidation,
   type ManualPriceProduct,
@@ -343,6 +355,7 @@ describe('saveManualPrice', () => {
     db.history = [{ id: 1 }];
     db.ops = [];
     db.failUpdate = false;
+    db.audit = [];
     vi.mocked(requireAdmin).mockReset();
     vi.mocked(requireAdmin).mockResolvedValue('cristopher');
     vi.mocked(logAdminEvent).mockClear();
@@ -458,5 +471,229 @@ describe('saveManualPrice', () => {
       after: { a_la_venta: false },
     });
     expect(vi.mocked(revalidateTag)).toHaveBeenCalledWith('catalog');
+  });
+
+  it('anota en Actividad todo lo que hace falta para deshacer', async () => {
+    db.product = stored({ original_price: 589_990, offer_info: { free_shipping: true } });
+    await saveManualPrice(ID, '545337', '');
+    expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toMatchObject({
+      before: {
+        precio: 545_337,
+        tachado: 589_990,
+        revisado: '2026-11-23T16:33:00Z',
+        a_la_venta: true,
+        oferta: { free_shipping: true },
+        motivo_pausa: null,
+        en_pausa_desde: null,
+      },
+    });
+  });
+});
+
+// ── Deshacer un precio mal guardado ──────────────────────────────────────
+
+describe('lo que hace falta para deshacer', () => {
+  const SAVED_AT = '2026-11-26T11:58:03.000Z';
+  const now = Date.parse('2026-11-26T12:10:00Z');
+
+  it('manualPriceBefore junta cómo estaba el producto', () => {
+    expect(
+      manualPriceBefore({
+        ...product({ original_price: 589_990 }),
+        price_checked_at: '2026-11-23T16:33:00Z',
+        offer_info: { free_shipping: true },
+      })
+    ).toEqual({
+      precio: 545_337,
+      tachado: 589_990,
+      revisado: '2026-11-23T16:33:00Z',
+      a_la_venta: true,
+      oferta: { free_shipping: true },
+      motivo_pausa: null,
+      en_pausa_desde: null,
+    });
+  });
+
+  it('parseManualBefore lee lo anotado, también lo de antes de que se guardara la oferta', () => {
+    expect(parseManualBefore({ precio: 545_337, tachado: null, revisado: '2026-11-23T16:33:00Z', a_la_venta: true })).toEqual({
+      precio: 545_337,
+      tachado: null,
+      revisado: '2026-11-23T16:33:00Z',
+      a_la_venta: true,
+      motivo_pausa: null,
+      en_pausa_desde: null,
+    });
+    // Un tachado que no es mayor que el precio, o una fecha que no se entiende, no se toman.
+    expect(parseManualBefore({ precio: 545_337, tachado: 500_000, revisado: 'ayer', a_la_venta: true })).toMatchObject({
+      tachado: null,
+      revisado: null,
+    });
+    for (const bad of [null, 'x', {}, { precio: '545337', a_la_venta: true }, { precio: 0, a_la_venta: true }, { precio: 100 }]) {
+      expect(parseManualBefore(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('canUndoManual: solo si lo último anotado es lo que dejó al producto como está, y fue hace menos de un día', () => {
+    const saved = { price_checked_at: SAVED_AT };
+    expect(canUndoManual(saved, { at: '2026-11-26T11:58:04.200Z' }, now)).toBe(true);
+    // Otra cosa lo tocó después (el canal, otra revisión): la hora ya no calza.
+    expect(canUndoManual({ price_checked_at: '2026-11-26T12:05:00Z' }, { at: '2026-11-26T11:58:04Z' }, now)).toBe(false);
+    expect(canUndoManual(saved, { at: '2026-11-26T12:30:00Z' }, now)).toBe(false);
+    expect(canUndoManual(saved, null, now)).toBe(false);
+    expect(canUndoManual({ price_checked_at: null }, { at: SAVED_AT }, now)).toBe(false);
+    // Lo de ayer ya no se deshace.
+    expect(canUndoManual(saved, { at: '2026-11-26T11:58:04Z' }, Date.parse('2026-11-27T12:30:00Z'))).toBe(false);
+  });
+
+  it('manualUndoPatch deja el producto como estaba', () => {
+    expect(
+      manualUndoPatch({ precio: 545_337, tachado: null, revisado: '2026-11-23T16:33:00Z', a_la_venta: true }, NOW)
+    ).toEqual({
+      price: 545_337,
+      original_price: null,
+      price_checked_at: '2026-11-23T16:33:00Z',
+      is_active: true,
+      inactive_reason: null,
+      inactive_since: null,
+    });
+    // Con la oferta anotada, vuelve también.
+    expect(
+      manualUndoPatch({ precio: 1, tachado: null, revisado: null, a_la_venta: true, oferta: { free_shipping: true } }, NOW)
+    ).toMatchObject({ offer_info: { free_shipping: true } });
+    // Estaba en pausa: vuelve a la pausa, con su motivo.
+    expect(
+      manualUndoPatch(
+        { precio: 1, tachado: null, revisado: null, a_la_venta: false, motivo_pausa: 'ganador_no_verde', en_pausa_desde: '2026-11-20T10:00:00Z' },
+        NOW
+      )
+    ).toMatchObject({ is_active: false, inactive_reason: 'ganador_no_verde', inactive_since: '2026-11-20T10:00:00Z' });
+    expect(manualUndoPatch({ precio: 1, tachado: null, revisado: null, a_la_venta: false }, NOW)).toMatchObject({
+      is_active: false,
+      inactive_reason: 'sin_ganador',
+      inactive_since: NOW,
+    });
+  });
+});
+
+describe('undoManualPrice', () => {
+  // Guardado hace 5 minutos, con un dígito de menos.
+  const SAVED_AT = new Date(Date.now() - 5 * 60_000).toISOString();
+  const stored = (over: Record<string, unknown> = {}) => ({
+    ...product({ price: 54_533 }),
+    slug: 'consola-nintendo-switch-2',
+    name: 'Consola Nintendo Switch 2',
+    category: 'gaming',
+    is_hidden: false,
+    price_checked_at: SAVED_AT,
+    offer_info: MANUAL_OFFER_INFO,
+    affiliate_url: 'https://meli.la/abc',
+    seller_sales_count: 1200,
+    link_target_product_id: null,
+    link_checked_at: null,
+    deleted_at: null,
+    ...over,
+  });
+  const event = (over: Record<string, unknown> = {}) => ({
+    at: new Date(Date.parse(SAVED_AT) + 1500).toISOString(),
+    before: { precio: 545_337, tachado: 589_990, revisado: '2026-11-23T16:33:00Z', a_la_venta: true },
+    ...over,
+  });
+  const updates = () => db.ops.filter((o) => o.table === 'products' && o.method === 'update');
+  const deletes = () => db.ops.filter((o) => o.table === 'price_history' && o.method === 'delete');
+
+  beforeEach(() => {
+    db.product = stored();
+    db.audit = [event()];
+    db.history = [{ id: 1 }];
+    db.ops = [];
+    db.failUpdate = false;
+    vi.mocked(requireAdmin).mockReset();
+    vi.mocked(requireAdmin).mockResolvedValue('cristopher');
+    vi.mocked(logAdminEvent).mockClear();
+    vi.mocked(notifyIndexNow).mockClear();
+    vi.mocked(revalidatePath).mockClear();
+    vi.mocked(revalidateTag).mockClear();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('deja el producto como estaba, borra del historial la fila equivocada, rearma el sitio y lo anota', async () => {
+    const res = await undoManualPrice(ID);
+    expect(res).toEqual({ ok: true, price: 545_337, listPrice: 589_990, checkedAt: '2026-11-23T16:33:00Z', active: true });
+
+    expect(updates()).toHaveLength(1);
+    expect(updates()[0].patch).toEqual({
+      price: 545_337,
+      original_price: 589_990,
+      price_checked_at: '2026-11-23T16:33:00Z',
+      is_active: true,
+      inactive_reason: null,
+      inactive_since: null,
+    });
+    expect(updates()[0].filters).toEqual([['eq', 'id', ID]]);
+    // Solo la fila que dejó ese guardado: misma hora y sin vendedor.
+    expect(deletes()).toHaveLength(1);
+    expect(deletes()[0].filters).toEqual([
+      ['eq', 'product_id', ID],
+      ['eq', 'observed_at', SAVED_AT],
+      ['is', 'seller_id', null],
+    ]);
+
+    expect(vi.mocked(revalidateTag)).toHaveBeenCalledWith('catalog');
+    expect(vi.mocked(notifyIndexNow)).toHaveBeenCalledWith([expect.stringMatching(/\/producto\/consola-nintendo-switch-2$/)]);
+    expect(vi.mocked(logAdminEvent).mock.calls[0][1]).toMatchObject({
+      actor: 'cristopher',
+      action: 'precio_deshacer',
+      target: ID,
+      before: { precio: 54_533, revisado: SAVED_AT },
+      after: { nombre: 'Consola Nintendo Switch 2', precio: 545_337, tachado: 589_990, a_la_venta: true },
+    });
+  });
+
+  it('si lo último que tocó el producto no fue ese guardado, no deshace nada', async () => {
+    const nothing = { ok: false, error: expect.stringContaining('No hay nada que deshacer') };
+    // Nunca se guardó a mano.
+    db.audit = [];
+    expect(await undoManualPrice(ID)).toEqual(nothing);
+    // Lo anotado es de otro momento: después lo cambió otra cosa.
+    db.audit = [event({ at: new Date(Date.parse(SAVED_AT) + 10 * 60_000).toISOString() })];
+    expect(await undoManualPrice(ID)).toEqual(nothing);
+    // El precio guardado es de hace días.
+    db.audit = [event()];
+    db.product = stored({ price_checked_at: '2026-11-20T10:00:00Z' });
+    expect(await undoManualPrice(ID)).toEqual(nothing);
+    // Lo anotado no dice cómo estaba.
+    db.product = stored();
+    db.audit = [event({ before: { nada: true } })];
+    expect(await undoManualPrice(ID)).toEqual(nothing);
+
+    expect(updates()).toHaveLength(0);
+    expect(deletes()).toHaveLength(0);
+    expect(vi.mocked(logAdminEvent)).not.toHaveBeenCalled();
+  });
+
+  it('si la base no guarda, lo dice y no borra nada del historial', async () => {
+    db.failUpdate = true;
+    expect(await undoManualPrice(ID)).toEqual({ ok: false, error: 'No se pudo deshacer. Intenta de nuevo.' });
+    expect(deletes()).toHaveLength(0);
+    expect(vi.mocked(logAdminEvent)).not.toHaveBeenCalled();
+    expect(vi.mocked(revalidateTag)).not.toHaveBeenCalled();
+  });
+
+  it('un "Ya no se vende" equivocado vuelve a dejar el producto a la venta', async () => {
+    db.product = stored({ price: 545_337, is_active: false, inactive_reason: 'sin_ganador', inactive_since: SAVED_AT, offer_info: null });
+    db.audit = [event({ before: { precio: 545_337, tachado: null, revisado: '2026-11-23T16:33:00Z', a_la_venta: true } })];
+    const res = await undoManualPrice(ID);
+    expect(res).toMatchObject({ ok: true, active: true });
+    expect(updates()[0].patch).toMatchObject({ is_active: true, inactive_reason: null, inactive_since: null });
+  });
+
+  it('no acepta un id raro ni un producto que ya no existe, y sin sesión no hace nada', async () => {
+    expect(await undoManualPrice('no-es-un-id')).toEqual({ ok: false, error: 'Producto no válido.' });
+    db.product = null;
+    expect(await undoManualPrice(ID)).toEqual({ ok: false, error: 'Ese producto ya no existe.' });
+    db.ops = [];
+    vi.mocked(requireAdmin).mockRejectedValue(new Error('No autorizado'));
+    await expect(undoManualPrice(ID)).rejects.toThrow('No autorizado');
+    expect(db.ops).toHaveLength(0);
   });
 });

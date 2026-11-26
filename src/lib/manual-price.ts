@@ -102,7 +102,9 @@ export function checkManualPrice(storedPrice: number, rawPrice: unknown, rawList
   if (listPrice !== null && listPrice <= price) {
     return {
       ok: false,
-      error: 'El precio tachado tiene que ser mayor que el precio de hoy. Si la ficha no muestra uno, deja el cuadro vacío.',
+      error:
+        'El precio tachado tiene que ser mayor que el precio de hoy. El de hoy es el número grande de la ficha y va en ' +
+        'el primer cuadro; el tachado es el gris que aparece sobre él. Si la ficha no muestra uno, deja ese cuadro vacío.',
     };
   }
 
@@ -199,6 +201,98 @@ export function manualPriceOutcome(product: ManualPriceProduct, input: ManualPri
   };
 }
 
+/**
+ * Lo que el producto tenía justo antes de guardar un precio a mano. Queda en
+ * Actividad (admin_audit_log, acción precio_manual) y es lo que permite
+ * deshacer: un toque de más en el teléfono guarda un monto que nadie revisó.
+ */
+export interface ManualPriceBefore {
+  precio: number;
+  tachado: number | null;
+  /** price_checked_at de antes; null si nunca se había revisado. */
+  revisado: string | null;
+  a_la_venta: boolean;
+  /** offer_info de antes. Ausente en lo guardado hasta el 26-11-2026: ahí se deja el que haya. */
+  oferta?: unknown;
+  motivo_pausa?: string | null;
+  en_pausa_desde?: string | null;
+}
+
+/** Lo que se anota en Actividad antes de guardar: con esto se puede deshacer exacto. */
+export function manualPriceBefore(
+  product: ManualPriceProduct & { price_checked_at?: string | null; offer_info?: unknown }
+): ManualPriceBefore {
+  return {
+    precio: product.price,
+    tachado: product.original_price ?? null,
+    revisado: product.price_checked_at ?? null,
+    a_la_venta: product.is_active,
+    oferta: product.offer_info ?? null,
+    motivo_pausa: product.inactive_reason ?? null,
+    en_pausa_desde: product.inactive_since ?? null,
+  };
+}
+
+/** El "antes" como viene de Actividad (jsonb), o null si no tiene la forma. */
+export function parseManualBefore(raw: unknown): ManualPriceBefore | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.precio !== 'number' || !Number.isSafeInteger(o.precio) || o.precio <= 0 || o.precio > MAX_PRICE) return null;
+  if (typeof o.a_la_venta !== 'boolean') return null;
+  const tachado = typeof o.tachado === 'number' && Number.isSafeInteger(o.tachado) && o.tachado > o.precio ? o.tachado : null;
+  const revisado = typeof o.revisado === 'string' && Number.isFinite(Date.parse(o.revisado)) ? o.revisado : null;
+  return {
+    precio: o.precio,
+    tachado,
+    revisado,
+    a_la_venta: o.a_la_venta,
+    ...('oferta' in o ? { oferta: o.oferta ?? null } : {}),
+    motivo_pausa: typeof o.motivo_pausa === 'string' ? o.motivo_pausa : null,
+    en_pausa_desde: typeof o.en_pausa_desde === 'string' ? o.en_pausa_desde : null,
+  };
+}
+
+/** Cuánto después de la hora de revisión puede haber quedado anotada la acción en Actividad. */
+const AUDIT_LAG_MS = 2 * 60_000;
+/** Solo se deshace lo guardado en el último día: más atrás ya es historia del producto. */
+const UNDO_WINDOW_MS = 24 * 3_600_000;
+
+/**
+ * ¿La última acción de precio anotada en Actividad es la que dejó al producto
+ * como está ahora? Solo esa se puede deshacer: si después lo tocó otra cosa
+ * (otra revisión, el canal), deshacer pisaría algo que no es el error.
+ */
+export function canUndoManual(
+  product: { price_checked_at: string | null },
+  event: { at: string } | null,
+  now: number
+): boolean {
+  if (!event || !product.price_checked_at) return false;
+  const checked = Date.parse(product.price_checked_at);
+  const logged = Date.parse(event.at);
+  if (!Number.isFinite(checked) || !Number.isFinite(logged)) return false;
+  if (now - checked > UNDO_WINDOW_MS) return false;
+  // La acción se anota después de escribir el precio, con unos segundos de diferencia.
+  return logged >= checked - 5_000 && logged - checked <= AUDIT_LAG_MS;
+}
+
+/**
+ * Lo que hay que escribir en el producto para dejarlo como estaba antes de
+ * guardar a mano. La fila que ese guardado dejó en el historial la borra la
+ * acción del admin (la que tiene la misma hora y no tiene vendedor).
+ */
+export function manualUndoPatch(before: ManualPriceBefore, now: string): Record<string, unknown> {
+  return {
+    price: before.precio,
+    original_price: before.tachado,
+    price_checked_at: before.revisado,
+    ...('oferta' in before ? { offer_info: before.oferta ?? null } : {}),
+    is_active: before.a_la_venta,
+    inactive_reason: before.a_la_venta ? null : (before.motivo_pausa ?? 'sin_ganador'),
+    inactive_since: before.a_la_venta ? null : (before.en_pausa_desde ?? now),
+  };
+}
+
 /** Lo que la lista de "Precios de hoy" lee de cada producto. */
 export interface ValidationRow {
   id: string;
@@ -214,6 +308,8 @@ export interface ValidationRow {
   is_hidden: boolean;
   inactive_reason: InactiveReason | null;
   deleted_at?: string | null;
+  /** Para saber si el precio de hoy lo guardó una persona (se puede deshacer). */
+  offer_info?: unknown;
 }
 
 /**

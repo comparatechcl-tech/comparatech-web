@@ -50,6 +50,8 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   // Sin esto Google muestra "comparatech.cl" en vez del nombre (también va en el WebSite de la portada).
   applicationName: 'ComparaTech',
+  // El manifiesto es una ruta (app/manifest.webmanifest) para que el admin pueda usar el suyo.
+  manifest: '/manifest.webmanifest',
   title: {
     default: 'ComparaTech — Compara precios de tecnología en Chile',
     template: '%s | ComparaTech',

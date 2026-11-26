@@ -17,8 +17,14 @@ export const maxDuration = 60;
 
 // El admin pide clave, pero igual se le dice a los buscadores que no lo
 // indexen: una URL filtrada no debería terminar en Google.
+//
+// El manifiesto propio hace que "Agregar a la pantalla de inicio" desde el
+// admin instale una app que abre en /admin, y no la portada pública
+// (app/app-admin.webmanifest).
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
+  manifest: '/app-admin.webmanifest',
+  title: 'Admin',
 };
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
