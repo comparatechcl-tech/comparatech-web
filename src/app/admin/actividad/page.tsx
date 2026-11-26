@@ -17,6 +17,7 @@ const ACTIONS: { value: string; label: string }[] = [
   { value: 'precio_manual', label: 'Precios revisados a mano' },
   { value: 'precio_deshacer', label: 'Precios deshechos' },
   { value: 'precio_canal', label: 'Precios del canal de afiliados' },
+  { value: 'videos_armar', label: 'Videos pedidos a mano' },
   { value: 'tienda_enlazar', label: 'Otras tiendas enlazadas' },
   { value: 'tienda_quitar', label: 'Otras tiendas quitadas' },
   { value: 'tienda_pausar', label: 'Otras tiendas en pausa' },
@@ -116,6 +117,9 @@ function describe(row: AdminEventRow): string {
       const price = typeof after?.precio === 'number' ? ` en ${formatCLP(after.precio)}` : '';
       return `anotó el precio que Mercado Libre publicó de ${name}${price}`;
     }
+    // "Armar los videos ahora" (/admin/videos): se le pidió a GitHub la pasada que los arma.
+    case 'videos_armar':
+      return count === null ? 'pidió armar los videos de hoy' : `pidió armar ${plural(count, 'video', 'videos')}`;
     // Otras tiendas (/admin/tiendas): la ficha de un producto en Paris, MacOnline…
     case 'tienda_enlazar': {
       const name = typeof after?.nombre === 'string' ? after.nombre : 'un producto';

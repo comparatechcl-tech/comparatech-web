@@ -12,7 +12,7 @@ const TICK_MS = 30_000;
  * nuevos. Sigue al día aunque la página quede abierta. El primer dibujo usa
  * la hora del servidor, así el del servidor y el del teléfono salen iguales.
  */
-export function NextPass({ renderedAt }: { renderedAt: number }) {
+export function NextPass({ renderedAt, auto = false }: { renderedAt: number; auto?: boolean }) {
   const [now, setNow] = useState(renderedAt);
 
   useEffect(() => {
@@ -21,5 +21,5 @@ export function NextPass({ renderedAt }: { renderedAt: number }) {
     return () => clearInterval(timer);
   }, []);
 
-  return <>{nextPassText(new Date(now))}</>;
+  return <>{nextPassText(new Date(now), auto)}</>;
 }

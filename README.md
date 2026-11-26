@@ -39,7 +39,8 @@ Cada push a `main` se publica solo en producción.
 | Vercel Cron (`vercel.json`) | `/api/cron/prospect`, `/api/cron/refresh-prices`, `/api/cron/social-telegram` y `/api/cron/backup` | Una vez al día cada uno (el respaldo, los lunes). Hobby no permite más. |
 | GitHub Actions (`.github/workflows/refresh-prices.yml`) | `/api/cron/refresh-prices` | Respaldo, y para lanzarlo a mano desde Actions. |
 | GitHub Actions (`.github/workflows/reels.yml`) | `/api/social/videos/plan` | Arma los videos del día con ffmpeg (`scripts/reels/generar.mjs`) y los sube a Supabase Storage. |
-| GitHub Actions (`.github/workflows/tiendas.yml`) | `/api/cron/tiendas` | Cada 2 horas. Vuelve a leer el precio de las fichas de otras tiendas enlazadas en el admin; cada ficha se lee dos veces al día (`src/lib/store-sync.ts`). No le pide nada a Mercado Libre. |
+| Supabase `pg_cron` (migración `0023`) y, de respaldo, GitHub Actions (`.github/workflows/tiendas.yml`) | `/api/cron/tiendas` | Cada 2 horas. Vuelve a leer el precio de las fichas de otras tiendas enlazadas en el admin; cada ficha se lee dos veces al día (`src/lib/store-sync.ts`). No le pide nada a Mercado Libre. |
+| Supabase `pg_cron` (migración `0023`) | `/api/cron/videos` | Cada media hora. Si hay videos por armar, le pide a GitHub que corra "Videos del día" (`src/lib/video-build.ts`). GitHub atrasa o se salta casi todas sus pasadas programadas: lo que tiene que correr a tiempo se programa en Supabase. |
 
 Todos se identifican con `Authorization: Bearer <CRON_SECRET>`. El secreto
 tiene que ser el mismo en los tres lugares: variable de Vercel, secreto
@@ -165,6 +166,12 @@ Opcionales: `HEALTHCHECK_REFRESH_URL`, `HEALTHCHECK_PROSPECT_URL`,
 `HEALTHCHECK_BACKUP_URL`, `HEALTH_MAX_PRICE_AGE_MIN`, `HEALTH_MAX_OLDEST_PRICE_AGE_MIN`, `MIN_COMMISSION_CLP`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHANNEL_ID`,
 `NEXT_PUBLIC_TELEGRAM_URL`.
 
+`GITHUB_VIDEOS_TOKEN` (opcional, solo en Railway): una llave de GitHub con
+permiso "Actions" de lectura y escritura únicamente sobre este repositorio.
+Con ella el sitio le pide a GitHub que arme los videos apenas hay algo por
+armar, sin esperar el horario de GitHub (`src/lib/video-build.ts`). Sin ella
+los videos siguen dependiendo de ese horario.
+
 Las variables se cargan en Vercel → Settings → Environment Variables. Un
 cambio de variable recién se aplica en el siguiente deploy.
 
@@ -195,6 +202,8 @@ después publicar, o publicar y aplicarla apenas se pueda.
   6. `0017_contenido.sql` — contenido para redes y Telegram.
   7. `0018_operacion.sql` — historial de los crons (`cron_runs`) y datos
      extra de la prospección.
+- `0023_crons_tiendas_y_videos.sql` (del 26-11-2026): horario en Supabase de
+  la revisión de las otras tiendas y del pedido de videos a GitHub.
 - `0022_otras_tiendas.sql` (del 26-11-2026): precios de otras tiendas (`store_offers`)
   y sus clics (`store_clicks`). Sin ella, `/admin/tiendas` avisa que
   falta y el sitio sigue igual.

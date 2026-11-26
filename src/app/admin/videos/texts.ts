@@ -53,7 +53,14 @@ export function changedAfterPostingText(item: ChangedAfterPosting): string {
  * entren productos nuevos. La hora sale del horario de GitHub (en UTC) pasado
  * a hora de Chile, así que el cambio de hora se ajusta solo. Puro.
  */
-export function nextPassText(now: Date): string {
+export function nextPassText(now: Date, auto = false): string {
+  // Con la revisión de cada media hora corriendo (lib/video-build) ya no se espera una pasada fija.
+  if (auto) {
+    return (
+      'Los videos se arman solos: cada media hora el sitio mira si hay algo por armar y lo manda a hacer. ' +
+      'Para que entren productos nuevos, marca en qué redes subiste los de hoy: lo marcado deja su lugar al siguiente.'
+    );
+  }
   const next = nextReelPass(now);
   const time = chileTime(next);
   const today = chileDateTime(now)?.date;

@@ -4,6 +4,9 @@ import { chileDateTime } from '@/lib/content/captions';
 import { HISTORY_UNREAD_EXAMPLE } from '@/lib/social/warning-help';
 import { VIDEO_RULES, readVideoBoard, type VideoBoard } from '@/lib/social/videos';
 import { WarningGuide } from '../WarningGuide';
+import { videoCronActive } from '@/lib/video-build';
+import { videoDispatchToken } from '@/lib/video-dispatch';
+import { BuildNow } from './BuildNow';
 import { NextPass } from './NextPass';
 import { changedAfterPostingText, staleText } from './texts';
 import { VideoList } from './VideoList';
@@ -51,6 +54,9 @@ export default async function VideosPage() {
   const changedAfter = Array.isArray(board.changedAfterPosting) ? board.changedAfterPosting : [];
   const last = chileDateTime(board.lastRenderedAt);
   const maxAgeHours = Math.round(VIDEO_RULES.maxPriceAgeMs / 3_600_000);
+  // Con la llave de GitHub y la revisión de cada media hora (lib/video-build), los videos no dependen del horario de GitHub.
+  const canBuildNow = videoDispatchToken() !== null;
+  const autoBuild = canBuildNow && admin ? await videoCronActive(admin, now) : false;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:py-10">
@@ -77,7 +83,7 @@ export default async function VideosPage() {
         ajusta solo.
       */}
       <p className="mt-3 text-sm text-muted">
-        <NextPass renderedAt={now.getTime()} />
+        <NextPass renderedAt={now.getTime()} auto={autoBuild} />
       </p>
 
       {/*
@@ -101,6 +107,9 @@ export default async function VideosPage() {
           </p>
         </div>
       )}
+
+      {/* Pedirle a GitHub que arme ya lo que falta, sin esperar su horario (lib/video-build). */}
+      <BuildNow ready={canBuildNow} auto={autoBuild} maxAgeHours={maxAgeHours} />
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         <li>
