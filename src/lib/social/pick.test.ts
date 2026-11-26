@@ -607,3 +607,62 @@ describe('más gaming en historias y videos (pedido del dueño, 07-11-2026)', ()
     expect(picks).toHaveLength(3);
   });
 });
+
+describe('lo que revisó el dueño (o informó el canal) entra aunque no traiga descuento', () => {
+  // Sin tachado, sin baja, con aviso en el puntaje, excluido por tipo y bajo el piso: todo lo que saca a un producto.
+  const MANUAL = { free_shipping: false, is_full: false, source: 'manual' };
+  const CHANNEL = { free_shipping: false, is_full: false, source: 'canal' };
+  const plain = (over: Partial<SocialProduct> = {}) =>
+    scored(1, { original_price: null, ...over }, { warning: 'la oferta es chica', excluded: 'repuesto' });
+
+  it('un precio revisado a mano o del canal sale en historias, videos y el feed; el mismo producto sin esa marca, no', () => {
+    const manual = plain({ offer_info: MANUAL });
+    const channel = plain({ offer_info: CHANNEL });
+    const auto = plain();
+    for (const rules of [STORY_RULES, VIDEO_RULES, NETWORK_RULES, WIDE]) {
+      const picked = ids(pickByRules([auto, manual, channel], opts(), { ...rules, maxPosts: 10 }));
+      expect(picked.sort()).toEqual([manual.id, channel.id].sort());
+    }
+  });
+
+  it('igual tiene que estar a la venta, no haberse publicado hace poco y tener el precio de las últimas horas', () => {
+    const paused = plain({ offer_info: MANUAL, is_active: false });
+    const posted = plain({ offer_info: MANUAL });
+    const stale = plain({ offer_info: MANUAL, price_checked_at: new Date(NOW.getTime() - 7 * HOUR).toISOString() });
+    const ok = plain({ offer_info: MANUAL });
+    const picked = ids(pickByRules([paused, posted, stale, ok], opts({ recentlyPosted: new Set([posted.id]) }), STORY_RULES));
+    expect(picked).toEqual([ok.id]);
+  });
+
+  it('van primero y sin cupos por categoría ni marca; lo demás completa lo que queda con las reglas de siempre', () => {
+    const chosen = Array.from({ length: 4 }, () => plain({ offer_info: MANUAL, category: 'gaming', brand: 'Nintendo' }));
+    const deals = Array.from({ length: 4 }, (_, i) => scored(HIGH - i, { category: 'audio' }));
+    const picks = pickByRules([...deals, ...chosen], opts(), { ...WIDE, maxPosts: 5, perCategory: 1 });
+    // Los 4 revisados (misma categoría y marca) y, en el cupo que queda, la mejor oferta.
+    expect(ids(picks).slice(0, 4).sort()).toEqual(chosen.map((p) => p.id).sort());
+    expect(ids(picks)[4]).toBe(deals[0].id);
+    expect(picks).toHaveLength(5);
+  });
+
+  it('si llenan el cupo, no entra nada más; y de un mismo modelo va uno solo', () => {
+    const many = Array.from({ length: 6 }, () => plain({ offer_info: MANUAL }));
+    const deal = scored(HIGH);
+    expect(ids(pickByRules([deal, ...many], opts(), { ...WIDE, maxPosts: 4 }))).toHaveLength(4);
+    expect(ids(pickByRules([deal, ...many], opts(), { ...WIDE, maxPosts: 4 }))).not.toContain(deal.id);
+
+    const black = plain({ offer_info: MANUAL, ml_family_id: 'FAM-SWITCH' });
+    const white = plain({ offer_info: MANUAL, ml_family_id: 'FAM-SWITCH' });
+    const sameModelDeal = scored(HIGH, { ml_family_id: 'FAM-SWITCH' });
+    const picked = ids(pickByRules([black, white, sameModelDeal], opts(), WIDE));
+    expect(picked).toHaveLength(1);
+    expect([black.id, white.id]).toContain(picked[0]);
+  });
+
+  it('el pick lleva su puntaje y su aviso tal cual, para que el dueño lo vea en la tarjeta', () => {
+    const manual = plain({ offer_info: MANUAL });
+    const [pick] = pickByRules([manual], opts(), STORY_RULES);
+    expect(pick.discount).toBe(0);
+    expect(pick.drop).toBeNull();
+    expect(pick.score.warning).toBe('la oferta es chica');
+  });
+});

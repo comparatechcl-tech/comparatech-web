@@ -211,7 +211,8 @@ export default async function VideosPage() {
           {last ? `Último video generado el ${last.date} a las ${last.time}. ` : ''}
           Se eligen por lo que más puede interesar (qué es, la marca, qué tan comprobada está la oferta y que el precio
           esté al alcance), sumando lo que figura entre los más vendidos de Mercado Libre y lo que recibe más clics en
-          el sitio. Solo ofertas sin avisos y con el precio revisado en las últimas {maxAgeHours} horas. Si un producto
+          el sitio. Solo ofertas sin avisos y con el precio revisado en las últimas {maxAgeHours} horas; lo que revisas
+          a mano en Precios o guardas desde un aviso del canal va primero, aunque no traiga descuento. Si un producto
           cambia de precio o de oferta, su video deja de mostrarse; si después de armado aparece algo que mirar, la
           tarjeta lo dice con un &quot;Ojo&quot;. Al abrir esta página, cada video se compara con su ficha de Mercado
           Libre: si ya no calza, no deja compartirlo, guardarlo ni copiar su texto. Lo que marcas acá no cuenta para

@@ -165,8 +165,9 @@ export default async function HistoriasPage() {
           Mientras Mercado Libre no le entregue precios al sitio, esos son los que revises a mano en{' '}
           <Link href="/admin/precios" className="font-medium text-accent hover:underline">
             Precios de hoy
-          </Link>
-          . {waitingText(waiting, days)}
+          </Link>{' '}
+          y los que guardes desde un aviso del canal: esos aparecen acá aunque no traigan descuento.{' '}
+          {waitingText(waiting, days)}
         </p>
       )}
 
@@ -190,6 +191,7 @@ export default async function HistoriasPage() {
           una baja confirmada por el historial), con el precio revisado en las últimas{' '}
           {Math.round(STORY_RULES.maxPriceAgeMs / 3_600_000)} horas, y no haberse subido como historia en los últimos{' '}
           {days} días. Tampoco muestro las que le interesarían a poca gente ni las que hace poco costaban bastante menos.
+          Lo que revises a mano o guardes desde un aviso del canal aparece igual, aunque no traiga descuento.
           Para tener ofertas acá, revisa precios en{' '}
           <Link href="/admin/precios" className="font-medium text-accent hover:underline">
             Precios de hoy

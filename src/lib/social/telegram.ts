@@ -12,6 +12,7 @@ import {
 } from '@/lib/content/captions';
 import { estimateCommission } from '@/lib/commission';
 import { resolveOutboundUrl } from '@/lib/outbound';
+import { priceOnlyKnown } from '@/lib/price-freshness';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
 import { interestScore, pickVaried, type InterestEvidence, type InterestScore } from '@/lib/social/interest';
 import { shortProductName } from '@/lib/text';
@@ -457,6 +458,8 @@ export function pickByRules<T extends SocialProduct>(
     commission: number;
     score: InterestScore;
     pick: TelegramPick<T>;
+    /** Su precio lo revisó una persona o lo informó el canal de afiliados (ver abajo). */
+    chosen: boolean;
   }[] = [];
 
   // El precio más bajo de cada modelo entre lo que llega (a la venta y con
@@ -468,17 +471,24 @@ export function pickByRules<T extends SocialProduct>(
 
   for (const p of rows) {
     if (!isOnSale(p) || opts.recentlyPosted.has(p.id)) continue;
-    if (!rules.anyScore && pricierThanFamily(p, familyLowest)) continue;
+    // Un precio que revisó una persona (Precios de hoy) o que informó el canal
+    // de afiliados es una elección de quien lleva el sitio: desde el
+    // 23-11-2026 Mercado Libre no entrega precios, y lo que el dueño revisa
+    // es lo único que hay para publicar. Entra aunque no traiga descuento ni
+    // baja, y ni el puntaje ni sus avisos lo sacan.
+    const chosen = priceOnlyKnown(p);
+    const free = Boolean(rules.anyScore) || chosen;
+    if (!free && pricierThanFamily(p, familyLowest)) continue;
     const checked = p.price_checked_at ? new Date(p.price_checked_at).getTime() : NaN;
     if (!Number.isFinite(checked) || now - checked > rules.maxPriceAgeMs || checked > now + 60_000) continue;
 
     const evidence = opts.evidence?.get(p.id) ?? NO_EVIDENCE;
     const discount = captionDiscount(p);
     const drop = evidenceDrop(evidence);
-    if (discount < rules.minDiscount && (drop === null || drop < rules.minDrop)) continue;
+    if (!chosen && discount < rules.minDiscount && (drop === null || drop < rules.minDrop)) continue;
 
     const score = interestScore(p, evidence);
-    if (rules.cleanOnly && !rules.anyScore && score.warning !== null) continue;
+    if (rules.cleanOnly && !free && score.warning !== null) continue;
 
     const commission = estimateCommission(p.price, p.ml_root_category ?? null);
     candidates.push({
@@ -487,24 +497,51 @@ export function pickByRules<T extends SocialProduct>(
       familyId: p.ml_family_id ?? null,
       commission,
       // A lo elegido a mano la exclusión no lo saca; el pick lleva el puntaje tal cual, para que se vea.
-      score: rules.anyScore ? { ...score, excluded: null } : score,
+      score: free ? { ...score, excluded: null } : score,
       pick: { product: p, discount, drop, commission, score, reason: score.reason },
+      chosen,
     });
   }
 
   const boost = rules.categoryBoost;
   const boosted = (c: (typeof candidates)[number]) => c.score.points + (boost?.[c.category] ?? 0);
-  return pickVaried(candidates, {
-    max: rules.maxPosts,
-    perCategory: rules.perCategory,
-    perType: rules.perType ?? DEFAULT_PER_TYPE,
-    perBrand: rules.perBrand ?? DEFAULT_PER_BRAND,
-    minPoints: rules.anyScore ? -Infinity : undefined,
-    perCategoryFor: rules.perCategoryFor,
-    order: boost
-      ? (a, b) => boosted(b) - boosted(a) || b.commission - a.commission || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-      : undefined,
-  }).map((c) => c.pick);
+  const order = boost
+    ? (a: (typeof candidates)[number], b: (typeof candidates)[number]) =>
+        boosted(b) - boosted(a) || b.commission - a.commission || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    : undefined;
+
+  // Primero lo que eligió el dueño, sin piso de interés ni cupos por
+  // categoría, tipo o marca (igual va uno solo por modelo). Lo demás completa
+  // lo que quede, con las reglas de siempre.
+  const first = pickVaried(
+    candidates.filter((c) => c.chosen),
+    {
+      max: rules.maxPosts,
+      perCategory: rules.maxPosts,
+      perType: rules.maxPosts,
+      perBrand: rules.maxPosts,
+      minPoints: -Infinity,
+      order,
+    }
+  );
+  const families = new Set(first.map((c) => c.familyId).filter((f): f is string => f !== null));
+  const left = rules.maxPosts - first.length;
+  const rest =
+    left > 0
+      ? pickVaried(
+          candidates.filter((c) => !c.chosen && !(c.familyId && families.has(c.familyId))),
+          {
+            max: left,
+            perCategory: rules.perCategory,
+            perType: rules.perType ?? DEFAULT_PER_TYPE,
+            perBrand: rules.perBrand ?? DEFAULT_PER_BRAND,
+            minPoints: rules.anyScore ? -Infinity : undefined,
+            perCategoryFor: rules.perCategoryFor,
+            order,
+          }
+        )
+      : [];
+  return [...first, ...rest].map((c) => c.pick);
 }
 
 // ---------------------------------------------------------------------------
