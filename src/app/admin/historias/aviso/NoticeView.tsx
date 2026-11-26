@@ -8,7 +8,7 @@ import type { NoticeDeal } from '@/lib/social/deal-notice';
 import type { DealResult } from '@/lib/social/deal-notice-review';
 import { ProductCard } from '@/app/admin/candidatos/agregar/AddFromMl';
 import { StoryList } from '../StoryList';
-import { reviewNotice, reviewNoticeDeal } from './actions';
+import { reviewNotice, reviewNoticeDeal, saveNoticePrices, type NoticePricesResult } from './actions';
 
 /**
  * El aviso pegado y lo que salió de cada producto: las historias listas
@@ -48,9 +48,24 @@ export function NoticeView({ maxPriceAgeMs }: { maxPriceAgeMs: number }) {
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [pending, startTransition] = useTransition();
+  const [prices, setPrices] = useState<NoticePricesResult | null>(null);
+  const [saving, startSaving] = useTransition();
+
+  /** Guarda en el sitio los precios del aviso, para los productos que ya están publicados. */
+  function savePrices() {
+    setPrices(null);
+    startSaving(async () => {
+      try {
+        setPrices(await saveNoticePrices(text));
+      } catch {
+        setPrices({ ok: false, error: 'No se pudo guardar. Revisa la conexión e intenta de nuevo.' });
+      }
+    });
+  }
 
   function check() {
     setError(null);
+    setPrices(null);
     startTransition(async () => {
       try {
         const res = await reviewNotice(text);
@@ -137,6 +152,49 @@ export function NoticeView({ maxPriceAgeMs }: { maxPriceAgeMs: number }) {
             : `Encontré ${results.length} ${results.length === 1 ? 'producto' : 'productos'}: ${stories.length} con historia lista, ${toAdd.length} por agregar y ${skipped.length} que se ${skipped.length === 1 ? 'salta' : 'saltan'}.`}
           {review.omitted > 0 && ` Quedaron ${review.omitted} fuera: pega el resto en otra tanda.`}
         </p>
+      )}
+
+      {review && results.length > 0 && (
+        <section className="rounded-xl border border-border bg-surface p-4">
+          <h2 className="font-heading text-lg font-semibold text-fg">Precios del aviso</h2>
+          <p className="mt-1 text-sm text-muted">
+            Si el aviso es de hoy, guarda sus precios en el sitio: los productos que ya están publicados quedan con el
+            precio del aviso y la fecha de hoy. No toca los que traen cupón ni los que están en pausa.
+          </p>
+          <button
+            type="button"
+            onClick={savePrices}
+            disabled={saving || pending}
+            className={`${BUTTON} mt-3 bg-accent text-ink hover:bg-accent/90`}
+          >
+            {saving && <Loader2 size={16} className="animate-spin" aria-hidden />}
+            {saving ? 'Guardando…' : 'Guardar los precios en el sitio'}
+          </button>
+          {prices && !prices.ok && (
+            <p role="alert" className="mt-3 text-sm text-red-400">
+              {prices.error}
+            </p>
+          )}
+          {prices?.ok && (
+            <div role="status" className="mt-3">
+              <p className="text-sm font-medium text-fg">
+                {prices.test
+                  ? 'Modo prueba: no se guardó nada. Esto es lo que se guardaría.'
+                  : prices.saved === 0
+                    ? 'No se guardó ningún precio.'
+                    : `${prices.saved} ${prices.saved === 1 ? 'precio guardado' : 'precios guardados'} en el sitio.`}
+              </p>
+              <ul className="mt-2 flex flex-col gap-2">
+                {prices.lines.map((line, i) => (
+                  <li key={i} className="text-sm">
+                    <span className="font-medium text-fg">{line.name}</span>
+                    <span className="block text-muted">{line.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
       )}
 
       {review && review.coupons.length > 0 && (

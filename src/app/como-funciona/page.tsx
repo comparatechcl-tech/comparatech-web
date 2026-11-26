@@ -39,8 +39,9 @@ export default function ComoFuncionaPage() {
 
       <Section id="precios" title="El precio">
         <p>
-          Es el que mostraba Mercado Libre en la ficha del producto la última vez que lo revisamos: esa fecha va junto
-          al precio. El de hoy es el que ves en Mercado Libre al momento de comprar.
+          Es el que mostraba Mercado Libre en la ficha del producto la última vez que lo revisamos, o el que Mercado
+          Libre informó ese día en su canal para afiliados: esa fecha va junto al precio. El de hoy es el que ves en
+          Mercado Libre al momento de comprar.
         </p>
       </Section>
 

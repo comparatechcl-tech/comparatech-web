@@ -5,9 +5,11 @@
  * historia de cada producto de tecnología.
  *
  * Los links del aviso (tinyurl, meli.la) no se abren nunca: abrirlos cuenta
- * como clic de afiliado. El producto se busca por su nombre en el catálogo
- * de Mercado Libre (lib/social/deal-notice-review). Solo un link limpio a
- * una ficha (mercadolibre.cl/…/p/MLC…) se usa tal cual.
+ * como clic de afiliado. A un link de tinyurl se le puede preguntar adónde
+ * apunta sin seguirlo (lib/short-links), y con eso se sabe la ficha exacta;
+ * si no, el producto se busca por su nombre en el catálogo de Mercado Libre
+ * (lib/social/deal-notice-review). Un link limpio a una ficha
+ * (mercadolibre.cl/…/p/MLC…) se usa tal cual.
  *
  * Puro y sin Node. Sin lookbehind ni grupos con nombre (Safari < 16.4).
  */

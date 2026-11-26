@@ -12,7 +12,9 @@ import { CHANNEL_OFFER_INFO } from './channel-price';
 import {
   CHANNEL_ACTOR,
   channelName,
+  dealOutcomeText,
   postsToProcess,
+  processNotices,
   readLastChannelPost,
   syncChannel,
   type ChannelSyncDeps,
@@ -270,6 +272,65 @@ describe('syncChannel', () => {
       ok: false,
       omitida: 'Telegram no respondió bien: Telegram respondió 500',
     });
+  });
+});
+
+describe('processNotices: un aviso pegado a mano', () => {
+  const pasted = (text: string) => [{ id: 0, postedAt: NOW.toISOString(), text }];
+  const opts = { now: NOW.getTime(), write: true, actor: 'cristopher' };
+
+  it('dice qué pasó con cada producto, en el orden del aviso, y firma quien lo pegó', async () => {
+    const { admin, audit } = fakeAdmin([ps5({ price: 729_990 })]);
+    const { d, applied } = deps([]);
+    const result = await processNotices(admin, pasted(DEALS_TEXT), opts, d);
+
+    expect(result.deals).toEqual([
+      { name: 'Auriculares inalámbricos Pulse Elite Sony', price: 109_990, mlId: 'MLC50000001', status: 'no_esta_en_el_sitio' },
+      { name: 'Consola PlayStation 5 Digital Slim', price: 709_990, mlId: 'MLC61403702', status: 'guardado', changed: true },
+    ]);
+    expect(result).toMatchObject({ products: 2, saved: 1, changed: 1 });
+    // Queda con la hora en que se pegó, que es cuando la persona lo vio.
+    expect(applied[0].patch).toMatchObject({ price: 709_990, price_checked_at: NOW.toISOString() });
+    expect(audit[0]).toMatchObject({
+      actor: 'cristopher',
+      action: 'precio_canal',
+      after: { precio: 709_990, aviso: 'pegado a mano' },
+    });
+  });
+
+  it('si un producto viene dos veces, vale la última', async () => {
+    const twice = `${DEALS_TEXT}\n\n🎮 Consola PlayStation 5 Digital Slim Edición Nueva\n💰 Precio: $699.990\n👉 https://tinyurl.com/yc8hrkdp`;
+    const { admin } = fakeAdmin([ps5()]);
+    const { d, applied } = deps([]);
+    const result = await processNotices(admin, pasted(twice), opts, d);
+    expect(result.deals.map((x) => [x.name, x.status])).toEqual([
+      ['Auriculares inalámbricos Pulse Elite Sony', 'no_esta_en_el_sitio'],
+      ['Consola PlayStation 5 Digital Slim', 'ya_revisado'],
+      ['Consola PlayStation 5 Digital Slim Edición Nueva', 'guardado'],
+    ]);
+    expect(applied).toHaveLength(1);
+    expect(applied[0].patch.price).toBe(699_990);
+  });
+
+  it('un aviso sin productos no hace nada', async () => {
+    const { admin } = fakeAdmin([ps5()]);
+    const { d } = deps([]);
+    const result = await processNotices(admin, pasted('Hola, mañana hay ofertas'), opts, d);
+    expect(result).toMatchObject({ products: 0, saved: 0, deals: [] });
+    expect(d.resolve).not.toHaveBeenCalled();
+  });
+
+  it('dealOutcomeText explica cada caso en una frase', () => {
+    expect(dealOutcomeText({ status: 'guardado', price: 709_990, changed: true })).toBe(
+      'Guardado: $709.990. Cambió respecto de lo que tenía el sitio.'
+    );
+    expect(dealOutcomeText({ status: 'guardado', price: 709_990, changed: false })).toBe(
+      'Guardado: $709.990, el mismo que tenía el sitio.'
+    );
+    expect(dealOutcomeText({ status: 'guardado', price: 709_990 }, true)).toBe('Modo prueba: se guardaría $709.990.');
+    expect(dealOutcomeText({ status: 'con_condiciones', price: 1 })).toContain('cupón');
+    expect(dealOutcomeText({ status: 'no_esta_en_el_sitio', price: 1 })).toContain('No está en el sitio');
+    expect(dealOutcomeText({ status: 'cambio_grande', price: 1 })).toContain('pestaña Precios');
   });
 });
 

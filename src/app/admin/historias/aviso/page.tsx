@@ -8,9 +8,12 @@ export const maxDuration = 60;
 
 /**
  * Recomendaciones del canal de afiliados de Mercado Libre: el dueño pega el
- * aviso y el sitio busca cada producto por su nombre (lib/social/deal-notice
- * y deal-notice-review). Lo que está en el sitio sale con su historia lista;
- * lo que falta se agrega con un toque; lo que no es de tecnología se salta.
+ * aviso y el sitio ubica cada producto por su link (lib/short-links: se le
+ * pregunta al acortador, sin llegar a Mercado Libre) o, si no se puede, por
+ * su nombre (lib/social/deal-notice y deal-notice-review). Lo que está en el
+ * sitio sale con su historia lista; lo que falta se agrega con un toque; lo
+ * que no es de tecnología se salta. Con un toque más, los precios del aviso
+ * quedan en el sitio (lib/channel-sync).
  * Los links del aviso no se abren: cuentan como clic de afiliado.
  */
 export default function AvisoPage() {
@@ -27,11 +30,16 @@ export default function AvisoPage() {
 
       <ol className="mt-5 list-decimal space-y-1.5 rounded-xl border border-border bg-surface py-4 pl-9 pr-4 text-sm text-fg">
         <li>
-          En WhatsApp, mantén apretado el aviso y toca <strong>Copiar</strong>. Puedes copiar varios mensajes juntos.
+          En WhatsApp o en Telegram, mantén apretado el aviso y toca <strong>Copiar</strong>. Puedes copiar varios
+          mensajes juntos.
         </li>
         <li>
-          Pégalo abajo y toca <strong>Revisar aviso</strong>. Los links tinyurl no los abro (cuentan como clic): busco
-          cada producto por su nombre.
+          Pégalo abajo y toca <strong>Revisar aviso</strong>. Los links no los abro: le pregunto al acortador a qué
+          producto apunta cada uno, sin entrar a Mercado Libre. Si no responde, busco el producto por su nombre.
+        </li>
+        <li>
+          Si el aviso es de hoy, toca <strong>Guardar los precios en el sitio</strong>: los productos que ya están
+          publicados quedan con el precio del aviso y la fecha de hoy.
         </li>
         <li>
           Si alguno falta en el sitio, toca <strong>Publicar ahora</strong> y su historia aparece en la lista.

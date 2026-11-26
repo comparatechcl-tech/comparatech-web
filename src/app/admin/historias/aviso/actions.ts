@@ -1,15 +1,24 @@
 'use server';
 
 /**
- * Acciones de "Aviso del canal" (/admin/historias/aviso). Solo leen: agregar
- * un producto que falta lo hace la acción de Agregar (addFromMl), con sus
- * mismos controles, y marcar una historia como subida, la de Historias.
+ * Acciones de "Aviso del canal" (/admin/historias/aviso). Revisar solo lee:
+ * agregar un producto que falta lo hace la acción de Agregar (addFromMl), con
+ * sus mismos controles, y marcar una historia como subida, la de Historias.
+ *
+ * Lo único que escribe es saveNoticePrices: guarda en el sitio el precio que
+ * el aviso da para los productos que ya están publicados (lib/channel-sync).
  */
 
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { getMlToken, mlTokenError } from '@/lib/ml-enrichment';
 import { mapWithConcurrency } from '@/lib/ml-catalog';
 import { requireAdmin } from '@/lib/admin-auth';
+import { dealOutcomeText, processNotices } from '@/lib/channel-sync';
+import { notifyIndexNow } from '@/lib/indexnow';
+import { isProductionRuntime } from '@/lib/runtime-env';
+import { resolveShortLink } from '@/lib/short-links';
+import { SITE_URL } from '@/lib/site';
 import { directLinksUsable } from '@/lib/admin-settings';
 import { readAffiliateSettings } from '@/lib/settings';
 import { minCommissionFromEnv } from '@/lib/prospect-filter';
@@ -64,6 +73,17 @@ async function safeReview(deal: NoticeDeal, ctx: DealContext): Promise<DealResul
   }
 }
 
+/**
+ * La ficha exacta del producto, si el link del aviso es uno corto que se puede
+ * resolver: se le pregunta al acortador adónde apunta, sin llegar a Mercado
+ * Libre (lib/short-links). Con ella no hace falta adivinar por el nombre.
+ */
+async function withExactId(deal: NoticeDeal): Promise<NoticeDeal> {
+  if (deal.mlId || !deal.link) return deal;
+  const resolved = await resolveShortLink(deal.link);
+  return resolved.status === 'ficha' ? { ...deal, mlId: resolved.mlId } : deal;
+}
+
 /** Lee el aviso pegado y revisa cada producto. */
 export async function reviewNotice(text: string): Promise<NoticeReview> {
   await requireAdmin();
@@ -80,7 +100,7 @@ export async function reviewNotice(text: string): Promise<NoticeReview> {
 
   const ctx = await context();
   if ('error' in ctx) return { ok: false, error: ctx.error };
-  const results = await mapWithConcurrency(parsed.deals, 3, (deal) => safeReview(deal, ctx));
+  const results = await mapWithConcurrency(parsed.deals, 3, async (deal) => safeReview(await withExactId(deal), ctx));
   return { ok: true, results, omitted: parsed.omitted, coupons: parsed.coupons, renderedAt: Date.now() };
 }
 
@@ -103,4 +123,66 @@ export async function reviewNoticeDeal(raw: unknown): Promise<DealReview> {
   const ctx = await context();
   if ('error' in ctx) return { ok: false, error: ctx.error };
   return { ok: true, result: await safeReview(deal, ctx), renderedAt: Date.now() };
+}
+
+export type NoticePricesResult =
+  | {
+      ok: true;
+      /** Precios guardados (o que se guardarían, en modo prueba). */
+      saved: number;
+      /** Qué pasó con cada producto del aviso, en su orden. */
+      lines: { name: string; text: string; saved: boolean }[];
+      /** Fuera del sitio publicado no se escribe: se muestra qué se guardaría. */
+      test: boolean;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Guarda en el sitio el precio que el aviso da para cada producto que ya está
+ * publicado. Lo usa el dueño cuando pega un aviso de hoy del canal oficial de
+ * afiliados: el precio queda con la hora en que lo pegó, que es cuando lo vio.
+ *
+ * Se lee de nuevo el texto en el servidor (no se confía en precios que manda
+ * el navegador) y valen las reglas de lib/channel-price: sin cupones ni
+ * tarjetas, sin cambios de más del doble o menos de la mitad, y sin volver a
+ * publicar productos en pausa.
+ *
+ * Solo escribe en el sitio publicado; en cualquier otro lado responde qué
+ * guardaría.
+ */
+export async function saveNoticePrices(text: string): Promise<NoticePricesResult> {
+  const actor = await requireAdmin();
+  const admin = getSupabaseAdmin();
+  if (!admin) return { ok: false, error: 'Supabase admin no configurado' };
+
+  const notice = String(text ?? '');
+  if (parseDealNotice(notice).deals.length === 0) {
+    return { ok: false, error: 'No encontré productos con su link en lo que pegaste.' };
+  }
+
+  const now = new Date();
+  const write = isProductionRuntime();
+  try {
+    const result = await processNotices(
+      admin,
+      [{ id: 0, postedAt: now.toISOString(), text: notice }],
+      { now: now.getTime(), write, actor }
+    );
+    if (result.written.length > 0) {
+      // El precio se ve en casi todas las páginas públicas: se vuelve a armar todo.
+      revalidateTag('catalog');
+      revalidatePath('/', 'layout');
+      // Bing (de donde lee ChatGPT) vuelve a leer esas fichas. Nunca lanza.
+      await notifyIndexNow(result.written.map((w) => `${SITE_URL}/producto/${w.slug}`));
+    }
+    return {
+      ok: true,
+      saved: result.saved,
+      test: !write,
+      lines: result.deals.map((d) => ({ name: d.name, text: dealOutcomeText(d, !write), saved: d.status === 'guardado' })),
+    };
+  } catch (err) {
+    console.error('[aviso] no se pudieron guardar los precios:', err instanceof Error ? err.message : err);
+    return { ok: false, error: 'No se pudieron guardar los precios. Intenta de nuevo.' };
+  }
 }
