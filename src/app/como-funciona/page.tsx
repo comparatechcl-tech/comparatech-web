@@ -32,8 +32,9 @@ export default function ComoFuncionaPage() {
       <Section id="productos" title="Los productos">
         {/* En pasado: desde el 23-11-2026 Mercado Libre no deja volver a mirar quién vende cada producto. */}
         <p>
-          Salen de lo más vendido y lo más buscado en Mercado Libre Chile. Los agregamos cuando su vendedor tenía
-          reputación verde. Las especificaciones son las que publica Mercado Libre.
+          Salen de lo más vendido y lo más buscado en Mercado Libre Chile, y de lo que Mercado Libre recomienda en su
+          canal para afiliados. Los que encontramos nosotros se agregaron cuando su vendedor tenía reputación verde.
+          Las especificaciones son las que publica Mercado Libre.
         </p>
       </Section>
 

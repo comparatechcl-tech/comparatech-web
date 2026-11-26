@@ -4,7 +4,8 @@ import { categoryFromDomain } from '@/lib/categories';
 import { priceCheckedWithin } from '@/lib/price-freshness';
 import { captionDiscount } from '@/lib/content/captions';
 import { searchCatalogProducts, type CatalogSearchHit } from '@/lib/ml-catalog';
-import { inspectCatalogProduct, type ProductPreview, type ReviewContext } from '@/lib/manual-add';
+import { noticePrice } from '@/lib/channel-price';
+import { inspectCatalogProduct, type KnownPrice, type ProductPreview, type ReviewContext } from '@/lib/manual-add';
 import { readAffiliateSettings, type AffiliateSettings } from '@/lib/settings';
 import { NAME_MATCH_MIN, nameMatch, noticeNote, type NoticeDeal } from '@/lib/social/deal-notice';
 import { STORY_RULES, buildStoryItem, readStoryHistory, type StoryHistory, type StoryItem } from '@/lib/social/stories';
@@ -117,6 +118,16 @@ async function storyOf(product: SocialProduct, deal: NoticeDeal, ctx: DealContex
   return { kind: 'historia', deal, item: { ...item, reason: noticeNote(deal, shown.price, last, !fresh) } };
 }
 
+/**
+ * El precio que el aviso da para el producto, si no tiene condiciones
+ * (lib/channel-price). Con él se puede agregar al sitio un producto que
+ * falta aunque Mercado Libre no entregue precios: entra con el del aviso.
+ */
+export function knownPriceOf(deal: NoticeDeal, now: Date): KnownPrice | undefined {
+  const read = noticePrice(deal);
+  return read.ok ? { ...read.value, seenAt: now.toISOString() } : undefined;
+}
+
 /** Qué hacer con un producto del aviso. Lanza solo si falla la base. */
 export async function reviewDeal(deal: NoticeDeal, ctx: DealContext): Promise<DealResult> {
   let found: Found[];
@@ -152,7 +163,7 @@ export async function reviewDeal(deal: NoticeDeal, ctx: DealContext): Promise<De
   const ordered = [...candidates.filter((f) => f.buyBox), ...candidates.filter((f) => !f.buyBox)];
   let first: ProductPreview | null = null;
   for (const f of ordered.slice(0, MAX_INSPECT)) {
-    const inspected = await inspectCatalogProduct(f.id, f.id, ctx);
+    const inspected = await inspectCatalogProduct(f.id, f.id, ctx, knownPriceOf(deal, ctx.now));
     if ('notFound' in inspected) continue;
     const preview = inspected.preview;
     if (preview.state === 'en_sitio') {

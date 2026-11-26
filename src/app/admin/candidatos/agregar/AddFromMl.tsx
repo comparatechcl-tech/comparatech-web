@@ -66,7 +66,20 @@ function CopyLink({ url }: { url: string }) {
 }
 
 /** `onDone`: avisa cuando se agregó o publicó (lo usa /admin/historias/aviso para armar la historia). */
-export function ProductCard({ item, onDone }: { item: ProductPreview; onDone?: (result: Done) => void }) {
+export function ProductCard({
+  item,
+  onDone,
+  addWith,
+}: {
+  item: ProductPreview;
+  onDone?: (result: Done) => void;
+  /**
+   * Otra forma de agregarlo. /admin/historias/aviso la usa para agregar con el
+   * precio del aviso del canal, que es lo único que hay desde que Mercado
+   * Libre no entrega precios. Sin esto, se agrega como siempre (addFromMl).
+   */
+  addWith?: (publish: boolean) => Promise<AddFromMlResult>;
+}) {
   const [state, setState] = useState<CardState>({ status: 'idle' });
   const [, startTransition] = useTransition();
 
@@ -74,7 +87,7 @@ export function ProductCard({ item, onDone }: { item: ProductPreview; onDone?: (
     setState({ status: 'busy', label: publish ? 'Publicando…' : 'Agregando…' });
     startTransition(async () => {
       try {
-        const result = await addFromMl(item.id, publish);
+        const result = await (addWith ? addWith(publish) : addFromMl(item.id, publish));
         setState(result.ok ? { status: 'done', result } : { status: 'error', message: result.error });
         if (result.ok) onDone?.(result);
       } catch {

@@ -38,9 +38,11 @@ vi.mock('@/app/admin/candidatos/actions', () => ({
   approveCandidate: (...args: Parameters<typeof mocks.approveCandidate>) => mocks.approveCandidate(...args),
 }));
 
+import { resetWinnersGate } from '@/lib/ml-catalog';
 import {
   NOT_ML_MESSAGE,
   SHORT_LINK_MESSAGE,
+  UNKNOWN_SELLER_ID,
   inspectCatalogProduct,
   reviewInput,
   saveManualCandidate,
@@ -69,6 +71,8 @@ interface MlWorld {
   domains?: string[];
   searchResults?: unknown[];
   searchStatus?: number;
+  /** Mercado Libre tiene cerrada la consulta de precios (desde el 23-11-2026). */
+  winnersClosed?: boolean;
 }
 
 /** ML de mentira: una ficha, su ganador, la raíz de su categoría y su vendedor. */
@@ -82,6 +86,7 @@ function stubMl(world: MlWorld = {}) {
       return status === 200 ? json(200, { results: world.searchResults ?? [] }) : json(status, { error: 'forbidden' });
     }
     if (/^\/products\/[^/]+\/items$/.test(path)) {
+      if (world.winnersClosed) return json(403, { code: 'PA_UNAUTHORIZED_RESULT_FROM_POLICIES', message: 'x' });
       if (world.winners === null) return json(404, { message: 'No winners found' });
       return json(200, {
         paging: { total: 1 },
@@ -171,6 +176,8 @@ function context(over: Partial<ReviewContext> = {}): ReviewContext {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // El estado de la consulta de precios vive en el módulo: que un rechazo no pase a la prueba siguiente.
+  resetWinnersGate();
 });
 
 // ---------------------------------------------------------------------------
@@ -483,5 +490,90 @@ describe('acciones de /admin/candidatos/agregar', () => {
       error: 'Ese no es un código de ficha de Mercado Libre (MLC…).',
     });
     expect(logged).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Con la consulta de precios cerrada: un producto entra con el precio de un aviso del canal
+// ---------------------------------------------------------------------------
+
+describe('inspectCatalogProduct con el precio de un aviso del canal', () => {
+  const known = { price: 109_990, listPrice: null, seenAt: '2026-11-26T14:00:00.000Z' };
+
+  it('sin precio conocido, con los precios cerrados no se puede agregar', async () => {
+    stubMl({ winnersClosed: true });
+    const res = await inspectCatalogProduct(ID, ID, context());
+    if ('notFound' in res) throw new Error('la ficha existe');
+    expect(res.preview).toMatchObject({
+      state: 'no_se_puede',
+      reason: expect.stringContaining('cerró la consulta de precios'),
+    });
+    expect(res.candidate).toBeNull();
+  });
+
+  it('con el precio del aviso entra: ese precio, su fecha, y nada del vendedor', async () => {
+    stubMl({ winnersClosed: true });
+    const res = await inspectCatalogProduct(ID, ID, context(), known);
+    if ('notFound' in res) throw new Error('la ficha existe');
+
+    expect(res.preview).toMatchObject({
+      state: 'listo',
+      name: 'Parlante JBL Charge 5 Negro',
+      price: 109_990,
+      originalPrice: null,
+      discountPct: 0,
+      sellerNickname: null,
+      commissionAssumed: true,
+      affiliateUrl: expect.stringContaining(ID),
+    });
+    expect(res.preview.reason).toBeUndefined();
+    expect(res.preview.warnings[0]).toContain('precio del aviso del canal');
+
+    expect(res.candidate).toMatchObject({
+      ml_product_id: ID,
+      ml_item_id: null,
+      name: 'Parlante JBL Charge 5 Negro',
+      price: 109_990,
+      original_price: null,
+      seller_id: UNKNOWN_SELLER_ID,
+      seller_nickname: null,
+      seller_sales_count: 0,
+      source: 'canal',
+      status: 'pending_review',
+      ml_root_category: null,
+      is_full: false,
+      official_store: false,
+      // Con esta fecha el producto muestra el precio en el sitio.
+      checked_at: known.seenAt,
+    });
+  });
+
+  it('lleva el descuento que da el aviso', async () => {
+    stubMl({ winnersClosed: true });
+    const res = await inspectCatalogProduct(ID, ID, context(), { ...known, price: 79_990, listPrice: 159_990 });
+    if ('notFound' in res) throw new Error('la ficha existe');
+    expect(res.preview).toMatchObject({ price: 79_990, originalPrice: 159_990, discountPct: 50 });
+    expect(res.candidate).toMatchObject({ price: 79_990, original_price: 159_990 });
+  });
+
+  it('lo demás sigue igual: si ya está en el sitio lo dice, y si ML responde, manda el precio de ML', async () => {
+    stubMl({ winnersClosed: true });
+    const onSite = fakeAdmin((q) =>
+      q.table === 'products' && q.columns.startsWith('slug')
+        ? { data: { slug: 'parlante-jbl', name: 'Parlante JBL', is_active: true, is_hidden: false, deleted_at: null } }
+        : { data: null }
+    );
+    const already = await inspectCatalogProduct(ID, ID, context({ admin: onSite.client }), known);
+    if ('notFound' in already) throw new Error('la ficha existe');
+    expect(already.preview.state).toBe('en_sitio');
+    expect(already.candidate).toBeNull();
+
+    // Con la consulta abierta, el precio conocido no se usa: manda lo que dice Mercado Libre.
+    resetWinnersGate();
+    stubMl();
+    const open = await inspectCatalogProduct(ID, ID, context(), known);
+    if ('notFound' in open) throw new Error('la ficha existe');
+    expect(open.preview).toMatchObject({ state: 'listo', price: 129_990, sellerNickname: 'JBL_TIENDA' });
+    expect(open.candidate).toMatchObject({ seller_id: 42, source: 'manual' });
   });
 });

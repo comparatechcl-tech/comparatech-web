@@ -14,7 +14,12 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { getMlToken, mlTokenError } from '@/lib/ml-enrichment';
 import { mapWithConcurrency } from '@/lib/ml-catalog';
 import { requireAdmin } from '@/lib/admin-auth';
+import { logAdminEvent } from '@/lib/admin-audit';
+import { CHANNEL_OFFER_INFO, noticePrice } from '@/lib/channel-price';
 import { dealOutcomeText, processNotices } from '@/lib/channel-sync';
+import { UNKNOWN_SELLER_ID, inspectCatalogProduct, saveManualCandidate } from '@/lib/manual-add';
+import { approveCandidate } from '../../candidatos/actions';
+import type { AddFromMlResult } from '../../candidatos/agregar/actions';
 import { notifyIndexNow } from '@/lib/indexnow';
 import { isProductionRuntime } from '@/lib/runtime-env';
 import { resolveShortLink } from '@/lib/short-links';
@@ -43,6 +48,8 @@ export type DealReview = { ok: true; result: DealResult; renderedAt: number } | 
 
 const ML_ID = /^MLC\d{5,15}$/;
 const CODE = /^[A-Z0-9]{4,20}$/;
+/** Las columnas de precio son integer de Postgres; ningún producto del sitio pasa de esto. */
+const MAX_AMOUNT = 99_999_999;
 
 async function context(): Promise<DealContext | { error: string }> {
   const admin = getSupabaseAdmin();
@@ -112,7 +119,98 @@ function toDeal(raw: unknown): NoticeDeal | null {
   const price = typeof o.price === 'number' && Number.isSafeInteger(o.price) && o.price > 0 ? o.price : null;
   const coupon = typeof o.coupon === 'string' && CODE.test(o.coupon) ? o.coupon : null;
   const mlId = typeof o.mlId === 'string' && ML_ID.test(o.mlId) ? o.mlId : null;
-  return { name: o.name.trim(), price, coupon, mlId };
+  // Lo que lib/channel-price mira para saber si el aviso da un precio sin condiciones.
+  const amounts = Array.isArray(o.amounts)
+    ? o.amounts.filter((n): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n > 0 && n <= MAX_AMOUNT).slice(0, 6)
+    : undefined;
+  const discountPct =
+    typeof o.discountPct === 'number' && o.discountPct > 0 && o.discountPct < 100 ? Math.round(o.discountPct) : null;
+  return {
+    name: o.name.trim(),
+    price,
+    coupon,
+    mlId,
+    ...(amounts ? { amounts } : {}),
+    discountPct,
+    conditional: o.conditional === true || coupon !== null,
+  };
+}
+
+/** Por qué el precio de un aviso no sirve para agregar el producto al sitio. */
+const NO_PRICE_REASON: Record<string, string> = {
+  con_condiciones: 'El aviso ata el precio a un cupón, una tarjeta o cuotas: no sirve como precio del producto.',
+  sin_precio: 'El aviso no trae el precio de este producto.',
+  precio_ambiguo: 'El aviso trae varios montos y no queda claro cuál es el precio.',
+};
+
+/**
+ * Agrega al sitio un producto de un aviso del canal que todavía no está, con
+ * el precio del aviso. Desde el 23-11-2026 Mercado Libre no entrega precios
+ * ni vendedores, y sin eso "Agregar desde Mercado Libre" no puede revisar un
+ * producto nuevo; el aviso del canal oficial sí trae el precio.
+ *
+ * El producto entra sin nada del vendedor (lib/manual-add: UNKNOWN_SELLER_ID)
+ * y con la marca del canal en su oferta, así que el sitio muestra el precio
+ * con su fecha y nada más. Lo demás es lo de siempre: la misma cola, la misma
+ * aprobación y el mismo link de afiliado.
+ */
+export async function addFromNotice(raw: unknown, publish: boolean): Promise<AddFromMlResult> {
+  const actor = await requireAdmin();
+  const deal = toDeal(raw);
+  if (!deal?.mlId) return { ok: false, error: 'No se sabe a qué ficha apunta este producto del aviso.' };
+  const price = noticePrice(deal);
+  if (!price.ok) return { ok: false, error: NO_PRICE_REASON[price.reason] ?? 'El aviso no da un precio que se pueda usar.' };
+
+  const ctx = await context();
+  if ('error' in ctx) return { ok: false, error: ctx.error };
+
+  const id = deal.mlId;
+  let inspected: Awaited<ReturnType<typeof inspectCatalogProduct>>;
+  try {
+    inspected = await inspectCatalogProduct(id, id, ctx, { ...price.value, seenAt: new Date().toISOString() });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'No se pudo revisar. Intenta de nuevo.' };
+  }
+  if ('notFound' in inspected) return { ok: false, error: `Mercado Libre no tiene una ficha con el código ${id}.` };
+  const { preview, candidate } = inspected;
+  if (preview.state === 'en_sitio') return { ok: false, error: 'Este producto ya está en el sitio.' };
+  if (!candidate) return { ok: false, error: preview.reason ?? 'No se puede agregar este producto.' };
+
+  const saved = await saveManualCandidate(ctx.admin, candidate);
+  if (!saved.ok) return saved;
+
+  await logAdminEvent(ctx.admin, {
+    actor,
+    action: 'agregar_desde_ml',
+    target: saved.id,
+    after: { ml_product_id: id, name: preview.name, price: preview.price, origen: 'aviso del canal', publish },
+  });
+  revalidatePath('/admin/candidatos');
+
+  if (!publish) return { ok: true, outcome: 'en_cola' };
+
+  const approved = await approveCandidate(saved.id, '');
+  if (!approved.ok) return { ok: true, outcome: 'en_cola', notPublished: approved.error };
+
+  // Entró sin nada de la oferta: con la marca del canal el sitio no muestra
+  // vendedor, envío ni garantía. Solo si sigue siendo ese el precio que se
+  // vio (si Mercado Libre reabriera los precios, la revisión de la
+  // aprobación ya habría dejado los datos de verdad).
+  const { error: markError } = await ctx.admin
+    .from('products')
+    .update({ offer_info: CHANNEL_OFFER_INFO })
+    .eq('ml_product_id', id)
+    .eq('seller_id', UNKNOWN_SELLER_ID);
+  if (markError) console.error('[aviso] no se pudo marcar la oferta del producto nuevo:', markError.message);
+  revalidateTag('catalog');
+  revalidatePath('/', 'layout');
+
+  return {
+    ok: true,
+    outcome: approved.outcome,
+    slug: approved.slug,
+    ...(approved.reason ? { reason: approved.reason } : {}),
+  };
 }
 
 /** Revisa de nuevo un producto del aviso, por ejemplo recién agregado al sitio. */

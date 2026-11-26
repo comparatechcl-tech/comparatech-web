@@ -89,6 +89,34 @@ export interface ReviewContext {
 /** La fila de product_candidates, como la arma la prospección. */
 export type ManualCandidate = Record<string, unknown> & { ml_product_id: string; name: string };
 
+/**
+ * Un precio que ya se conoce por otra vía: el que Mercado Libre publicó para
+ * el producto en su canal de afiliados (lib/channel-price). Con la consulta
+ * de precios cerrada es lo único que permite agregar un producto nuevo.
+ */
+export interface KnownPrice {
+  price: number;
+  /** El precio sin descuento, si el aviso lo trae y es creíble. */
+  listPrice: number | null;
+  /** Cuándo se vio ese precio (ISO). */
+  seenAt: string;
+}
+
+/**
+ * El vendedor de un producto que entra con un precio conocido: no se sabe
+ * quién lo vende. La base exige un número y una reputación (migración 0002),
+ * así que va este número, que no es de ningún vendedor, sin nombre ni ventas.
+ * El sitio no muestra nada del vendedor de estos productos: su offer_info
+ * lleva la marca del canal (priceOnlyKnown en lib/price-freshness).
+ */
+export const UNKNOWN_SELLER_ID = 0;
+
+/** De dónde viene un candidato que entra con el precio de un aviso del canal. */
+export const CHANNEL_CANDIDATE_SOURCE = 'canal';
+
+const FROM_NOTICE_WARNING =
+  'Entra con el precio del aviso del canal. Mercado Libre no deja ver quién lo vende: el sitio no dirá nada del vendedor.';
+
 /** Columnas de las migraciones 0014 y 0018: sin ellas se guarda igual, sin estas. */
 const OPTIONAL_COLUMNS = [
   'reject_reason',
@@ -166,7 +194,9 @@ async function readSiteState(admin: SupabaseClient, id: string, familyId: string
 export async function inspectCatalogProduct(
   id: string,
   raw: string,
-  ctx: ReviewContext
+  ctx: ReviewContext,
+  /** El precio del aviso del canal, si el producto viene de uno: permite agregarlo aunque ML no entregue precios. */
+  known?: KnownPrice
 ): Promise<{ notFound: true } | { preview: ProductPreview; candidate: ManualCandidate | null }> {
   const base: ProductPreview = {
     kind: 'ficha',
@@ -240,7 +270,71 @@ export async function inspectCatalogProduct(
     );
   }
   if (winners.status === 'error') {
-    return blocked(preview, winners.detail === WINNERS_CLOSED_DETAIL ? ML_PRICES_CLOSED : ML_DOWN);
+    if (winners.detail !== WINNERS_CLOSED_DETAIL) return blocked(preview, ML_DOWN);
+    if (!known) return blocked(preview, ML_PRICES_CLOSED);
+
+    // Mercado Libre no entrega el precio ni el vendedor, pero el aviso del
+    // canal trae el precio: el producto entra con ese, sin nada del vendedor.
+    const commission = estimateCommission(known.price, null);
+    const warnings = [FROM_NOTICE_WARNING];
+    if (!passesCommissionFloor(known.price, null, ctx.minCommission)) {
+      warnings.push(`Puede dejar poca comisión: ~${formatCLP(commission)} por venta.`);
+    }
+    if (site.familyName) warnings.push(`Ya publicas otro color de este modelo (${site.familyName}).`);
+    if (site.candidate && site.candidate.status !== 'pending_review' && site.candidate.status !== 'approved') {
+      warnings.push('Lo habías descartado antes: agregarlo lo vuelve a la cola.');
+    }
+    if (!ctx.affiliate) {
+      warnings.push(
+        'Los links directos no están confirmados: para publicarlo hay que pegar su link meli.la en Candidatos.'
+      );
+    }
+    const at = new Date().toISOString();
+    return {
+      preview: {
+        ...preview,
+        price: known.price,
+        originalPrice: known.listPrice,
+        discountPct: discountOf(known.price, known.listPrice),
+        commission,
+        commissionAssumed: true,
+        state: site.candidate?.status === 'pending_review' ? 'en_cola' : 'listo',
+        warnings,
+      },
+      candidate: {
+        ml_product_id: id,
+        ml_family_id: enrichment.familyId,
+        ml_domain_id: enrichment.domainId,
+        ml_item_id: null,
+        name,
+        brand: enrichment.brand,
+        category,
+        price: known.price,
+        original_price: known.listPrice,
+        image_url: imageUrl,
+        description: enrichment.description,
+        specs: enrichment.specs,
+        seller_id: UNKNOWN_SELLER_ID,
+        seller_nickname: null,
+        // La base exige una de sus cuatro reputaciones. Sin vendedor conocido
+        // (UNKNOWN_SELLER_ID) y sin ventas, el sitio no la muestra.
+        seller_reputation: 'verde',
+        seller_sales_count: 0,
+        source: CHANNEL_CANDIDATE_SOURCE,
+        status: 'pending_review',
+        prospected_at: at,
+        reviewed_at: null,
+        reject_reason: null,
+        reviewed_by: null,
+        highlight_position: null,
+        highlight_category_id: null,
+        ml_root_category: null,
+        is_full: false,
+        official_store: false,
+        // Con esta fecha entra el precio al sitio (candidatos/actions: priceSeenAt).
+        checked_at: known.seenAt,
+      },
+    };
   }
 
   const winner = winners.offers[0];

@@ -8,7 +8,7 @@ import type { NoticeDeal } from '@/lib/social/deal-notice';
 import type { DealResult } from '@/lib/social/deal-notice-review';
 import { ProductCard } from '@/app/admin/candidatos/agregar/AddFromMl';
 import { StoryList } from '../StoryList';
-import { reviewNotice, reviewNoticeDeal, saveNoticePrices, type NoticePricesResult } from './actions';
+import { addFromNotice, reviewNotice, reviewNoticeDeal, saveNoticePrices, type NoticePricesResult } from './actions';
 
 /**
  * El aviso pegado y lo que salió de cada producto: las historias listas
@@ -231,6 +231,8 @@ export function NoticeView({ maxPriceAgeMs }: { maxPriceAgeMs: number }) {
                   <p className="mb-1 text-xs text-muted">Del aviso: {dealLine(r.deal)}</p>
                   <ProductCard
                     item={r.preview}
+                    // Con el precio del aviso: Mercado Libre ya no entrega el suyo para revisar un producto nuevo.
+                    addWith={(publish) => addFromNotice({ ...r.deal, mlId: r.preview.id }, publish)}
                     onDone={(done) => {
                       if (done.outcome === 'publicado') afterPublish(i, r.deal, r.preview.id);
                     }}
