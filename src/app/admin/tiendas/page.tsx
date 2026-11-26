@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { fetchAllRows } from '@/lib/admin-stats';
@@ -7,6 +8,7 @@ import { readStoreSettings } from '@/lib/store-settings';
 import { STORES, getStore, storeProductUrl } from '@/lib/stores';
 import { shortProductName } from '@/lib/text';
 import { StoreOffers } from '@/components/product/StoreOffers';
+import { orderStoreCards } from './list';
 import { ProductCard, VisibilitySwitch, type OfferItem, type ProductItem, type SearchableStore } from './StoreManager';
 
 export const dynamic = 'force-dynamic';
@@ -111,15 +113,18 @@ function searchQuery(name: string): string {
     .trim();
 }
 
+const FILTER_LINK = 'inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium';
+
 /**
  * Otras tiendas: enlazar productos del sitio con su ficha en tiendas que
  * dejan leer su precio (lib/stores), para mostrarlo junto al de Mercado
  * Libre. Enlazar se hace una vez por producto; después el precio se revisa
  * solo, dos veces al día (/api/cron/tiendas).
  */
-export default async function TiendasPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function TiendasPage({ searchParams }: { searchParams: Promise<{ q?: string; ver?: string }> }) {
   const sp = await searchParams;
   const q = (sp.q ?? '').trim().slice(0, 60);
+  const onlyLinked = !q && sp.ver === 'enlazados';
   const now = new Date();
   const admin = getSupabaseAdmin();
 
@@ -133,7 +138,7 @@ export default async function TiendasPage({ searchParams }: { searchParams: Prom
   for (const row of rows) byProduct.set(row.product_id, [...(byProduct.get(row.product_id) ?? []), row]);
 
   const linkedIds = [...byProduct.keys()];
-  // Sin búsqueda: los más abiertos que todavía no tienen ninguna tienda. Se piden de más: algunos están ocultos.
+  // Sin búsqueda: los más abiertos. Se piden de más: algunos están ocultos y otros ya están entre los enlazados.
   const topIds = [...clicks.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([id]) => id)
@@ -141,7 +146,7 @@ export default async function TiendasPage({ searchParams }: { searchParams: Prom
     .slice(0, SUGGESTED + 30);
   const [linkedProducts, otherProducts] = await Promise.all([
     readProducts(admin, linkedIds),
-    q ? searchProducts(admin, q) : readProducts(admin, topIds),
+    q ? searchProducts(admin, q) : onlyLinked ? Promise.resolve([]) : readProducts(admin, topIds),
   ]);
 
   const toItem = (product: ProductRow): ProductItem => {
@@ -158,14 +163,15 @@ export default async function TiendasPage({ searchParams }: { searchParams: Prom
       query: searchQuery(product.name),
     };
   };
-  const byClicks = (a: ProductItem, b: ProductItem) => b.clicks - a.clicks || a.name.localeCompare(b.name);
 
-  const linked = linkedProducts.map(toItem).sort(byClicks);
-  const others = otherProducts
-    .filter((p) => !p.is_hidden && !byProduct.has(p.id))
-    .map(toItem)
-    .sort(q ? () => 0 : byClicks)
-    .slice(0, SUGGESTED);
+  // Una sola lista, por clics: una tarjeta no cambia de lugar cuando se le guarda una tienda (ver ./list).
+  // Con búsqueda, lo que calza, en el orden de la búsqueda.
+  const items: ProductItem[] = q
+    ? otherProducts.map(toItem)
+    : orderStoreCards(
+        [...linkedProducts, ...otherProducts.filter((p) => !p.is_hidden)].map((p) => ({ ...toItem(p), linked: byProduct.has(p.id) })),
+        SUGGESTED
+      );
 
   const searchable: SearchableStore[] = STORES.filter((s) => s.price === 'ficha' && s.searchUrl).map((s) => ({ key: s.key, name: s.name }));
   const readableNames = STORES.filter((s) => s.price === 'ficha').map((s) => s.name);
@@ -223,37 +229,25 @@ export default async function TiendasPage({ searchParams }: { searchParams: Prom
           capacidad, y no un pack ni un accesorio.
         </li>
         <li>
-          Si es, toca <strong>Es el mismo producto: guardar</strong>. Listo: ese precio se actualiza solo.
+          Si es, toca <strong>Es el mismo producto: guardar</strong>. La tienda queda en la misma tarjeta y su precio se actualiza solo.
         </li>
       </ol>
       <p className="mt-3 text-xs text-muted">
         El precio que se guarda es el que la tienda publica para cualquiera. El de la Tarjeta Cencosud de Paris no se toma nunca.
       </p>
 
-      {linked.length > 0 && (
-        <section className="mt-8">
-          <h2 className="font-heading text-lg font-semibold text-fg">
-            Ya enlazados <span className="text-sm font-normal text-muted">({linked.length})</span>
-          </h2>
-          <ul className="mt-3 space-y-3">
-            {linked.map((item) => {
-              const shown = publicStoreOffers(byProduct.get(item.id) ?? [], now.getTime());
-              return (
-                <ProductCard
-                  key={item.id}
-                  item={item}
-                  stores={searchable}
-                  // En la vista previa el clic no se cuenta: "vista-previa" no es un producto.
-                  preview={shown.length > 0 ? <StoreOffers offers={shown} productId="vista-previa" /> : undefined}
-                />
-              );
-            })}
-          </ul>
-        </section>
-      )}
-
       <section className="mt-8">
-        <h2 className="font-heading text-lg font-semibold text-fg">{q ? `Productos con "${q}"` : 'Los más abiertos, todavía sin otra tienda'}</h2>
+        <h2 className="font-heading text-lg font-semibold text-fg">
+          {q ? `Productos con "${q}"` : onlyLinked ? 'Productos con una tienda enlazada' : 'Los productos más abiertos'}
+        </h2>
+        <p className="mt-1 text-sm text-muted">
+          {linkedIds.length === 0
+            ? 'Todavía no hay ningún producto enlazado.'
+            : `${linkedIds.length} ${linkedIds.length === 1 ? 'producto enlazado' : 'productos enlazados'}, ${shownPrices} ${
+                shownPrices === 1 ? 'precio listo' : 'precios listos'
+              } para mostrar.`}
+        </p>
+
         <form action="/admin/tiendas" method="get" className="mt-3 flex flex-col gap-2 sm:flex-row">
           <input
             type="search"
@@ -271,13 +265,50 @@ export default async function TiendasPage({ searchParams }: { searchParams: Prom
             Buscar en el sitio
           </button>
         </form>
-        {others.length === 0 ? (
-          <p className="mt-4 text-sm text-muted">{q ? 'Ningún producto del sitio calza con eso.' : 'No hay productos con clics en los últimos 30 días.'}</p>
+
+        {(linkedIds.length > 0 || q) && (
+          <p className="mt-3 flex flex-wrap gap-2">
+            <Link
+              href="/admin/tiendas"
+              aria-current={!q && !onlyLinked ? 'page' : undefined}
+              className={`${FILTER_LINK} ${!q && !onlyLinked ? 'border-accent text-fg' : 'border-border text-muted hover:text-fg'}`}
+            >
+              Los más abiertos
+            </Link>
+            {linkedIds.length > 0 && (
+              <Link
+                href="/admin/tiendas?ver=enlazados"
+                aria-current={onlyLinked ? 'page' : undefined}
+                className={`${FILTER_LINK} ${onlyLinked ? 'border-accent text-fg' : 'border-border text-muted hover:text-fg'}`}
+              >
+                Solo los enlazados ({linkedIds.length})
+              </Link>
+            )}
+          </p>
+        )}
+
+        {items.length === 0 ? (
+          <p className="mt-4 text-sm text-muted">
+            {q
+              ? 'Ningún producto del sitio calza con eso.'
+              : onlyLinked
+                ? 'Cuando enlaces un producto con una tienda, aparece acá.'
+                : 'No hay productos con clics en los últimos 30 días.'}
+          </p>
         ) : (
           <ul className="mt-3 space-y-3">
-            {others.map((item) => (
-              <ProductCard key={item.id} item={item} stores={searchable} />
-            ))}
+            {items.map((item) => {
+              const shown = publicStoreOffers(byProduct.get(item.id) ?? [], now.getTime());
+              return (
+                <ProductCard
+                  key={item.id}
+                  item={item}
+                  stores={searchable}
+                  // En la vista previa el clic no se cuenta: "vista-previa" no es un producto.
+                  preview={shown.length > 0 ? <StoreOffers offers={shown} productId="vista-previa" /> : undefined}
+                />
+              );
+            })}
           </ul>
         )}
       </section>
