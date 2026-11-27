@@ -99,7 +99,10 @@ export async function dispatchVideoBuild(
 /** Qué revisar en la llave según lo que respondió GitHub. */
 const KEY_HINTS: Record<number, string> = {
   401: 'La llave no es válida: quedó mal copiada, venció o se borró.',
-  403: 'Le falta el permiso: en la llave, "Repository permissions → Actions" tiene que decir "Read and write".',
+  // El repositorio es público: una llave de otra cuenta también lo ve, y GitHub responde 403 (no 404) al pedir la pasada.
+  403:
+    'La llave no puede lanzar pasadas en este repositorio: tiene que estar creada con la cuenta comparatechcl-tech ' +
+    '(la dueña de comparatech-web), con ese repositorio elegido y "Actions: Read and write".',
   // GitHub responde 404, y no 403, cuando la llave no alcanza a ver el repositorio.
   404: 'No alcanza a ver este repositorio: en la llave, "Repository access" tiene que tener elegido comparatech-web.',
 };
