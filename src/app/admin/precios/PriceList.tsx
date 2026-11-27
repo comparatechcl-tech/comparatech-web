@@ -32,6 +32,8 @@ export interface PriceItem {
   manualToday: boolean;
   /** A la venta en el sitio; false si está en pausa. */
   active: boolean;
+  /** Si está en pausa: por qué y qué hacer (lib/manual-price: pausedNote). */
+  pausedNote?: string | null;
   clicks: number;
   /** La ficha en Mercado Libre, sin parámetros de afiliado: mirar no cuenta como clic. */
   mlUrl: string;
@@ -155,6 +157,7 @@ function PriceCard({ item, locked, onDone }: { item: PriceItem; locked: boolean;
             {item.clicks} {item.clicks === 1 ? 'clic' : 'clics'} en 30 días
             {!item.active && <span className="text-amber-400"> · en pausa</span>}
           </p>
+          {item.pausedNote && <p className="mt-1 text-xs leading-snug text-amber-400">{item.pausedNote}</p>}
         </div>
       </div>
 

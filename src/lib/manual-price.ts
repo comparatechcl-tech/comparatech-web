@@ -22,6 +22,7 @@
 import type { InactiveReason } from '@/lib/inactive-reasons';
 import type { PricedProduct, PricingOutcome } from '@/lib/pricing';
 import { MANUAL_PRICE_SOURCE } from '@/lib/price-freshness';
+import { formatDayMonth } from '@/lib/format';
 import type { OfferInfo } from '@/lib/types';
 
 /** Lo que queda en offer_info: nada afirmado de la oferta, y la marca de que lo revisó una persona. */
@@ -307,16 +308,21 @@ export interface ValidationRow {
   is_active: boolean;
   is_hidden: boolean;
   inactive_reason: InactiveReason | null;
+  /** Desde cuándo está en pausa, si lo está. */
+  inactive_since?: string | null;
   deleted_at?: string | null;
   /** Para saber si el precio de hoy lo guardó una persona (se puede deshacer). */
   offer_info?: unknown;
 }
 
 /**
- * En qué orden conviene revisar: primero lo que más se abre en Mercado Libre
- * desde el sitio (ahí están las ventas) y, a igual cantidad de clics, lo que
- * lleva más tiempo sin revisarse. Fuera lo oculto, lo eliminado y lo que no
- * tiene ficha: nada de eso se muestra o se puede mirar. Puro.
+ * En qué orden conviene revisar: primero lo que está a la venta, de lo que
+ * más se abre en Mercado Libre desde el sitio (ahí están las ventas) a lo que
+ * menos y, a igual cantidad de clics, lo que lleva más tiempo sin revisarse.
+ * Al final lo que está en pausa: casi siempre sigue sin vendedores, y sus
+ * clics son de antes de pausarse (en pausa la ficha no tiene botón de
+ * compra). Fuera lo oculto, lo eliminado y lo que no tiene ficha: nada de
+ * eso se muestra o se puede mirar. Puro.
  */
 export function rankForValidation(
   rows: ValidationRow[],
@@ -331,8 +337,32 @@ export function rankForValidation(
     .map((row) => ({ row, clicks: clicks.get(row.id) ?? 0 }))
     .sort(
       (a, b) =>
-        b.clicks - a.clicks || checked(a.row) - checked(b.row) || (a.row.id < b.row.id ? -1 : a.row.id > b.row.id ? 1 : 0)
+        Number(b.row.is_active) - Number(a.row.is_active) ||
+        b.clicks - a.clicks ||
+        checked(a.row) - checked(b.row) ||
+        (a.row.id < b.row.id ? -1 : a.row.id > b.row.id ? 1 : 0)
     );
+}
+
+/**
+ * Lo que la tarjeta de un producto en pausa dice de por qué está así y qué
+ * hacer. Si nadie lo vende, Mercado Libre abre la ficha sin precio y muestra
+ * "Productos relacionados": parece un link roto y no lo es. null si está a la
+ * venta. Puro.
+ */
+export function pausedNote(row: Pick<ValidationRow, 'is_active' | 'inactive_reason' | 'inactive_since'>): string | null {
+  if (row.is_active) return null;
+  const since = row.inactive_since && Number.isFinite(Date.parse(row.inactive_since)) ? ` desde el ${formatDayMonth(row.inactive_since)}` : '';
+  if (row.inactive_reason === 'sin_ganador') {
+    return (
+      `En pausa${since}: no tenía vendedores en Mercado Libre. Si al abrirlo no ves un precio (solo "Productos ` +
+      'relacionados"), sigue sin vendedores: toca Ya no se vende.'
+    );
+  }
+  if (row.inactive_reason === 'ganador_no_verde') {
+    return `En pausa${since}: en nuestra última revisión lo vendía alguien sin reputación verde.`;
+  }
+  return `En pausa${since}.`;
 }
 
 /**

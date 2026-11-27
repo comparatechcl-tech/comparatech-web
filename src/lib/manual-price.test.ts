@@ -92,6 +92,7 @@ import {
   manualUndoPatch,
   parseManualBefore,
   parsePesos,
+  pausedNote,
   rankForValidation,
   type ManualPriceProduct,
   type ValidationRow,
@@ -319,6 +320,22 @@ describe('rankForValidation', () => {
     ]);
   });
 
+  it('lo que está en pausa va al final, aunque tenga más clics', () => {
+    const rows = [
+      row('pausado', { is_active: false, inactive_reason: 'sin_ganador' }),
+      row('a'),
+      row('b'),
+      row('pausado2', { is_active: false, inactive_reason: 'ganador_no_verde' }),
+    ];
+    const clicks = new Map([
+      ['pausado', 90],
+      ['a', 3],
+      ['b', 7],
+      ['pausado2', 1],
+    ]);
+    expect(rankForValidation(rows, clicks).map((r) => r.row.id)).toEqual(['b', 'a', 'pausado', 'pausado2']);
+  });
+
   it('fuera lo oculto, lo eliminado y lo que no tiene ficha', () => {
     const rows = [
       row('a'),
@@ -327,6 +344,28 @@ describe('rankForValidation', () => {
       row('d', { ml_product_id: null }),
     ];
     expect(rankForValidation(rows, new Map()).map((r) => r.row.id)).toEqual(['a']);
+  });
+});
+
+describe('pausedNote', () => {
+  it('a la venta no dice nada', () => {
+    expect(pausedNote({ is_active: true, inactive_reason: null, inactive_since: null })).toBeNull();
+  });
+
+  it('sin vendedores: explica que la ficha sale sin precio y qué tocar', () => {
+    const note = pausedNote({ is_active: false, inactive_reason: 'sin_ganador', inactive_since: '2026-11-15T00:00:11Z' });
+    // 00:00 UTC del 15 son las 21:00 del 14 en Chile.
+    expect(note).toContain('En pausa desde el 14/11');
+    expect(note).toContain('Productos relacionados');
+    expect(note).toContain('Ya no se vende');
+  });
+
+  it('vendedor sin reputación verde, motivo desconocido o sin fecha', () => {
+    expect(pausedNote({ is_active: false, inactive_reason: 'ganador_no_verde', inactive_since: '2026-11-20T15:00:00Z' })).toBe(
+      'En pausa desde el 20/11: en nuestra última revisión lo vendía alguien sin reputación verde.'
+    );
+    expect(pausedNote({ is_active: false, inactive_reason: null, inactive_since: null })).toBe('En pausa.');
+    expect(pausedNote({ is_active: false, inactive_reason: 'sin_ganador', inactive_since: 'no es fecha' })).toMatch(/^En pausa: no tenía vendedores/);
   });
 });
 

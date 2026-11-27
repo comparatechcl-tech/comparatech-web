@@ -4,7 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/server';
 import { isMissingSchemaError } from '@/lib/supabase/errors';
 import { fetchAllRows } from '@/lib/admin-stats';
 import { startOfChileDay } from '@/lib/clicks';
-import { canValidateByHand, rankForValidation, type ValidationRow } from '@/lib/manual-price';
+import { canValidateByHand, pausedNote, rankForValidation, type ValidationRow } from '@/lib/manual-price';
 import { mlProductUrl } from '@/lib/ml-urls';
 import { MANUAL_PRICE_SOURCE, isManualPrice, priceState } from '@/lib/price-freshness';
 import { PriceList, type PriceItem } from './PriceList';
@@ -22,7 +22,7 @@ const ID_CHUNK = 100;
 type DbError = { code?: string; message: string } | null;
 
 const BASE_COLUMNS =
-  'id, slug, name, brand, image_url, price, original_price, price_checked_at, ml_product_id, is_active, is_hidden, inactive_reason, offer_info';
+  'id, slug, name, brand, image_url, price, original_price, price_checked_at, ml_product_id, is_active, is_hidden, inactive_reason, inactive_since, offer_info';
 /** deleted_at es de la migración 0017: sin ella se lee sin él. */
 const FULL_COLUMNS = `${BASE_COLUMNS}, deleted_at`;
 
@@ -77,10 +77,14 @@ async function countValidatedToday(admin: SupabaseClient, now: Date): Promise<nu
  * el precio de hoy. No es una tarea diaria: lo que no se revisa sigue con el
  * precio de su última revisión y su fecha.
  */
-export default async function PreciosPage({ searchParams }: { searchParams: Promise<{ ver?: string }> }) {
+export default async function PreciosPage({ searchParams }: { searchParams: Promise<{ ver?: string; pausa?: string }> }) {
   const sp = await searchParams;
   const wanted = Number(sp.ver);
   const shown = Number.isFinite(wanted) && wanted > PAGE ? Math.min(Math.floor(wanted), MAX_SHOWN) : PAGE;
+  // Dos listas: lo que está a la venta (la de siempre) y lo que está en pausa (?pausa=1). En pausa casi
+  // siempre sigue sin vendedores y Mercado Libre abre la ficha sin precio: mezclados, quitaban tiempo.
+  const onlyPaused = sp.pausa === '1';
+  const pageHref = (ver: number) => `/admin/precios?${onlyPaused ? 'pausa=1&' : ''}ver=${ver}`;
   const now = new Date();
   const admin = getSupabaseAdmin();
 
@@ -89,14 +93,17 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
   }
 
   const clicks = await readClickCounts(admin, now);
-  // Más de los que se muestran: algunos de los más abiertos pueden estar ocultos o eliminados.
+  // Más de los que se muestran: algunos de los más abiertos pueden estar ocultos, eliminados o en la otra lista.
+  // Los que están en pausa son pocos entre los más abiertos: para su lista se miran más.
   const topIds = [...clicks.counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, shown + 60)
+    .slice(0, onlyPaused ? 400 : shown + 60)
     .map(([id]) => id);
   const [products, validatedToday] = await Promise.all([readProducts(admin, topIds), countValidatedToday(admin, now)]);
 
-  const ranked = rankForValidation(products.rows, clicks.counts).filter((r) => canValidateByHand(r.row));
+  const ranked = rankForValidation(products.rows, clicks.counts)
+    .filter((r) => canValidateByHand(r.row))
+    .filter((r) => (onlyPaused ? !r.row.is_active : r.row.is_active));
   const totalClicks = [...clicks.counts.values()].reduce((sum, n) => sum + n, 0);
   const visible = ranked.slice(0, shown);
   const coveredClicks = visible.reduce((sum, r) => sum + r.clicks, 0);
@@ -115,6 +122,7 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
     // Guardado a mano hoy: la tarjeta ofrece deshacerlo.
     manualToday: today && isManualPrice(row),
     active: row.is_active,
+    pausedNote: pausedNote(row),
     clicks: n,
     mlUrl: mlProductUrl(row.ml_product_id as string),
     };
@@ -122,8 +130,23 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:py-10">
-      <h1 className="font-heading text-2xl font-bold text-fg">Precios de hoy</h1>
-      <p className="mt-1 text-sm text-muted">
+      <h1 className="font-heading text-2xl font-bold text-fg">{onlyPaused ? 'Precios de hoy: productos en pausa' : 'Precios de hoy'}</h1>
+      {onlyPaused && (
+        <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 text-sm text-fg">
+          <p>
+            Estos productos no se muestran como a la venta: en la última revisión no tenían vendedores en Mercado Libre, o
+            no uno con reputación verde. Si al abrirlo Mercado Libre muestra un precio, guárdalo y el producto vuelve al
+            sitio. Si no muestra ningún precio (solo &quot;Productos relacionados&quot;), sigue sin vendedores: toca{' '}
+            <strong>Ya no se vende</strong> o déjalo para otro día.
+          </p>
+          <p className="mt-2">
+            <Link href="/admin/precios" className="font-medium text-accent hover:underline">
+              Volver a los productos a la venta
+            </Link>
+          </p>
+        </div>
+      )}
+      <p className="mt-3 text-sm text-muted">
         Mercado Libre ya no le entrega precios al sitio. Acá puedes revisar a mano los productos que más se abren:
         miras la ficha, confirmas o corriges el precio y queda como <strong className="text-fg">precio de hoy</strong>{' '}
         por 12 horas. No es una obligación: lo que no revises sigue mostrando el precio de su última revisión, con su
@@ -167,11 +190,15 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
         )}
       </p>
       <p className="mt-2 text-sm text-muted">
-        Los que queden con descuento o hayan bajado de precio aparecen en{' '}
+        Lo que revises aparece en{' '}
         <Link href="/admin/historias" className="font-medium text-accent hover:underline">
           Historias
         </Link>{' '}
-        durante las 6 horas siguientes, listos para compartir.
+        y en{' '}
+        <Link href="/admin/videos" className="font-medium text-accent hover:underline">
+          Videos
+        </Link>{' '}
+        durante las 6 horas siguientes, listo para compartir.
       </p>
 
       {clicks.error && <p className="mt-3 text-sm text-amber-400">No pude leer todos los clics: el orden puede no ser exacto.</p>}
@@ -179,16 +206,28 @@ export default async function PreciosPage({ searchParams }: { searchParams: Prom
 
       <PriceList items={items} />
 
-      {ranked.length > shown && shown < MAX_SHOWN && (
-        <p className="mt-5">
+      {onlyPaused && visible.length === 0 && (
+        <p className="mt-6 rounded-xl border border-border bg-surface px-4 py-6 text-sm text-muted">
+          No hay productos en pausa entre los que se abrieron en los últimos {CLICK_DAYS} días.
+        </p>
+      )}
+
+      <p className="mt-5 flex flex-wrap gap-2">
+        {ranked.length > shown && shown < MAX_SHOWN && (
           <Link
-            href={`/admin/precios?ver=${Math.min(shown + PAGE, MAX_SHOWN)}`}
+            href={pageHref(Math.min(shown + PAGE, MAX_SHOWN))}
             className="inline-flex min-h-11 items-center rounded-md border border-border px-4 text-sm font-medium text-fg hover:border-accent"
           >
             Ver {PAGE} más
           </Link>
-        </p>
-      )}
+        )}
+        <Link
+          href={onlyPaused ? '/admin/precios' : '/admin/precios?pausa=1'}
+          className="inline-flex min-h-11 items-center rounded-md border border-border px-4 text-sm font-medium text-muted hover:border-accent hover:text-fg"
+        >
+          {onlyPaused ? 'Volver a los productos a la venta' : 'Ver los productos en pausa'}
+        </Link>
+      </p>
     </main>
   );
 }
