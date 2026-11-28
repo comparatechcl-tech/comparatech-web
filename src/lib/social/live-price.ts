@@ -524,3 +524,29 @@ export async function runLiveChecks(
   });
   return { results, changes, checked };
 }
+
+/**
+ * ¿Una pieza puede publicarse sola (reel diario, historia diaria)? Si la
+ * revisión en vivo dice que la oferta sigue igual ('same'), sí.
+ *
+ * Desde el 23-11-2026 Mercado Libre no deja revisar el precio en vivo (la
+ * revisión responde 'unknown'). El 28-11-2026 el dueño pidió retomar las
+ * publicaciones automáticas con los precios que él revisa ("retoma como sea
+ * la forma de publicar en automático los precios de productos que haya
+ * actualizado"): vale también un precio que él revisó a mano o que llegó de
+ * un aviso del canal de afiliados (`handChecked`), si se revisó hace
+ * `maxAgeMs` o menos. Si la revisión en vivo vuelve a funcionar y dice otra
+ * cosa ('changed', 'unavailable'), no se publica. Pura.
+ */
+export function passesPublishCheck(
+  item: { handChecked?: boolean; checkedAt: string | null },
+  check: LiveCheck | undefined,
+  now: number,
+  maxAgeMs: number
+): boolean {
+  if (check?.status === 'same') return true;
+  if (check && check.status !== 'unknown') return false;
+  if (item.handChecked !== true || !item.checkedAt) return false;
+  const checked = Date.parse(item.checkedAt);
+  return Number.isFinite(checked) && checked <= now + 5 * 60_000 && now - checked <= maxAgeMs;
+}

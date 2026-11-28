@@ -308,6 +308,37 @@ describe('runMetaDaily', () => {
     expect(store.settings.meta_daily).toBeUndefined();
   });
 
+  it('con Mercado Libre sin responder, publica el video de un precio revisado a mano hace poco (28-11-2026)', async () => {
+    const { runMetaDaily } = await import('./meta-daily');
+    const { fetchImpl, calls } = graph(['FINISHED']);
+    const unknown = { status: 'unknown' as const, what: 'Mercado Libre no respondió' };
+    // day1 es 13:35 UTC: revisado a mano a las 12:00 UTC (hace 1 h 35 min); el otro, sin revisión a mano.
+    const videos = [video('b'), video('c', { handChecked: true, checkedAt: '2026-10-25T12:00:00.000Z' })];
+    const summary = await runMetaDaily(fakeAdmin(), day1, {
+      readBoard: async () => board(videos),
+      liveCheck: async () => ({ b: unknown, c: unknown }),
+      fetchImpl,
+      sleep: async () => {},
+      now: () => day1.getTime(),
+    });
+    expect(summary.state).toMatchObject({ productId: 'c' });
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('un precio revisado a mano hace más de 6 horas no se publica solo', async () => {
+    const { runMetaDaily } = await import('./meta-daily');
+    const { fetchImpl, calls } = graph(['FINISHED']);
+    const unknown = { status: 'unknown' as const, what: 'Mercado Libre no respondió' };
+    const summary = await runMetaDaily(fakeAdmin(), day1, {
+      readBoard: async () => board([video('c', { handChecked: true, checkedAt: '2026-10-25T07:00:00.000Z' })]),
+      liveCheck: async () => ({ c: unknown }),
+      fetchImpl,
+      now: () => day1.getTime(),
+    });
+    expect(summary).toMatchObject({ ok: true, skipped: expect.stringMatching(/revisado a mano/) });
+    expect(calls).toHaveLength(0);
+  });
+
   it('sin Meta conectado no hace nada', async () => {
     const { runMetaDaily } = await import('./meta-daily');
     delete store.settings.meta_connection;

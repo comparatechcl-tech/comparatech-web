@@ -11,6 +11,7 @@ import { SITE_URL } from '@/lib/site';
 import { addInterestSignals, countUnreadHistory, readInterestEvidence, readSocialEvidence } from '@/lib/social/drops';
 import { interestScore, type InterestEvidence } from '@/lib/social/interest';
 import { mlCheckUrl, postedPriceShift } from '@/lib/social/live-price';
+import { priceOnlyKnown } from '@/lib/price-freshness';
 import { NETWORK_RULES, VIDEO_MARK } from '@/lib/social/networks';
 import {
   GAMING_EMPHASIS,
@@ -777,6 +778,12 @@ export interface ReadyVideo {
   /** Lo que el video dice del envío (los mismos datos de la huella). */
   freeShipping: boolean;
   full: boolean;
+  /**
+   * El precio lo revisó el dueño a mano o llegó de un aviso del canal
+   * (priceOnlyKnown): Mercado Libre no deja confirmarlo en el momento, y el
+   * reel diario lo acepta si es reciente (live-price: passesPublishCheck).
+   */
+  handChecked?: boolean;
 }
 
 /**
@@ -1016,6 +1023,7 @@ export async function readVideoBoard(admin: SupabaseClient, now: Date): Promise<
       mlUrl: mlCheckUrl(p.ml_product_id),
       freeShipping: claims.envio_gratis,
       full: claims.full,
+      handChecked: priceOnlyKnown(p),
     });
   }
 

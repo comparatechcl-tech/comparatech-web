@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { logAdminEvent } from '@/lib/admin-audit';
 import { SITE_URL } from '@/lib/site';
 import { chileDay } from './carousel-url';
-import type { LiveCheck, ShownOffer } from './live-price';
+import { passesPublishCheck, type LiveCheck, type ShownOffer } from './live-price';
 import { metaCredentials, metaErrorMessage, readMetaConnection, redactTokens } from './meta';
 import {
   PublishError,
@@ -14,7 +14,7 @@ import {
 } from './meta-publish';
 import { STORY_MARK } from './networks';
 import { piecePath, snapshotOf } from './piece-url';
-import type { StoryItem } from './stories';
+import { STORY_RULES, type StoryItem } from './stories';
 import { STORY_NETWORKS } from './story-networks';
 
 /**
@@ -199,8 +199,14 @@ export async function runMetaStory(admin: SupabaseClient, at: Date, deps: StoryD
   const candidates = storyCandidates(await deps.readPicks(admin, at, deps.key));
   if (candidates.length === 0) return { ok: true, skipped: 'No hay una oferta sin avisos para la historia de hoy.' };
   const checks = await deps.liveCheck(candidates.map((item) => ({ productId: item.id, shown: shownOf(item) })));
-  const item = candidates.find((c) => checks[c.id]?.status === 'same');
-  if (!item) return { ok: true, skipped: 'Ninguna oferta pasó la revisión del precio en Mercado Libre.' };
+  // Confirmado en Mercado Libre, o revisado por el dueño (o del canal) hace poco: ver passesPublishCheck.
+  const item = candidates.find((c) => passesPublishCheck(c, checks[c.id], now(), STORY_RULES.maxPriceAgeMs));
+  if (!item) {
+    return {
+      ok: true,
+      skipped: 'Ninguna oferta pasó la revisión del precio (ni confirmada en Mercado Libre ni revisada a mano en las últimas horas).',
+    };
+  }
   const path = profileStoryPath(item, deps.key, at);
   if (!path) return { ok: false, skipped: 'No se pudo firmar la imagen.' };
 

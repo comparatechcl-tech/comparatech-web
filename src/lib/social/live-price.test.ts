@@ -28,6 +28,7 @@ import {
   markPriceWarning,
   minutesAgo,
   mlCheckUrl,
+  passesPublishCheck,
   needsWrite,
   normalizeShown,
   parseLiveItems,
@@ -738,5 +739,35 @@ describe('runLiveChecks', () => {
     const { results } = await running;
     // Llegó a tiempo: guardado, y nunca "se demoró".
     expect(results[ID(1)]).toMatchObject({ status: 'changed', saved: true });
+  });
+});
+
+describe('passesPublishCheck', () => {
+  const now = Date.parse('2026-11-28T15:30:00Z');
+  const SIX_H = 6 * 3600_000;
+  const unknown = { status: 'unknown' as const, what: 'Mercado Libre no respondió' };
+  const fresh = '2026-11-28T13:00:00Z';
+
+  it('confirmado en Mercado Libre siempre pasa', () => {
+    expect(passesPublishCheck({ checkedAt: null }, { status: 'same', checkedAt: fresh }, now, SIX_H)).toBe(true);
+  });
+
+  it('sin respuesta de Mercado Libre, pasa solo un precio revisado a mano (o del canal) dentro del plazo', () => {
+    expect(passesPublishCheck({ handChecked: true, checkedAt: fresh }, unknown, now, SIX_H)).toBe(true);
+    expect(passesPublishCheck({ handChecked: true, checkedAt: fresh }, undefined, now, SIX_H)).toBe(true);
+    expect(passesPublishCheck({ handChecked: false, checkedAt: fresh }, unknown, now, SIX_H)).toBe(false);
+    expect(passesPublishCheck({ checkedAt: fresh }, unknown, now, SIX_H)).toBe(false);
+    expect(passesPublishCheck({ handChecked: true, checkedAt: '2026-11-28T09:00:00Z' }, unknown, now, SIX_H)).toBe(false);
+    expect(passesPublishCheck({ handChecked: true, checkedAt: null }, unknown, now, SIX_H)).toBe(false);
+    expect(passesPublishCheck({ handChecked: true, checkedAt: 'no es fecha' }, unknown, now, SIX_H)).toBe(false);
+    // Una fecha del futuro no cuenta como revisión.
+    expect(passesPublishCheck({ handChecked: true, checkedAt: '2026-11-28T18:00:00Z' }, unknown, now, SIX_H)).toBe(false);
+  });
+
+  it('si Mercado Libre dice que cambió o que no está, no pasa aunque se haya revisado a mano', () => {
+    const changed = { status: 'changed' as const, checkedAt: fresh, price: 1, listPrice: null, freeShipping: false, full: false, saved: false, what: 'subió' };
+    const gone = { status: 'unavailable' as const, checkedAt: fresh, what: 'sin vendedor' };
+    expect(passesPublishCheck({ handChecked: true, checkedAt: fresh }, changed, now, SIX_H)).toBe(false);
+    expect(passesPublishCheck({ handChecked: true, checkedAt: fresh }, gone, now, SIX_H)).toBe(false);
   });
 });

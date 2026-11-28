@@ -8,6 +8,7 @@ import { socialProductName } from '@/lib/content/social-name';
 import { readSocialEvidence } from '@/lib/social/drops';
 import type { InterestScore } from '@/lib/social/interest';
 import { mlCheckUrl } from '@/lib/social/live-price';
+import { priceOnlyKnown } from '@/lib/price-freshness';
 import { NETWORK_RULES, STORY_MARK } from '@/lib/social/networks';
 import { ANY_FORMAT_REPEAT_DAYS, readPublishedAnyFormat, stillPublished } from '@/lib/social/published-any';
 import { piecePath, snapshotOf } from '@/lib/social/piece-url';
@@ -157,6 +158,8 @@ export interface StoryItem {
   /** Lo que la pieza dice del envío (mismo dato que la imagen, de offer_info). */
   freeShipping: boolean;
   full: boolean;
+  /** El precio lo revisó el dueño a mano o llegó de un aviso del canal (ver live-price: passesPublishCheck). */
+  handChecked?: boolean;
 }
 
 /** Lo que buildStoryItem necesita de la selección. Una historia ya publicada no lleva puntaje. */
@@ -197,6 +200,7 @@ export function buildStoryItem(
     // Igual que la imagen (snapshotOf): solo con un sí explícito.
     freeShipping: p.offer_info?.free_shipping === true,
     full: p.offer_info?.is_full === true,
+    handChecked: priceOnlyKnown(p),
   };
 }
 

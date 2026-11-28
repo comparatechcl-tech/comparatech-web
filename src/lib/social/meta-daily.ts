@@ -2,7 +2,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logAdminEvent } from '@/lib/admin-audit';
 import { chileDay } from './carousel-url';
-import type { LiveCheck, ShownOffer } from './live-price';
+import { passesPublishCheck, type LiveCheck, type ShownOffer } from './live-price';
 import { metaCredentials, metaErrorMessage, readMetaConnection, redactTokens, type MetaConnection, type MetaCredentials } from './meta';
 import {
   PublishError,
@@ -13,7 +13,7 @@ import {
   publishInstagramContainer,
   type PublishDeps,
 } from './meta-publish';
-import { VIDEO_MARK, VIDEO_WARNING_MARK, type ReadyVideo, type VideoBoard } from './videos';
+import { VIDEO_MARK, VIDEO_RULES, VIDEO_WARNING_MARK, type ReadyVideo, type VideoBoard } from './videos';
 
 /**
  * La publicación diaria automática en Instagram y Facebook: un reel de
@@ -24,7 +24,10 @@ import { VIDEO_MARK, VIDEO_WARNING_MARK, type ReadyVideo, type VideoBoard } from
  * - solo un video listo de /admin/videos (con el precio de ahora y revisado
  *   hace poco), sin un "Ojo" que mirar a mano y que no se haya subido a
  *   Instagram ni a Facebook en los últimos 14 días;
- * - y con el precio confirmado en Mercado Libre en el momento.
+ * - y con el precio confirmado en Mercado Libre en el momento o, desde el
+ *   28-11-2026 (Mercado Libre ya no deja confirmarlo), revisado por el dueño
+ *   a mano o informado por el canal de afiliados en las últimas 6 horas
+ *   (live-price: passesPublishCheck). Lo pidió él ese día.
  *
  * Corre dos veces al día (app/api/cron/meta-diario). La primera elige y
  * publica. Instagram procesa el video por su cuenta: si en la primera no
@@ -240,8 +243,14 @@ export async function runMetaDaily(admin: SupabaseClient, at: Date, deps: DailyD
   const candidates = dailyCandidates(board.videos, lastDomain).slice(0, DAILY_CANDIDATES);
   if (candidates.length === 0) return { ok: true, skipped: 'No hay un video listo que cumpla las reglas hoy.' };
   const checks = await deps.liveCheck(candidates.map((v) => ({ productId: v.id, shown: shownOf(v) })));
-  const video = candidates.find((v) => checks[v.id]?.status === 'same');
-  if (!video) return { ok: true, skipped: 'Ningún video pasó la revisión del precio en Mercado Libre.' };
+  // Confirmado en Mercado Libre, o revisado por el dueño (o del canal) hace poco: ver passesPublishCheck.
+  const video = candidates.find((v) => passesPublishCheck(v, checks[v.id], now(), VIDEO_RULES.maxPriceAgeMs));
+  if (!video) {
+    return {
+      ok: true,
+      skipped: 'Ningún video pasó la revisión del precio (ni confirmado en Mercado Libre ni revisado a mano en las últimas horas).',
+    };
+  }
 
   const stamp = new Date(now()).toISOString();
   state = {

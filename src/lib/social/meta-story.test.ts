@@ -258,9 +258,32 @@ describe('runMetaStory', () => {
     const { runMetaStory } = await import('./meta-story');
     const g = graph();
     const summary = await runMetaStory(fakeAdmin(), AT, deps(g, [item(ID_A), item(ID_B)], { [ID_A]: changed, [ID_B]: { status: 'unknown', what: 'sin respuesta' } }));
-    expect(summary).toMatchObject({ ok: true, skipped: 'Ninguna oferta pasó la revisión del precio en Mercado Libre.' });
+    expect(summary).toMatchObject({ ok: true, skipped: expect.stringMatching(/^Ninguna oferta pasó la revisión del precio/) });
     expect(g.calls).toEqual([]);
     expect(store.settings.meta_story).toBeUndefined();
+  });
+
+  it('con Mercado Libre sin responder, publica un precio que el dueño revisó a mano hace poco (28-11-2026)', async () => {
+    const { runMetaStory } = await import('./meta-story');
+    const g = graph();
+    const unknown = { status: 'unknown' as const, what: 'Mercado Libre no respondió' };
+    // Revisado a mano 1 hora antes de la pasada; el otro, de la revisión automática de antes.
+    const hand = item(ID_B, { handChecked: true, checkedAt: '2026-11-23T14:40:00.000Z' });
+    const auto = item(ID_A, { checkedAt: '2026-11-23T14:40:00.000Z' });
+    const summary = await runMetaStory(fakeAdmin(), AT, { ...deps(g, [auto, hand], { [ID_A]: unknown, [ID_B]: unknown }), now: () => AT.getTime() });
+    expect(summary.state).toMatchObject({ productId: ID_B, status: 'publicado' });
+    expect(published(g.calls)).toBe(1);
+  });
+
+  it('un precio revisado a mano hace más de 6 horas, o que Mercado Libre dice que cambió, no se publica solo', async () => {
+    const { runMetaStory } = await import('./meta-story');
+    const g = graph();
+    const unknown = { status: 'unknown' as const, what: 'Mercado Libre no respondió' };
+    const old = item(ID_A, { handChecked: true, checkedAt: '2026-11-23T09:00:00.000Z' });
+    const moved = item(ID_B, { handChecked: true, checkedAt: '2026-11-23T15:00:00.000Z' });
+    const summary = await runMetaStory(fakeAdmin(), AT, { ...deps(g, [old, moved], { [ID_A]: unknown, [ID_B]: changed }), now: () => AT.getTime() });
+    expect(summary).toMatchObject({ ok: true, skipped: expect.stringMatching(/revisada a mano/) });
+    expect(g.calls).toEqual([]);
   });
 
   it('sin ofertas limpias no consulta Mercado Libre', async () => {
